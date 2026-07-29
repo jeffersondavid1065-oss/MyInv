@@ -238,7 +238,7 @@ with tab_entradas:
                 st.success(f"📄 {factura_img.name}")
 
         if factura_img:
-            if st.button("🤖 Analizar con IA", type="primary", use_container_width=True):
+            if st.button("🤖 Analizar con IA", type="primary", use_container_width=True, key="btn_analizar_ia"):
                 with st.spinner("Gemini está leyendo la factura..."):
                     try:
                         from gemini_utils import leer_factura_imagen, leer_factura_pdf
@@ -293,13 +293,13 @@ with tab_entradas:
     # ---- Botones de gestión ----
     col_btn1, col_btn2 = st.columns(2)
     with col_btn1:
-        if st.button("➕ Agregar producto manualmente", use_container_width=True):
+        if st.button("➕ Agregar producto manualmente", use_container_width=True, key="btn_agregar_manual"):
             st.session_state.items_entrada.append({
                 "nombre": "", "cantidad": 1, "costo": 0.0, "subtotal": 0.0, "ia": False
             })
             st.rerun()
     with col_btn2:
-        if st.button("🗑️ Limpiar todo", use_container_width=True):
+        if st.button("🗑️ Limpiar todo", use_container_width=True, key="btn_limpiar_entrada"):
             st.session_state.items_entrada = []
             if "num_factura_ia" in st.session_state:
                 del st.session_state.num_factura_ia
@@ -441,7 +441,7 @@ with tab_entradas:
 
         # ---- Botón registrar ----
         if st.session_state.items_entrada and st.button(
-            "✅ Registrar Entrada", type="primary", use_container_width=True
+            "✅ Registrar Entrada", type="primary", use_container_width=True, key="btn_registrar_entrada"
         ):
             items_validos = [
                 i for i in st.session_state.items_entrada
