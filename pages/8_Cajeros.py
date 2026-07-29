@@ -1,12 +1,13 @@
 import streamlit as st
 import pandas as pd
 import hashlib
-from datetime import date
+from datetime import date, timedelta
 from sqlalchemy import text
 from db import obtener_conexion
-from utils import verificar_auth
+from utils import aplicar_estilos, verificar_auth
 
 st.set_page_config(page_title="Cajeros", layout="wide")
+aplicar_estilos()
 user_id, nombre_negocio = verificar_auth()
 
 engine = obtener_conexion()
@@ -33,19 +34,23 @@ tab_cajeros, tab_nuevo, tab_rendimiento = st.tabs([
 with tab_cajeros:
     st.subheader("Cajeros del Negocio")
 
-    with engine.connect() as conn:
-        df_cajeros = pd.read_sql_query(text("""
-            SELECT c.id, c.nombre, c.activo, c.fecha_registro,
-                   COUNT(DISTINCT DATE(v.fecha)) as dias_trabajados,
-                   COUNT(v.id) as total_ventas,
-                   COALESCE(SUM(v.total), 0) as total_vendido
-            FROM Cajeros c
-            LEFT JOIN Ventas v ON v.cajero_id = c.id
-                AND v.estado != 'Anulada'
-            WHERE c.usuario_id = :uid
-            GROUP BY c.id, c.nombre, c.activo, c.fecha_registro
-            ORDER BY c.nombre ASC
-        """), con=conn, params={"uid": user_id})
+    try:
+        with engine.connect() as conn:
+            df_cajeros = pd.read_sql_query(text("""
+                SELECT c.id, c.nombre, c.activo, c.fecha_registro,
+                       COUNT(DISTINCT DATE(v.fecha)) as dias_trabajados,
+                       COUNT(v.id) as total_ventas,
+                       COALESCE(SUM(v.total), 0) as total_vendido
+                FROM Cajeros c
+                LEFT JOIN Ventas v ON v.cajero_id = c.id
+                    AND v.estado != 'Anulada'
+                WHERE c.usuario_id = :uid
+                GROUP BY c.id, c.nombre, c.activo, c.fecha_registro
+                ORDER BY c.nombre ASC
+            """), con=conn, params={"uid": user_id})
+    except Exception:
+        df_cajeros = pd.DataFrame()
+        st.warning("La tabla de cajeros aún no está lista. Haz Reboot app en Streamlit Cloud.")
 
     if not df_cajeros.empty:
         for _, caj in df_cajeros.iterrows():
@@ -60,7 +65,6 @@ with tab_cajeros:
                 with col_c3:
                     st.metric("Ventas", int(caj['total_ventas']))
                 with col_c4:
-                    # Toggle activo/inactivo
                     nuevo_estado = not caj['activo']
                     btn_label = "Desactivar" if caj['activo'] else "Activar"
                     if st.button(btn_label, key=f"toggle_{caj['id']}"):
@@ -152,7 +156,7 @@ with tab_nuevo:
     • Cada cajero tiene un **nombre** y un **PIN de 4 dígitos**
     • Al abrir el Punto de Venta, el cajero selecciona su nombre e ingresa su PIN
     • Las ventas quedan registradas con el cajero que las realizó
-    • El dueño puede ver el rendimiento de cada cajero en la pestaña "Rendimiento"
+    • El dueño puede ver el rendimiento de cada cajero en "Rendimiento"
     • Si un cajero ya no trabaja, puedes **desactivarlo** sin borrarlo
     """)
 
@@ -164,7 +168,6 @@ with tab_rendimiento:
 
     col_f1, col_f2 = st.columns(2)
     with col_f1:
-        from datetime import timedelta
         hoy = date.today()
         hace_30 = hoy - timedelta(days=30)
         fechas_rend = st.date_input("Período", [hace_30, hoy], key="fechas_rend")
@@ -174,28 +177,31 @@ with tab_rendimiento:
     if len(fechas_rend) == 2:
         f_ini_r, f_fin_r = fechas_rend
 
-        with engine.connect() as conn:
-            df_rend = pd.read_sql_query(text("""
-                SELECT
-                    COALESCE(caj.nombre, 'Sin cajero') as cajero,
-                    COUNT(v.id) as total_ventas,
-                    COALESCE(SUM(v.total), 0) as total_vendido,
-                    COALESCE(AVG(v.total), 0) as ticket_promedio,
-                    COUNT(CASE WHEN v.tipo_pago = 'Efectivo' THEN 1 END) as ventas_efectivo,
-                    COUNT(CASE WHEN v.tipo_pago = 'Credito' THEN 1 END) as ventas_credito
-                FROM Ventas v
-                LEFT JOIN Cajeros caj ON v.cajero_id = caj.id
-                WHERE v.usuario_id = :uid
-                AND DATE(v.fecha) >= :f_ini
-                AND DATE(v.fecha) <= :f_fin
-                AND v.estado != 'Anulada'
-                GROUP BY caj.id, caj.nombre
-                ORDER BY total_vendido DESC
-            """), con=conn, params={
-                "uid": user_id,
-                "f_ini": f_ini_r.strftime('%Y-%m-%d'),
-                "f_fin": f_fin_r.strftime('%Y-%m-%d')
-            })
+        try:
+            with engine.connect() as conn:
+                df_rend = pd.read_sql_query(text("""
+                    SELECT
+                        COALESCE(caj.nombre, 'Sin cajero') as cajero,
+                        COUNT(v.id) as total_ventas,
+                        COALESCE(SUM(v.total), 0) as total_vendido,
+                        COALESCE(AVG(v.total), 0) as ticket_promedio,
+                        COUNT(CASE WHEN v.tipo_pago = 'Efectivo' THEN 1 END) as ventas_efectivo,
+                        COUNT(CASE WHEN v.tipo_pago = 'Credito' THEN 1 END) as ventas_credito
+                    FROM Ventas v
+                    LEFT JOIN Cajeros caj ON v.cajero_id = caj.id
+                    WHERE v.usuario_id = :uid
+                    AND DATE(v.fecha) >= :f_ini
+                    AND DATE(v.fecha) <= :f_fin
+                    AND v.estado != 'Anulada'
+                    GROUP BY caj.id, caj.nombre
+                    ORDER BY total_vendido DESC
+                """), con=conn, params={
+                    "uid": user_id,
+                    "f_ini": f_ini_r.strftime('%Y-%m-%d'),
+                    "f_fin": f_fin_r.strftime('%Y-%m-%d')
+                })
+        except Exception:
+            df_rend = pd.DataFrame()
 
         if not df_rend.empty:
             for _, row in df_rend.iterrows():
@@ -212,4 +218,4 @@ with tab_rendimiento:
                 height=300
             )
         else:
-            st.info("No hay ventas en este período.")
+            st.info("No hay datos de rendimiento en este período.")
