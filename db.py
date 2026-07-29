@@ -8,10 +8,6 @@ LOCAL_DB_PATH = os.path.join(BASE_DIR, "myalmacen.db")
 
 @st.cache_resource
 def obtener_conexion():
-    """
-    Crea el engine de SQLAlchemy UNA sola vez por proceso.
-    Usa el pooler de Supabase (puerto 6543, modo Transaction).
-    """
     try:
         db_url = st.secrets["postgres"]["url"]
         engine = create_engine(
@@ -29,25 +25,16 @@ def obtener_conexion():
             f"Detalle: {e}"
         )
         engine = create_engine(f"sqlite:///{LOCAL_DB_PATH}")
-
     return engine
 
 
 @st.cache_resource
 def init_db():
-    """
-    Crea todas las tablas si no existen.
-    Se ejecuta UNA sola vez por proceso gracias a cache_resource.
-    Para forzar re-ejecución: Reboot app en Streamlit Cloud.
-    """
     engine = obtener_conexion()
     is_sqlite = "sqlite" in str(engine.url)
 
     with engine.begin() as conn:
         if is_sqlite:
-            # ==========================================
-            # SQLITE (desarrollo local)
-            # ==========================================
             conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS Usuarios (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,7 +52,6 @@ def init_db():
                     fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             '''))
-
             conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS Productos (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,7 +70,6 @@ def init_db():
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE
                 )
             '''))
-
             conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS Clientes (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -100,7 +85,6 @@ def init_db():
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE
                 )
             '''))
-
             conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS Proveedores (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,12 +98,12 @@ def init_db():
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE
                 )
             '''))
-
             conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS Ventas (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     usuario_id INTEGER NOT NULL,
                     cliente_id INTEGER,
+                    cajero_id INTEGER,
                     fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     subtotal REAL NOT NULL DEFAULT 0,
                     descuento REAL DEFAULT 0,
@@ -131,10 +115,10 @@ def init_db():
                     estado TEXT CHECK(estado IN ('Pagada','Credito','Anulada')) DEFAULT 'Pagada',
                     notas TEXT,
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE,
-                    FOREIGN KEY (cliente_id) REFERENCES Clientes(id)
+                    FOREIGN KEY (cliente_id) REFERENCES Clientes(id),
+                    FOREIGN KEY (cajero_id) REFERENCES Cajeros(id)
                 )
             '''))
-
             conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS Detalles_Venta (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -150,7 +134,6 @@ def init_db():
                     FOREIGN KEY (producto_id) REFERENCES Productos(id)
                 )
             '''))
-
             conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS Entradas_Inventario (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -164,7 +147,6 @@ def init_db():
                     FOREIGN KEY (proveedor_id) REFERENCES Proveedores(id)
                 )
             '''))
-
             conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS Detalles_Entrada (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -177,7 +159,6 @@ def init_db():
                     FOREIGN KEY (producto_id) REFERENCES Productos(id)
                 )
             '''))
-
             conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS Creditos (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -196,7 +177,6 @@ def init_db():
                     FOREIGN KEY (cliente_id) REFERENCES Clientes(id)
                 )
             '''))
-
             conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS Abonos (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -209,7 +189,6 @@ def init_db():
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id)
                 )
             '''))
-
             conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS Cierres_Caja (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -227,7 +206,6 @@ def init_db():
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE
                 )
             '''))
-
             conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS Cajeros (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -239,11 +217,7 @@ def init_db():
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE
                 )
             '''))
-
         else:
-            # ==========================================
-            # POSTGRES / SUPABASE
-            # ==========================================
             conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS Usuarios (
                     id SERIAL PRIMARY KEY,
@@ -261,7 +235,17 @@ def init_db():
                     fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             '''))
-
+            conn.execute(text('''
+                CREATE TABLE IF NOT EXISTS Cajeros (
+                    id SERIAL PRIMARY KEY,
+                    usuario_id INTEGER NOT NULL,
+                    nombre TEXT NOT NULL,
+                    pin TEXT NOT NULL,
+                    activo BOOLEAN DEFAULT TRUE,
+                    fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE
+                )
+            '''))
             conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS Productos (
                     id SERIAL PRIMARY KEY,
@@ -280,7 +264,6 @@ def init_db():
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE
                 )
             '''))
-
             conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS Clientes (
                     id SERIAL PRIMARY KEY,
@@ -296,7 +279,6 @@ def init_db():
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE
                 )
             '''))
-
             conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS Proveedores (
                     id SERIAL PRIMARY KEY,
@@ -310,12 +292,12 @@ def init_db():
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE
                 )
             '''))
-
             conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS Ventas (
                     id SERIAL PRIMARY KEY,
                     usuario_id INTEGER NOT NULL,
                     cliente_id INTEGER,
+                    cajero_id INTEGER,
                     fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     subtotal NUMERIC(12,2) NOT NULL DEFAULT 0,
                     descuento NUMERIC(12,2) DEFAULT 0,
@@ -327,10 +309,10 @@ def init_db():
                     estado VARCHAR(20) CHECK(estado IN ('Pagada','Credito','Anulada')) DEFAULT 'Pagada',
                     notas TEXT,
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE,
-                    FOREIGN KEY (cliente_id) REFERENCES Clientes(id)
+                    FOREIGN KEY (cliente_id) REFERENCES Clientes(id),
+                    FOREIGN KEY (cajero_id) REFERENCES Cajeros(id)
                 )
             '''))
-
             conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS Detalles_Venta (
                     id SERIAL PRIMARY KEY,
@@ -346,7 +328,6 @@ def init_db():
                     FOREIGN KEY (producto_id) REFERENCES Productos(id)
                 )
             '''))
-
             conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS Entradas_Inventario (
                     id SERIAL PRIMARY KEY,
@@ -360,7 +341,6 @@ def init_db():
                     FOREIGN KEY (proveedor_id) REFERENCES Proveedores(id)
                 )
             '''))
-
             conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS Detalles_Entrada (
                     id SERIAL PRIMARY KEY,
@@ -373,7 +353,6 @@ def init_db():
                     FOREIGN KEY (producto_id) REFERENCES Productos(id)
                 )
             '''))
-
             conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS Creditos (
                     id SERIAL PRIMARY KEY,
@@ -392,7 +371,6 @@ def init_db():
                     FOREIGN KEY (cliente_id) REFERENCES Clientes(id)
                 )
             '''))
-
             conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS Abonos (
                     id SERIAL PRIMARY KEY,
@@ -405,7 +383,6 @@ def init_db():
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id)
                 )
             '''))
-
             conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS Cierres_Caja (
                     id SERIAL PRIMARY KEY,
@@ -424,21 +401,10 @@ def init_db():
                 )
             '''))
 
-            conn.execute(text('''
-                CREATE TABLE IF NOT EXISTS Cajeros (
-                    id SERIAL PRIMARY KEY,
-                    usuario_id INTEGER NOT NULL,
-                    nombre TEXT NOT NULL,
-                    pin TEXT NOT NULL,
-                    activo BOOLEAN DEFAULT TRUE,
-                    fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE
-                )
-            '''))
-
         # ==========================================
-        # ÍNDICES (SQLite y Postgres)
+        # ÍNDICES
         # ==========================================
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_usuarios_token ON Usuarios(token_sesion)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_productos_usuario ON Productos(usuario_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_productos_barras ON Productos(codigo_barras)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_productos_usuario_barras ON Productos(usuario_id, codigo_barras)"))
@@ -450,17 +416,15 @@ def init_db():
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_detalles_venta ON Detalles_Venta(venta_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_entradas_usuario ON Entradas_Inventario(usuario_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_detalles_entrada ON Detalles_Entrada(entrada_id)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cierres_caja_usuario ON Cierres_Caja(usuario_id, fecha)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cajeros_usuario ON Cajeros(usuario_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_creditos_usuario ON Creditos(usuario_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_creditos_cliente ON Creditos(cliente_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_creditos_estado ON Creditos(usuario_id, estado)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_abonos_credito ON Abonos(credito_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cajeros_usuario ON Cajeros(usuario_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cierres_caja_usuario ON Cierres_Caja(usuario_id, fecha)"))
 
         # ==========================================
         # MIGRACIONES SEGURAS
-        # Agrega columnas nuevas sin romper la app
-        # si la tabla ya existía sin esas columnas.
         # ==========================================
         try:
             if is_sqlite:
@@ -475,21 +439,15 @@ def init_db():
                     conn.execute(text("ALTER TABLE Usuarios ADD COLUMN telefono TEXT"))
                 if 'direccion' not in cols:
                     conn.execute(text("ALTER TABLE Usuarios ADD COLUMN direccion TEXT"))
+                cols_v = [r[1] for r in conn.execute(text("PRAGMA table_info(Ventas)")).fetchall()]
+                if 'cajero_id' not in cols_v:
+                    conn.execute(text("ALTER TABLE Ventas ADD COLUMN cajero_id INTEGER"))
             else:
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS token_sesion VARCHAR(255)"))
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS logo_path TEXT"))
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS nit TEXT"))
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS telefono TEXT"))
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS direccion TEXT"))
-
-            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_usuarios_token ON Usuarios(token_sesion)"))
-
-            # Columna cajero_id en Ventas
-            if is_sqlite:
-                cols_v = [r[1] for r in conn.execute(text("PRAGMA table_info(Ventas)")).fetchall()]
-                if 'cajero_id' not in cols_v:
-                    conn.execute(text("ALTER TABLE Ventas ADD COLUMN cajero_id INTEGER"))
-            else:
                 conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS cajero_id INTEGER"))
         except Exception:
             pass
