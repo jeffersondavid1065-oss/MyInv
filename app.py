@@ -57,18 +57,12 @@ if not st.session_state.auth["logged"]:
             pass
 
 # ==========================================
-# 4. ESTILOS CSS
+# 4. ESTILOS CSS — mismo patrón que MyTaller
 # ==========================================
 is_logged = st.session_state.auth["logged"]
 
 st.markdown("""
     <style>
-    /* ==========================================
-       BLOQUEO TOTAL DE ESQUINA SUPERIOR DERECHA
-       Oculta: GitHub, Deploy, botón de opciones (3 puntos)
-       ========================================== */
-
-    /* Máscara sólida que cubre toda la esquina */
     header::after {
         content: "";
         position: fixed !important;
@@ -81,32 +75,23 @@ st.markdown("""
         pointer-events: all !important;
     }
 
-    /* Ocultar botón de GitHub */
-    [data-testid="stToolbar"] { display: none !important; }
-    
-    /* Ocultar menú de deploy y opciones */
-    [data-testid="stDecoration"] { display: none !important; }
-    
-    /* Ocultar botón de opciones (3 puntos arriba a la derecha) */
-    #MainMenu { visibility: hidden !important; }
-    
-    /* Ocultar footer de Streamlit */
-    footer { visibility: hidden !important; }
+    """ + ("" if is_logged else """
+    [data-testid="stSidebar"] { display: none !important; }
+    [data-testid="stSidebarCollapsedControl"] { display: none !important; }
+    """) + """
 
-    /* Ocultar header de "made with streamlit" */
-    [data-testid="stHeader"] { background: transparent !important; }
+    [data-testid="stSidebarNav"] ul li:last-child {
+        margin-top: 50px !important;
+        border-top: 1px solid rgba(255, 255, 255, 0.12) !important;
+        padding-top: 10px !important;
+    }
 
-    /* Animaciones */
     @keyframes fade-in-up {
         0% { opacity: 0; transform: translateY(20px); }
         100% { opacity: 1; transform: translateY(0); }
     }
     [data-testid="stAppViewBlockContainer"] { animation: fade-in-up 0.6s ease-out; }
-    """ + ("" if is_logged else """
-    /* Ocultar sidebar cuando no está logueado */
-    [data-testid="stSidebar"] { display: none !important; }
-    [data-testid="stSidebarCollapsedControl"] { display: none !important; }
-    """) + """
+    div[data-testid="stVerticalBlock"] > div { animation: fade-in-up 0.5s ease-out; }
     </style>
 """, unsafe_allow_html=True)
 
