@@ -210,6 +210,24 @@ def init_db():
                 )
             '''))
 
+            conn.execute(text('''
+                CREATE TABLE IF NOT EXISTS Cierres_Caja (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    usuario_id INTEGER NOT NULL,
+                    fecha DATE NOT NULL,
+                    total_ventas INTEGER DEFAULT 0,
+                    total_efectivo REAL DEFAULT 0,
+                    total_transferencias REAL DEFAULT 0,
+                    total_creditos REAL DEFAULT 0,
+                    efectivo_contado REAL DEFAULT 0,
+                    diferencia REAL DEFAULT 0,
+                    notas TEXT,
+                    cerrado_por TEXT,
+                    fecha_cierre TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE
+                )
+            '''))
+
         else:
             # ==========================================
             # POSTGRES / SUPABASE
@@ -376,6 +394,24 @@ def init_db():
                 )
             '''))
 
+            conn.execute(text('''
+                CREATE TABLE IF NOT EXISTS Cierres_Caja (
+                    id SERIAL PRIMARY KEY,
+                    usuario_id INTEGER NOT NULL,
+                    fecha DATE NOT NULL,
+                    total_ventas INTEGER DEFAULT 0,
+                    total_efectivo NUMERIC(12,2) DEFAULT 0,
+                    total_transferencias NUMERIC(12,2) DEFAULT 0,
+                    total_creditos NUMERIC(12,2) DEFAULT 0,
+                    efectivo_contado NUMERIC(12,2) DEFAULT 0,
+                    diferencia NUMERIC(12,2) DEFAULT 0,
+                    notas TEXT,
+                    cerrado_por TEXT,
+                    fecha_cierre TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE
+                )
+            '''))
+
         # ==========================================
         # ÍNDICES (SQLite y Postgres)
         # ==========================================
@@ -390,6 +426,7 @@ def init_db():
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_detalles_venta ON Detalles_Venta(venta_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_entradas_usuario ON Entradas_Inventario(usuario_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_detalles_entrada ON Detalles_Entrada(entrada_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cierres_caja_usuario ON Cierres_Caja(usuario_id, fecha)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_creditos_usuario ON Creditos(usuario_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_creditos_cliente ON Creditos(cliente_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_creditos_estado ON Creditos(usuario_id, estado)"))
