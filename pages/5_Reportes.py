@@ -1,0 +1,393 @@
+import streamlit as st
+import pandas as pd
+from datetime import date, timedelta, datetime
+from sqlalchemy import text
+from io import BytesIO
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from db import obtener_conexion
+from queries import (
+    obtener_ventas_periodo,
+    obtener_top_productos,
+    obtener_metricas_mes,
+)
+from utils import aplicar_estilos, verificar_auth
+
+st.set_page_config(page_title="Reportes", layout="wide")
+aplicar_estilos()
+user_id, nombre_negocio = verificar_auth()
+
+engine = obtener_conexion()
+
+def formato_cop(numero):
+    return f"${float(numero):,.0f}".replace(",", ".")
+
+
+def generar_excel_ventas(df_ventas, fecha_ini, fecha_fin, ingresos, costos, margen, nombre_negocio):
+    """Genera reporte Excel de ventas del período."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Ventas"
+
+    header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    total_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+    border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin')
+    )
+
+    # Título
+    ws.merge_cells("A1:G1")
+    ws["A1"] = f"REPORTE DE VENTAS — {nombre_negocio}"
+    ws["A1"].font = Font(bold=True, size=14, color="1F4E78")
+    ws["A1"].alignment = Alignment(horizontal="center")
+
+    ws.merge_cells("A2:G2")
+    ws["A2"] = f"{fecha_ini.strftime('%d/%m/%Y')} — {fecha_fin.strftime('%d/%m/%Y')}"
+    ws["A2"].font = Font(italic=True, size=10, color="666666")
+    ws["A2"].alignment = Alignment(horizontal="center")
+
+    ws.append([])
+
+    # Resumen financiero
+    ws.append(["RESUMEN FINANCIERO", "", "", "", "", "", ""])
+    ws["A4"].font = Font(bold=True, size=11, color="1F4E78")
+
+    ws.append(["Ingresos Totales", f"${ingresos:,.0f}".replace(",", ".")])
+    ws.append(["Costo de Ventas", f"${costos:,.0f}".replace(",", ".")])
+    ws.append(["Margen Bruto", f"${margen:,.0f}".replace(",", ".")])
+    ws.append([])
+
+    # Headers de tabla
+    headers = ["ID Venta", "Fecha", "Cliente", "Total ($)", "Tipo Pago", "Estado", "Cambio ($)"]
+    ws.append(headers)
+    header_row = ws.max_row
+    for col_num in range(1, len(headers) + 1):
+        cell = ws.cell(row=header_row, column=col_num)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+        cell.border = border
+
+    # Datos
+    if not df_ventas.empty:
+        for _, row in df_ventas.iterrows():
+            ws.append([
+                row.get('id', ''),
+                str(row.get('fecha', '')),
+                row.get('cliente', 'Venta directa'),
+                float(row.get('total', 0)),
+                row.get('tipo_pago', ''),
+                row.get('estado', ''),
+                float(row.get('cambio', 0)),
+            ])
+            for col_num in range(1, 8):
+                cell = ws.cell(row=ws.max_row, column=col_num)
+                cell.border = border
+                if col_num in [4, 7]:
+                    cell.number_format = '#,##0.00'
+                    cell.alignment = Alignment(horizontal="right")
+
+    # Total
+    total_row = ws.max_row + 1
+    ws.cell(row=total_row, column=3).value = "TOTAL"
+    ws.cell(row=total_row, column=3).font = Font(bold=True)
+    ws.cell(row=total_row, column=3).fill = total_fill
+    ws.cell(row=total_row, column=4).value = ingresos
+    ws.cell(row=total_row, column=4).font = Font(bold=True)
+    ws.cell(row=total_row, column=4).fill = total_fill
+    ws.cell(row=total_row, column=4).number_format = '#,##0.00'
+
+    ws.column_dimensions["A"].width = 10
+    ws.column_dimensions["B"].width = 14
+    ws.column_dimensions["C"].width = 25
+    ws.column_dimensions["D"].width = 16
+    ws.column_dimensions["E"].width = 16
+    ws.column_dimensions["F"].width = 12
+    ws.column_dimensions["G"].width = 14
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
+st.title("Reportes")
+st.markdown(f"Análisis de ventas para: **{nombre_negocio}**")
+st.markdown("---")
+
+tab_dia, tab_periodo, tab_productos, tab_cartera = st.tabs([
+    "Ventas del Día",
+    "Reporte por Período",
+    "Productos Más Vendidos",
+    "Cartera y Créditos"
+])
+
+# ==========================================
+# TAB 1: VENTAS DEL DÍA
+# ==========================================
+with tab_dia:
+    st.subheader(f"Ventas de Hoy — {date.today().strftime('%d/%m/%Y')}")
+
+    hoy = date.today()
+    df_hoy = obtener_ventas_periodo(user_id, hoy, hoy)
+
+    if not df_hoy.empty:
+        # Métricas
+        total_hoy = df_hoy['total'].sum()
+        efectivo_hoy = df_hoy['monto_efectivo'].sum()
+        transfer_hoy = df_hoy['monto_transferencia'].sum()
+        cant_ventas = len(df_hoy)
+        ticket_prom = total_hoy / cant_ventas if cant_ventas > 0 else 0
+
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric("Ventas", cant_ventas)
+        col2.metric("Total Ingresos", formato_cop(total_hoy))
+        col3.metric("Caja Efectivo", formato_cop(efectivo_hoy))
+        col4.metric("Transferencias", formato_cop(transfer_hoy))
+        col5.metric("Ticket Promedio", formato_cop(ticket_prom))
+
+        st.markdown("---")
+
+        # Tabla detallada
+        st.dataframe(
+            df_hoy[['id', 'fecha', 'cliente', 'total', 'tipo_pago', 'estado']].rename(columns={
+                'id': 'ID', 'fecha': 'Hora', 'cliente': 'Cliente',
+                'total': 'Total ($)', 'tipo_pago': 'Pago', 'estado': 'Estado'
+            }),
+            use_container_width=True,
+            hide_index=True
+        )
+
+        # Ver detalle de una venta
+        st.markdown("---")
+        st.markdown("**Ver ítems de una venta:**")
+        dict_ventas_hoy = {
+            f"Venta #{r['id']} — {formato_cop(r['total'])}": r['id']
+            for _, r in df_hoy.iterrows()
+        }
+        venta_sel_hoy = st.selectbox("Selecciona la venta", options=list(dict_ventas_hoy.keys()), key="venta_hoy")
+        venta_id_hoy = dict_ventas_hoy[venta_sel_hoy]
+
+        with engine.connect() as conn:
+            df_items_hoy = pd.read_sql_query(text("""
+                SELECT nombre_producto, cantidad, precio_unitario, subtotal
+                FROM Detalles_Venta WHERE venta_id = :vid
+            """), con=conn, params={"vid": venta_id_hoy})
+
+        if not df_items_hoy.empty:
+            st.dataframe(
+                df_items_hoy.rename(columns={
+                    'nombre_producto': 'Producto', 'cantidad': 'Cant.',
+                    'precio_unitario': 'Precio Unit.', 'subtotal': 'Subtotal'
+                }),
+                use_container_width=True, hide_index=True
+            )
+    else:
+        st.info("No hay ventas registradas hoy todavía.")
+
+# ==========================================
+# TAB 2: REPORTE POR PERÍODO
+# ==========================================
+with tab_periodo:
+    st.subheader("Reporte de Ventas por Período")
+
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        hoy = date.today()
+        hace_30 = hoy - timedelta(days=30)
+        fechas_rango = st.date_input("Rango de fechas", [hace_30, hoy], key="fechas_periodo")
+    with col_f2:
+        hoy_dt = datetime.today()
+        mes_sel = st.selectbox("O selecciona un mes", range(1, 13),
+                               index=hoy_dt.month - 1,
+                               format_func=lambda m: ["Enero", "Febrero", "Marzo", "Abril",
+                                                       "Mayo", "Junio", "Julio", "Agosto",
+                                                       "Septiembre", "Octubre", "Noviembre",
+                                                       "Diciembre"][m - 1])
+        año_sel = st.number_input("Año", value=hoy_dt.year, min_value=2020)
+
+    usar_mes = st.checkbox("Usar selección de mes completo", value=False)
+
+    if usar_mes:
+        fecha_ini_rep = date(año_sel, mes_sel, 1)
+        if mes_sel == 12:
+            fecha_fin_rep = date(año_sel + 1, 1, 1) - timedelta(days=1)
+        else:
+            fecha_fin_rep = date(año_sel, mes_sel + 1, 1) - timedelta(days=1)
+    else:
+        if len(fechas_rango) == 2:
+            fecha_ini_rep, fecha_fin_rep = fechas_rango
+        else:
+            fecha_ini_rep = fecha_fin_rep = date.today()
+
+    df_periodo = obtener_ventas_periodo(user_id, fecha_ini_rep, fecha_fin_rep)
+
+    # Métricas del período
+    ingresos_rep = float(df_periodo['total'].sum()) if not df_periodo.empty else 0
+    efectivo_rep = float(df_periodo['monto_efectivo'].sum()) if not df_periodo.empty else 0
+    transfer_rep = float(df_periodo['monto_transferencia'].sum()) if not df_periodo.empty else 0
+
+    # Costos del período
+    with engine.connect() as conn:
+        costos_rep = conn.execute(text("""
+            SELECT COALESCE(SUM(dv.costo_unitario * dv.cantidad), 0)
+            FROM Detalles_Venta dv
+            JOIN Ventas v ON dv.venta_id = v.id
+            WHERE v.usuario_id = :uid
+            AND DATE(v.fecha) >= :f_ini AND DATE(v.fecha) <= :f_fin
+            AND v.estado != 'Anulada'
+        """), {
+            "uid": user_id,
+            "f_ini": fecha_ini_rep.strftime('%Y-%m-%d'),
+            "f_fin": fecha_fin_rep.strftime('%Y-%m-%d')
+        }).scalar()
+        costos_rep = float(costos_rep) if costos_rep else 0
+
+    margen_rep = ingresos_rep - costos_rep
+
+    col_r1, col_r2, col_r3, col_r4 = st.columns(4)
+    col_r1.metric("Ingresos", formato_cop(ingresos_rep))
+    col_r2.metric("Efectivo", formato_cop(efectivo_rep))
+    col_r3.metric("Transferencias", formato_cop(transfer_rep))
+    col_r4.metric("Margen Bruto", formato_cop(margen_rep),
+                  delta_color="inverse" if margen_rep < 0 else "normal")
+
+    st.markdown("---")
+
+    if not df_periodo.empty:
+        st.dataframe(
+            df_periodo[['id', 'fecha', 'cliente', 'total', 'tipo_pago', 'estado']].rename(columns={
+                'id': 'ID', 'fecha': 'Fecha', 'cliente': 'Cliente',
+                'total': 'Total ($)', 'tipo_pago': 'Pago', 'estado': 'Estado'
+            }),
+            use_container_width=True, hide_index=True
+        )
+
+        # Descargar Excel
+        st.markdown("---")
+        excel_buf = generar_excel_ventas(
+            df_periodo, fecha_ini_rep, fecha_fin_rep,
+            ingresos_rep, costos_rep, margen_rep, nombre_negocio
+        )
+        st.download_button(
+            label="📥 Descargar Reporte en Excel (para DIAN)",
+            data=excel_buf,
+            file_name=f"Ventas_{fecha_ini_rep}_{fecha_fin_rep}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+    else:
+        st.info("No hay ventas en este período.")
+
+# ==========================================
+# TAB 3: PRODUCTOS MÁS VENDIDOS
+# ==========================================
+with tab_productos:
+    st.subheader("Top Productos Más Vendidos")
+
+    col_tp1, col_tp2 = st.columns(2)
+    with col_tp1:
+        hoy = date.today()
+        hace_30 = hoy - timedelta(days=30)
+        fechas_top = st.date_input("Período", [hace_30, hoy], key="fechas_top")
+    with col_tp2:
+        limite_top = st.number_input("Cantidad de productos", min_value=5, max_value=50, value=10)
+
+    if len(fechas_top) == 2:
+        f_ini_top, f_fin_top = fechas_top
+        df_top = obtener_top_productos(user_id, f_ini_top, f_fin_top, int(limite_top))
+
+        if not df_top.empty:
+            col_tp_a, col_tp_b = st.columns([2, 1])
+
+            with col_tp_a:
+                st.bar_chart(
+                    df_top.set_index('nombre_producto')['unidades_vendidas'],
+                    height=350
+                )
+
+            with col_tp_b:
+                st.markdown("**Ranking:**")
+                for i, (_, row) in enumerate(df_top.iterrows(), 1):
+                    st.write(f"**{i}.** {row['nombre_producto']}")
+                    st.caption(f"{int(row['unidades_vendidas'])} unidades — {formato_cop(row['total_vendido'])}")
+
+            st.markdown("---")
+            st.dataframe(
+                df_top.rename(columns={
+                    'nombre_producto': 'Producto',
+                    'unidades_vendidas': 'Unidades Vendidas',
+                    'total_vendido': 'Total Vendido ($)'
+                }),
+                use_container_width=True, hide_index=True
+            )
+        else:
+            st.info("No hay ventas en este período.")
+
+# ==========================================
+# TAB 4: CARTERA Y CRÉDITOS
+# ==========================================
+with tab_cartera:
+    st.subheader("Resumen de Cartera")
+
+    with engine.connect() as conn:
+        df_cartera = pd.read_sql_query(text("""
+            SELECT cl.nombre as cliente, cl.telefono,
+                   COUNT(cr.id) as creditos_activos,
+                   SUM(cr.total) as total_prestado,
+                   SUM(cr.saldo_pendiente) as saldo_pendiente,
+                   MAX(cr.fecha_limite) as proxima_fecha
+            FROM Creditos cr
+            JOIN Clientes cl ON cr.cliente_id = cl.id
+            WHERE cr.usuario_id = :uid AND cr.estado = 'Activo'
+            GROUP BY cl.id, cl.nombre, cl.telefono
+            ORDER BY saldo_pendiente DESC
+        """), con=conn, params={"uid": user_id})
+
+    if not df_cartera.empty:
+        total_cartera = df_cartera['saldo_pendiente'].sum()
+        st.metric("Total en Cartera", formato_cop(total_cartera))
+
+        st.dataframe(
+            df_cartera.rename(columns={
+                'cliente': 'Cliente', 'telefono': 'Teléfono',
+                'creditos_activos': 'Créditos', 'total_prestado': 'Total Prestado ($)',
+                'saldo_pendiente': 'Saldo Pendiente ($)', 'proxima_fecha': 'Próximo Vence'
+            }),
+            use_container_width=True, hide_index=True
+        )
+
+        # Descargar cartera en Excel
+        wb_c = Workbook()
+        ws_c = wb_c.active
+        ws_c.title = "Cartera"
+        ws_c.append(["REPORTE DE CARTERA — " + nombre_negocio])
+        ws_c.append([f"Generado: {date.today().strftime('%d/%m/%Y')}"])
+        ws_c.append([])
+        ws_c.append(["Cliente", "Teléfono", "Créditos Activos", "Total Prestado", "Saldo Pendiente", "Próximo Vence"])
+        for _, row in df_cartera.iterrows():
+            ws_c.append([
+                row['cliente'], row['telefono'],
+                int(row['creditos_activos']),
+                float(row['total_prestado']),
+                float(row['saldo_pendiente']),
+                str(row['proxima_fecha'])
+            ])
+        ws_c.append([])
+        ws_c.append(["", "", "", "TOTAL CARTERA", float(total_cartera), ""])
+
+        buf_c = BytesIO()
+        wb_c.save(buf_c)
+        buf_c.seek(0)
+
+        st.download_button(
+            label="📥 Descargar Cartera en Excel",
+            data=buf_c,
+            file_name=f"Cartera_{date.today()}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+    else:
+        st.success("🎉 No hay créditos activos. ¡Cartera limpia!")
