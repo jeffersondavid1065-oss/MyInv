@@ -26,8 +26,55 @@ st.markdown(f"Caja para: **{nombre_negocio}**")
 st.markdown("---")
 
 # ==========================================
-# SESSION STATE
+# IDENTIFICACIÓN DEL CAJERO
 # ==========================================
+if "cajero_activo_id" not in st.session_state:
+    st.session_state.cajero_activo_id = None
+if "cajero_activo_nombre" not in st.session_state:
+    st.session_state.cajero_activo_nombre = None
+
+with engine.connect() as conn:
+    cajeros = conn.execute(text("""
+        SELECT id, nombre, pin FROM Cajeros
+        WHERE usuario_id = :uid AND activo = TRUE
+        ORDER BY nombre ASC
+    """), {"uid": user_id}).fetchall()
+
+if cajeros:
+    if not st.session_state.cajero_activo_id:
+        with st.container(border=True):
+            st.subheader("👤 Identificación del Cajero")
+            col_id1, col_id2, col_id3 = st.columns([2, 1, 1])
+            with col_id1:
+                dict_cajeros = {c[1]: (c[0], c[2]) for c in cajeros}
+                cajero_sel_nombre = st.selectbox("Selecciona tu nombre", options=list(dict_cajeros.keys()))
+            with col_id2:
+                pin_input = st.text_input("Tu PIN", type="password", max_chars=4)
+            with col_id3:
+                st.write("")
+                st.write("")
+                if st.button("Entrar a Caja", type="primary", use_container_width=True):
+                    cajero_id_sel, pin_guardado = dict_cajeros[cajero_sel_nombre]
+                    import hashlib
+                    if hashlib.sha256(pin_input.encode()).hexdigest() == pin_guardado:
+                        st.session_state.cajero_activo_id = cajero_id_sel
+                        st.session_state.cajero_activo_nombre = cajero_sel_nombre
+                        st.rerun()
+                    else:
+                        st.error("PIN incorrecto.")
+        st.stop()
+    else:
+        col_caj1, col_caj2 = st.columns([3, 1])
+        with col_caj1:
+            st.success(f"👤 Cajero activo: **{st.session_state.cajero_activo_nombre}**")
+        with col_caj2:
+            if st.button("Cambiar cajero"):
+                st.session_state.cajero_activo_id = None
+                st.session_state.cajero_activo_nombre = None
+                st.rerun()
+        st.markdown("")
+
+cajero_id_actual = st.session_state.get("cajero_activo_id")
 if "carrito" not in st.session_state:
     st.session_state.carrito = []
 if "ultima_venta_id" not in st.session_state:
@@ -277,31 +324,33 @@ with tab_pos:
                             cur = conn.execute(text("""
                                 INSERT INTO Ventas
                                 (usuario_id, cliente_id, subtotal, descuento, total,
-                                 tipo_pago, monto_efectivo, monto_transferencia, cambio, estado)
+                                 tipo_pago, monto_efectivo, monto_transferencia, cambio, estado, cajero_id)
                                 VALUES (:uid, :cid, :sub, :desc, :total,
-                                        :tipo, :efec, :trans, :cambio, :est)
+                                        :tipo, :efec, :trans, :cambio, :est, :cajero)
                             """), {
                                 "uid": user_id, "cid": cliente_id,
                                 "sub": total_carrito, "desc": desc_global,
                                 "total": total_final, "tipo": tipo_pago,
                                 "efec": monto_efectivo, "trans": monto_transferencia,
-                                "cambio": cambio, "est": estado_venta
+                                "cambio": cambio, "est": estado_venta,
+                                "cajero": cajero_id_actual
                             })
                             venta_id = cur.lastrowid
                         else:
                             res = conn.execute(text("""
                                 INSERT INTO Ventas
                                 (usuario_id, cliente_id, subtotal, descuento, total,
-                                 tipo_pago, monto_efectivo, monto_transferencia, cambio, estado)
+                                 tipo_pago, monto_efectivo, monto_transferencia, cambio, estado, cajero_id)
                                 VALUES (:uid, :cid, :sub, :desc, :total,
-                                        :tipo, :efec, :trans, :cambio, :est)
+                                        :tipo, :efec, :trans, :cambio, :est, :cajero)
                                 RETURNING id
                             """), {
                                 "uid": user_id, "cid": cliente_id,
                                 "sub": total_carrito, "desc": desc_global,
                                 "total": total_final, "tipo": tipo_pago,
                                 "efec": monto_efectivo, "trans": monto_transferencia,
-                                "cambio": cambio, "est": estado_venta
+                                "cambio": cambio, "est": estado_venta,
+                                "cajero": cajero_id_actual
                             })
                             venta_id = res.scalar()
 
