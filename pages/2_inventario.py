@@ -25,11 +25,10 @@ st.title("Inventario y Almacén")
 st.markdown(f"Control de stock para: **{nombre_negocio}**")
 st.markdown("---")
 
-tab_stock, tab_nuevo, tab_entradas, tab_factura_ia = st.tabs([
+tab_stock, tab_nuevo, tab_entradas = st.tabs([
     "Stock Actual",
     "Agregar Producto",
-    "Entradas de Mercancía",
-    "🤖 Leer Factura con IA"
+    "Entradas de Mercancía 🤖"
 ])
 
 # ==========================================
@@ -215,11 +214,341 @@ with tab_nuevo:
             st.warning("El nombre y el precio de venta son obligatorios.")
 
 # ==========================================
-# TAB 3: ENTRADAS DE MERCANCÍA (MANUAL)
+# TAB 3: ENTRADAS DE MERCANCÍA (CON IA INTEGRADA)
 # ==========================================
 with tab_entradas:
     st.subheader("Registrar Entrada de Mercancía")
-    st.caption("Registra los productos recibidos manualmente.")
+    st.caption("Sube la factura para que la IA detecte los productos, o agrégalos manualmente.")
+
+    proveedores = obtener_proveedores(user_id)
+    dict_proveedores = {p[1]: p[0] for p in proveedores} if proveedores else {}
+
+    # ---- Datos de cabecera ----
+    col_cab1, col_cab2 = st.columns(2)
+    with col_cab1:
+        factura_img = st.file_uploader(
+            "📸 Foto o PDF de la factura",
+            type=["jpg", "jpeg", "png", "pdf"],
+            help="Sube la factura y la IA detecta los productos automáticamente."
+        )
+        if factura_img:
+            if factura_img.type != "application/pdf":
+                st.image(factura_img, use_container_width=True)
+            else:
+                st.success(f"📄 {factura_img.name}")
+
+        if factura_img:
+            if st.button("🤖 Analizar con IA", type="primary", use_container_width=True):
+                with st.spinner("Gemini está leyendo la factura..."):
+                    try:
+                        from gemini_utils import leer_factura_imagen, leer_factura_pdf
+                        archivo_bytes = factura_img.read()
+                        if factura_img.type == "application/pdf":
+                            datos = leer_factura_pdf(archivo_bytes)
+                        else:
+                            datos = leer_factura_imagen(archivo_bytes)
+
+                        if datos and "productos" in datos and datos["productos"]:
+                            # Cargar productos detectados como ítems de entrada
+                            st.session_state.items_entrada = [
+                                {
+                                    "nombre": p.get("nombre", ""),
+                                    "cantidad": max(1, int(p.get("cantidad", 1))),
+                                    "costo": float(p.get("costo_unitario", 0)),
+                                    "subtotal": float(p.get("subtotal", 0)),
+                                    "ia": True
+                                }
+                                for p in datos["productos"]
+                            ]
+                            if datos.get("numero_factura"):
+                                st.session_state.num_factura_ia = datos["numero_factura"]
+                            if datos.get("proveedor"):
+                                st.session_state.proveedor_ia = datos["proveedor"]
+                            st.success(f"✅ IA detectó **{len(datos['productos'])} producto(s)**. Revisa abajo.")
+                            st.rerun()
+                        else:
+                            st.error("No se detectaron productos. Intenta con imagen más clara.")
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+
+    with col_cab2:
+        if dict_proveedores:
+            prov_sel = st.selectbox("Proveedor", ["-- Sin proveedor --"] + list(dict_proveedores.keys()))
+        else:
+            prov_sel = "-- Sin proveedor --"
+            st.caption("Sin proveedores registrados.")
+
+        num_factura = st.text_input(
+            "Número de Factura",
+            value=st.session_state.get("num_factura_ia", "")
+        )
+        notas_entrada = st.text_area("Notas", height=68)
+
+    st.markdown("---")
+
+    # ---- Inicializar ítems ----
+    if "items_entrada" not in st.session_state:
+        st.session_state.items_entrada = []
+
+    # ---- Botones de gestión ----
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        if st.button("➕ Agregar producto manualmente", use_container_width=True):
+            st.session_state.items_entrada.append({
+                "nombre": "", "cantidad": 1, "costo": 0.0, "subtotal": 0.0, "ia": False
+            })
+            st.rerun()
+    with col_btn2:
+        if st.button("🗑️ Limpiar todo", use_container_width=True):
+            st.session_state.items_entrada = []
+            if "num_factura_ia" in st.session_state:
+                del st.session_state.num_factura_ia
+            st.rerun()
+
+    # ---- Lista de productos detectados/manuales ----
+    if not st.session_state.items_entrada:
+        st.info("Sube una factura para que la IA detecte los productos, o agrega uno manualmente.")
+    else:
+        # Cargar inventario para buscar matches
+        df_inv_entrada = obtener_todos_productos(user_id)
+        nombres_inv = list(df_inv_entrada['nombre'].values) if not df_inv_entrada.empty else []
+
+        st.markdown(f"**{len(st.session_state.items_entrada)} producto(s) en esta entrada:**")
+
+        items_a_eliminar = []
+        total_entrada = 0.0
+
+        for i, item in enumerate(st.session_state.items_entrada):
+            with st.container(border=True):
+                # Buscar si existe producto similar en inventario
+                nombre_item = item.get("nombre", "")
+                producto_match = None
+                if nombre_item and not df_inv_entrada.empty:
+                    # Búsqueda por nombre similar
+                    matches = df_inv_entrada[
+                        df_inv_entrada['nombre'].str.lower().str.contains(
+                            nombre_item.lower()[:10], na=False
+                        )
+                    ]
+                    if not matches.empty:
+                        producto_match = matches.iloc[0]
+
+                # Header del ítem
+                col_h1, col_h2 = st.columns([4, 1])
+                with col_h1:
+                    if producto_match is not None:
+                        st.success(f"✅ Producto encontrado en inventario: **{producto_match['nombre']}** (Stock actual: {int(producto_match['stock_actual'])})")
+                    else:
+                        st.warning(f"⚠️ Producto nuevo — se creará en el inventario")
+                with col_h2:
+                    if st.button("❌", key=f"del_item_{i}"):
+                        items_a_eliminar.append(i)
+
+                # Campos del ítem
+                col_f1, col_f2, col_f3 = st.columns([3, 1, 1])
+                with col_f1:
+                    nombre_nuevo = st.text_input(
+                        "Nombre del producto",
+                        value=nombre_item,
+                        key=f"nom_{i}"
+                    )
+                    st.session_state.items_entrada[i]["nombre"] = nombre_nuevo
+
+                with col_f2:
+                    cant_nueva = st.number_input(
+                        "Cantidad", min_value=1,
+                        value=int(item.get("cantidad", 1)),
+                        step=1, key=f"cant_{i}"
+                    )
+                    st.session_state.items_entrada[i]["cantidad"] = cant_nueva
+
+                with col_f3:
+                    costo_nuevo = st.number_input(
+                        "Costo unitario ($)",
+                        min_value=0.0,
+                        value=float(item.get("costo", 0)),
+                        step=1000.0, key=f"costo_{i}"
+                    )
+                    st.session_state.items_entrada[i]["costo"] = costo_nuevo
+                    subtotal_i = cant_nueva * costo_nuevo
+                    st.session_state.items_entrada[i]["subtotal"] = subtotal_i
+                    st.caption(f"Subtotal: {formato_cop(subtotal_i)}")
+
+                # Campos adicionales según si es nuevo o existente
+                if producto_match is not None:
+                    # Producto existente — mostrar precio de venta actual y opción de actualizar
+                    col_e1, col_e2 = st.columns(2)
+                    with col_e1:
+                        st.caption(f"Precio venta actual: {formato_cop(producto_match['precio_venta'])}")
+                        actualizar_precio = st.checkbox(
+                            "Actualizar precio de venta",
+                            key=f"upd_precio_{i}"
+                        )
+                    with col_e2:
+                        if actualizar_precio:
+                            precio_nuevo = st.number_input(
+                                "Nuevo precio de venta ($)",
+                                min_value=0.0,
+                                value=float(producto_match['precio_venta']),
+                                step=1000.0, key=f"pvp_{i}"
+                            )
+                            st.session_state.items_entrada[i]["precio_venta"] = precio_nuevo
+                            st.session_state.items_entrada[i]["producto_id"] = int(producto_match['id'])
+                        else:
+                            st.session_state.items_entrada[i]["precio_venta"] = float(producto_match['precio_venta'])
+                            st.session_state.items_entrada[i]["producto_id"] = int(producto_match['id'])
+                    st.session_state.items_entrada[i]["es_nuevo"] = False
+
+                else:
+                    # Producto nuevo — pedir precio de venta y código de barras
+                    col_n1, col_n2, col_n3 = st.columns(3)
+                    with col_n1:
+                        pvp_nuevo = st.number_input(
+                            "Precio de venta ($) *",
+                            min_value=0.0,
+                            value=float(costo_nuevo * 1.3) if costo_nuevo > 0 else 0.0,
+                            step=1000.0, key=f"pvp_nuevo_{i}"
+                        )
+                        st.session_state.items_entrada[i]["precio_venta"] = pvp_nuevo
+                    with col_n2:
+                        cod_barras = st.text_input(
+                            "Código de barras (opcional)",
+                            placeholder="Escanea o escribe",
+                            key=f"cod_{i}"
+                        )
+                        st.session_state.items_entrada[i]["codigo_barras"] = cod_barras
+                    with col_n3:
+                        categoria = st.text_input(
+                            "Categoría",
+                            value="General",
+                            key=f"cat_{i}"
+                        )
+                        st.session_state.items_entrada[i]["categoria"] = categoria
+                    st.session_state.items_entrada[i]["es_nuevo"] = True
+                    st.session_state.items_entrada[i]["producto_id"] = None
+
+                total_entrada += subtotal_i
+
+        # Eliminar ítems marcados
+        for idx in sorted(items_a_eliminar, reverse=True):
+            st.session_state.items_entrada.pop(idx)
+        if items_a_eliminar:
+            st.rerun()
+
+        if total_entrada > 0:
+            st.markdown("---")
+            st.info(f"**Total de la entrada: {formato_cop(total_entrada)}**")
+
+        # ---- Botón registrar ----
+        if st.session_state.items_entrada and st.button(
+            "✅ Registrar Entrada", type="primary", use_container_width=True
+        ):
+            items_validos = [
+                i for i in st.session_state.items_entrada
+                if i.get("nombre") and i.get("cantidad", 0) > 0
+            ]
+
+            if not items_validos:
+                st.warning("Agrega al menos un producto válido.")
+            else:
+                try:
+                    proveedor_id = dict_proveedores.get(prov_sel) if prov_sel != "-- Sin proveedor --" else None
+
+                    with engine.begin() as conn:
+                        is_sqlite = "sqlite" in str(engine.url)
+
+                        # Crear cabecera de entrada
+                        if is_sqlite:
+                            cur = conn.execute(text("""
+                                INSERT INTO Entradas_Inventario
+                                (usuario_id, proveedor_id, numero_factura, total_compra, notas)
+                                VALUES (:uid, :pid, :nf, :total, :notas)
+                            """), {"uid": user_id, "pid": proveedor_id,
+                                   "nf": num_factura or None,
+                                   "total": float(total_entrada),
+                                   "notas": notas_entrada or None})
+                            entrada_id = cur.lastrowid
+                        else:
+                            res = conn.execute(text("""
+                                INSERT INTO Entradas_Inventario
+                                (usuario_id, proveedor_id, numero_factura, total_compra, notas)
+                                VALUES (:uid, :pid, :nf, :total, :notas) RETURNING id
+                            """), {"uid": user_id, "pid": proveedor_id,
+                                   "nf": num_factura or None,
+                                   "total": float(total_entrada),
+                                   "notas": notas_entrada or None})
+                            entrada_id = res.scalar()
+
+                        nuevos = 0
+                        actualizados = 0
+
+                        for item in items_validos:
+                            producto_id = item.get("producto_id")
+                            precio_venta = float(item.get("precio_venta", 0))
+                            costo = float(item.get("costo", 0))
+                            cantidad = int(item.get("cantidad", 1))
+
+                            if item.get("es_nuevo") or not producto_id:
+                                # Crear producto nuevo
+                                cod = item.get("codigo_barras") or None
+                                cat = item.get("categoria", "General")
+                                if is_sqlite:
+                                    cur_p = conn.execute(text("""
+                                        INSERT INTO Productos
+                                        (usuario_id, nombre, codigo_barras, categoria,
+                                         stock_actual, stock_minimo, costo_compra, precio_venta)
+                                        VALUES (:uid, :nom, :cod, :cat, :stk, 2, :costo, :pvp)
+                                    """), {"uid": user_id, "nom": item["nombre"],
+                                           "cod": cod, "cat": cat, "stk": cantidad,
+                                           "costo": costo, "pvp": precio_venta})
+                                    producto_id = cur_p.lastrowid
+                                else:
+                                    res_p = conn.execute(text("""
+                                        INSERT INTO Productos
+                                        (usuario_id, nombre, codigo_barras, categoria,
+                                         stock_actual, stock_minimo, costo_compra, precio_venta)
+                                        VALUES (:uid, :nom, :cod, :cat, :stk, 2, :costo, :pvp)
+                                        RETURNING id
+                                    """), {"uid": user_id, "nom": item["nombre"],
+                                           "cod": cod, "cat": cat, "stk": cantidad,
+                                           "costo": costo, "pvp": precio_venta})
+                                    producto_id = res_p.scalar()
+                                nuevos += 1
+                            else:
+                                # Actualizar producto existente
+                                conn.execute(text("""
+                                    UPDATE Productos
+                                    SET stock_actual = stock_actual + :cant,
+                                        costo_compra = :costo,
+                                        precio_venta = :pvp
+                                    WHERE id = :pid AND usuario_id = :uid
+                                """), {"cant": cantidad, "costo": costo,
+                                       "pvp": precio_venta, "pid": producto_id,
+                                       "uid": user_id})
+                                actualizados += 1
+
+                            # Detalle de entrada
+                            conn.execute(text("""
+                                INSERT INTO Detalles_Entrada
+                                (entrada_id, producto_id, cantidad, costo_unitario, subtotal)
+                                VALUES (:eid, :pid, :cant, :costo, :sub)
+                            """), {"eid": entrada_id, "pid": producto_id,
+                                   "cant": cantidad, "costo": costo,
+                                   "sub": float(item.get("subtotal", 0))})
+
+                    invalidar_cache_productos()
+                    st.session_state.items_entrada = []
+                    if "num_factura_ia" in st.session_state:
+                        del st.session_state.num_factura_ia
+
+                    st.success(f"""
+                        ✅ Entrada #{entrada_id} registrada:
+                        - **{nuevos}** producto(s) nuevo(s) creados
+                        - **{actualizados}** producto(s) existentes actualizados
+                    """)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error al registrar: {e}")
 
     proveedores = obtener_proveedores(user_id)
     df_productos_entrada = obtener_todos_productos(user_id)
@@ -359,10 +688,7 @@ with tab_entradas:
             else:
                 st.warning("Selecciona al menos un producto con cantidad mayor a 0.")
 
-# ==========================================
-# TAB 4: LEER FACTURA CON IA (GEMINI)
-# ==========================================
-with tab_factura_ia:
+# Tab de IA integrado en Entradas de Mercancía
     st.subheader("🤖 Leer Factura con Inteligencia Artificial")
     st.caption("Sube la foto o PDF de la factura del proveedor y Gemini extrae los productos automáticamente.")
 
@@ -504,64 +830,123 @@ with tab_factura_ia:
             col_conf1, col_conf2 = st.columns(2)
             with col_conf1:
                 if st.button("✅ Confirmar y Registrar Entrada", type="primary", use_container_width=True):
-                    items_para_registrar = [i for i in items_ia_validos if i["producto_id"] is not None]
+                    try:
+                        proveedor_id_ia = dict_proveedores_ia.get(prov_ia) if prov_ia != "-- Sin proveedor --" else None
 
-                    if items_para_registrar:
-                        try:
-                            proveedor_id_ia = dict_proveedores_ia.get(prov_ia) if prov_ia != "-- Sin proveedor --" else None
+                        with engine.begin() as conn:
+                            is_sqlite = "sqlite" in str(engine.url)
 
-                            with engine.begin() as conn:
-                                is_sqlite = "sqlite" in str(engine.url)
-                                if is_sqlite:
-                                    cur = conn.execute(text("""
-                                        INSERT INTO Entradas_Inventario
-                                        (usuario_id, proveedor_id, numero_factura, total_compra, notas)
-                                        VALUES (:uid, :pid, :nf, :total, :notas)
-                                    """), {"uid": user_id, "pid": proveedor_id_ia,
-                                           "nf": nf_ia or None, "total": float(total_ia),
-                                           "notas": notas_ia or "Registrado con IA (Gemini)"})
-                                    entrada_id = cur.lastrowid
+                            # Crear entrada principal
+                            if is_sqlite:
+                                cur = conn.execute(text("""
+                                    INSERT INTO Entradas_Inventario
+                                    (usuario_id, proveedor_id, numero_factura, total_compra, notas)
+                                    VALUES (:uid, :pid, :nf, :total, :notas)
+                                """), {"uid": user_id, "pid": proveedor_id_ia,
+                                       "nf": nf_ia or None, "total": float(total_ia),
+                                       "notas": notas_ia or "Registrado con IA (Gemini)"})
+                                entrada_id = cur.lastrowid
+                            else:
+                                res = conn.execute(text("""
+                                    INSERT INTO Entradas_Inventario
+                                    (usuario_id, proveedor_id, numero_factura, total_compra, notas)
+                                    VALUES (:uid, :pid, :nf, :total, :notas) RETURNING id
+                                """), {"uid": user_id, "pid": proveedor_id_ia,
+                                       "nf": nf_ia or None, "total": float(total_ia),
+                                       "notas": notas_ia or "Registrado con IA (Gemini)"})
+                                entrada_id = res.scalar()
+
+                            productos_registrados = 0
+
+                            for item in items_ia_validos:
+                                if not item['nombre_factura'] or item['cantidad'] <= 0:
+                                    continue
+
+                                producto_id = item.get("producto_id")
+
+                                # Si es nuevo, crear el producto automáticamente
+                                if item.get("crear_nuevo") or not producto_id:
+                                    costo = item["costo_unitario"]
+                                    # Precio de venta sugerido: 30% de ganancia
+                                    precio_venta_sugerido = costo * 1.30 if costo > 0 else 1000
+
+                                    if is_sqlite:
+                                        cur_p = conn.execute(text("""
+                                            INSERT INTO Productos
+                                            (usuario_id, nombre, categoria, stock_actual,
+                                             stock_minimo, costo_compra, precio_venta)
+                                            VALUES (:uid, :nom, 'General', :stk, 2, :costo, :pvp)
+                                        """), {
+                                            "uid": user_id,
+                                            "nom": item["nombre_factura"],
+                                            "stk": item["cantidad"],
+                                            "costo": float(costo),
+                                            "pvp": float(precio_venta_sugerido)
+                                        })
+                                        producto_id = cur_p.lastrowid
+                                    else:
+                                        res_p = conn.execute(text("""
+                                            INSERT INTO Productos
+                                            (usuario_id, nombre, categoria, stock_actual,
+                                             stock_minimo, costo_compra, precio_venta)
+                                            VALUES (:uid, :nom, 'General', :stk, 2, :costo, :pvp)
+                                            RETURNING id
+                                        """), {
+                                            "uid": user_id,
+                                            "nom": item["nombre_factura"],
+                                            "stk": item["cantidad"],
+                                            "costo": float(costo),
+                                            "pvp": float(precio_venta_sugerido)
+                                        })
+                                        producto_id = res_p.scalar()
                                 else:
-                                    res = conn.execute(text("""
-                                        INSERT INTO Entradas_Inventario
-                                        (usuario_id, proveedor_id, numero_factura, total_compra, notas)
-                                        VALUES (:uid, :pid, :nf, :total, :notas) RETURNING id
-                                    """), {"uid": user_id, "pid": proveedor_id_ia,
-                                           "nf": nf_ia or None, "total": float(total_ia),
-                                           "notas": notas_ia or "Registrado con IA (Gemini)"})
-                                    entrada_id = res.scalar()
-
-                                for item in items_para_registrar:
-                                    conn.execute(text("""
-                                        INSERT INTO Detalles_Entrada
-                                        (entrada_id, producto_id, cantidad, costo_unitario, subtotal)
-                                        VALUES (:eid, :pid, :cant, :costo, :sub)
-                                    """), {"eid": entrada_id, "pid": item["producto_id"],
-                                           "cant": item["cantidad"],
-                                           "costo": item["costo_unitario"],
-                                           "sub": item["subtotal"]})
+                                    # Producto existente — actualizar stock
                                     conn.execute(text("""
                                         UPDATE Productos
                                         SET stock_actual = stock_actual + :cant,
                                             costo_compra = :costo
                                         WHERE id = :pid AND usuario_id = :uid
-                                    """), {"cant": item["cantidad"],
-                                           "costo": item["costo_unitario"],
-                                           "pid": item["producto_id"],
-                                           "uid": user_id})
+                                    """), {
+                                        "cant": item["cantidad"],
+                                        "costo": float(item["costo_unitario"]),
+                                        "pid": producto_id,
+                                        "uid": user_id
+                                    })
 
-                            invalidar_cache_productos()
+                                # Registrar detalle de entrada
+                                conn.execute(text("""
+                                    INSERT INTO Detalles_Entrada
+                                    (entrada_id, producto_id, cantidad, costo_unitario, subtotal)
+                                    VALUES (:eid, :pid, :cant, :costo, :sub)
+                                """), {
+                                    "eid": entrada_id,
+                                    "pid": producto_id,
+                                    "cant": item["cantidad"],
+                                    "costo": float(item["costo_unitario"]),
+                                    "sub": float(item["subtotal"])
+                                })
+                                productos_registrados += 1
+
+                        invalidar_cache_productos()
+                        if "factura_ia_productos" in st.session_state:
                             del st.session_state.factura_ia_productos
+                        if "factura_ia_datos" in st.session_state:
                             del st.session_state.factura_ia_datos
-                            st.success(f"✅ Entrada #{entrada_id} registrada. {len(items_para_registrar)} producto(s) actualizados.")
-                            nuevos = [i for i in items_ia_validos if i["crear_nuevo"]]
-                            if nuevos:
-                                st.warning(f"⚠️ {len(nuevos)} producto(s) marcados como 'Crear nuevo' no se registraron. Agrégalos en 'Agregar Producto'.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error al registrar: {e}")
-                    else:
-                        st.warning("Asocia al menos un producto del inventario para registrar la entrada.")
+
+                        nuevos = sum(1 for i in items_ia_validos if i.get("crear_nuevo") or not i.get("producto_id"))
+                        existentes = productos_registrados - nuevos
+
+                        st.success(f"""
+                            ✅ Entrada #{entrada_id} registrada exitosamente.
+                            - **{nuevos} producto(s) nuevo(s)** creados en el inventario
+                            - **{existentes} producto(s) existente(s)** actualizados en stock
+                        """)
+                        if nuevos > 0:
+                            st.info("💡 Los productos nuevos se crearon con **30% de ganancia** como precio sugerido. Ve a **Stock Actual** para ajustar los precios.")
+                        st.rerun()
+
+                    except Exception as e:
+                        st.error(f"Error al registrar: {e}")
 
             with col_conf2:
                 if st.button("❌ Cancelar", use_container_width=True):
