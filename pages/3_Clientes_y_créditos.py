@@ -142,33 +142,31 @@ with tab_creditos:
                 with col_ab2:
                     notas_abono = st.text_input("Notas (opcional)")
 
-                nuevo_saldo = saldo_actual - monto_abono
+                nuevo_saldo = float(saldo_actual) - float(monto_abono)
                 st.info(f"Saldo actual: {formato_cop(saldo_actual)} → Nuevo saldo: {formato_cop(nuevo_saldo)}")
 
                 if st.button("💵 Registrar Abono", type="primary", use_container_width=True):
                     try:
                         with engine.begin() as conn:
-                            # Insertar abono
                             conn.execute(text("""
                                 INSERT INTO Abonos (credito_id, usuario_id, monto, notas)
                                 VALUES (:cid, :uid, :monto, :notas)
                             """), {
-                                "cid": credito_id_abono,
+                                "cid": int(credito_id_abono),
                                 "uid": user_id,
                                 "monto": float(monto_abono),
                                 "notas": notas_abono or None
                             })
 
-                            # Actualizar saldo del crédito
                             nuevo_estado = "Pagado" if nuevo_saldo <= 0 else "Activo"
                             conn.execute(text("""
                                 UPDATE Creditos
                                 SET saldo_pendiente = :saldo, estado = :estado
                                 WHERE id = :cid AND usuario_id = :uid
                             """), {
-                                "saldo": max(0, nuevo_saldo),
+                                "saldo": float(max(0, nuevo_saldo)),
                                 "estado": nuevo_estado,
-                                "cid": credito_id_abono,
+                                "cid": int(credito_id_abono),
                                 "uid": user_id
                             })
 
