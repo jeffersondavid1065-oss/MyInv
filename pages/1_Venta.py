@@ -11,9 +11,10 @@ from queries import (
     invalidar_cache_creditos,
     invalidar_cache_productos,
 )
-from utils import verificar_auth
+from utils import aplicar_estilos, verificar_auth
 
 st.set_page_config(page_title="Punto de Venta", layout="wide")
+aplicar_estilos()
 user_id, nombre_negocio = verificar_auth()
 
 engine = obtener_conexion()
@@ -34,9 +35,10 @@ if "cajero_activo_nombre" not in st.session_state:
     st.session_state.cajero_activo_nombre = None
 
 with engine.connect() as conn:
+    # activo = 1 funciona tanto en SQLite (1) como Postgres (TRUE)
     cajeros = conn.execute(text("""
         SELECT id, nombre, pin FROM Cajeros
-        WHERE usuario_id = :uid AND activo = TRUE
+        WHERE usuario_id = :uid AND activo = 1
         ORDER BY nombre ASC
     """), {"uid": user_id}).fetchall()
 
@@ -98,6 +100,7 @@ def agregar_al_carrito(producto_id, nombre, codigo_barras, precio, stock_actual,
         "codigo_barras": codigo_barras,
         "precio_unitario": float(precio),
         "descuento_item": 0.0,
+        "descuento_pct_item": 0.0,
         "cantidad": cantidad,
         "subtotal": float(precio) * cantidad,
         "stock_max": stock_actual,
@@ -181,11 +184,25 @@ with tab_pos:
         if not st.session_state.carrito:
             st.info("El carrito está vacío.")
         else:
+            # ==========================================
+            # TIPO DE DESCUENTO POR ÍTEM
+            # ==========================================
+            tipo_desc_item = st.radio(
+                "Descuento por ítem:",
+                ["$ Valor fijo", "% Porcentaje"],
+                horizontal=True,
+                key="tipo_desc_item"
+            )
+
+            # Headers carrito
             h1, h2, h3, h4, h5, h6 = st.columns([3, 1, 1, 1, 1, 1])
             h1.markdown("**Producto**")
             h2.markdown("**Precio**")
             h3.markdown("**Cant.**")
-            h4.markdown("**Desc.$**")
+            if tipo_desc_item == "$ Valor fijo":
+                h4.markdown("**Desc.$**")
+            else:
+                h4.markdown("**Desc.%**")
             h5.markdown("**Total**")
             h6.markdown("**❌**")
 
@@ -207,20 +224,36 @@ with tab_pos:
                     )
                     if nueva_cant != item["cantidad"]:
                         st.session_state.carrito[i]["cantidad"] = nueva_cant
-                        precio_neto = item["precio_unitario"] - item.get("descuento_item", 0)
+                        desc = item.get("descuento_item", 0)
+                        precio_neto = item["precio_unitario"] - desc
                         st.session_state.carrito[i]["subtotal"] = nueva_cant * max(0, precio_neto)
                         st.rerun()
                 with c4:
-                    desc_item = st.number_input(
-                        "", min_value=0.0,
-                        value=float(item.get("descuento_item", 0)),
-                        step=500.0, key=f"desc_{i}", label_visibility="collapsed"
-                    )
-                    if desc_item != item.get("descuento_item", 0):
-                        st.session_state.carrito[i]["descuento_item"] = desc_item
-                        precio_neto = item["precio_unitario"] - desc_item
-                        st.session_state.carrito[i]["subtotal"] = item["cantidad"] * max(0, precio_neto)
-                        st.rerun()
+                    if tipo_desc_item == "$ Valor fijo":
+                        desc_item = st.number_input(
+                            "", min_value=0.0,
+                            value=float(item.get("descuento_item", 0)),
+                            step=500.0, key=f"desc_{i}", label_visibility="collapsed"
+                        )
+                        if desc_item != item.get("descuento_item", 0):
+                            st.session_state.carrito[i]["descuento_item"] = desc_item
+                            st.session_state.carrito[i]["descuento_pct_item"] = 0.0
+                            precio_neto = item["precio_unitario"] - desc_item
+                            st.session_state.carrito[i]["subtotal"] = item["cantidad"] * max(0, precio_neto)
+                            st.rerun()
+                    else:
+                        pct_item = st.number_input(
+                            "", min_value=0.0, max_value=100.0,
+                            value=float(item.get("descuento_pct_item", 0)),
+                            step=5.0, key=f"pct_{i}", label_visibility="collapsed"
+                        )
+                        if pct_item != item.get("descuento_pct_item", 0):
+                            desc_calculado = item["precio_unitario"] * (pct_item / 100)
+                            st.session_state.carrito[i]["descuento_pct_item"] = pct_item
+                            st.session_state.carrito[i]["descuento_item"] = desc_calculado
+                            precio_neto = item["precio_unitario"] - desc_calculado
+                            st.session_state.carrito[i]["subtotal"] = item["cantidad"] * max(0, precio_neto)
+                            st.rerun()
                 with c5:
                     st.write(formato_cop(item["subtotal"]))
                 with c6:
@@ -235,11 +268,42 @@ with tab_pos:
                 st.rerun()
 
             st.markdown("---")
+
+            # ==========================================
+            # DESCUENTO GLOBAL (SOBRE EL TOTAL)
+            # ==========================================
+            col_desc_tipo, col_desc_val = st.columns([1, 2])
+            with col_desc_tipo:
+                tipo_desc_global = st.radio(
+                    "Descuento global:",
+                    ["$ Fijo", "% Porcentaje"],
+                    horizontal=True,
+                    key="tipo_desc_global"
+                )
+            with col_desc_val:
+                if tipo_desc_global == "$ Fijo":
+                    desc_global = st.number_input(
+                        "Descuento sobre total ($)",
+                        min_value=0.0, step=1000.0,
+                        key="descuento_pos"
+                    )
+                else:
+                    pct_global = st.number_input(
+                        "Descuento sobre total (%)",
+                        min_value=0.0, max_value=100.0,
+                        step=5.0, key="descuento_pct_global"
+                    )
+                    desc_global = total_carrito * (pct_global / 100)
+                    if pct_global > 0:
+                        st.caption(f"= {formato_cop(desc_global)}")
+
+            total_final = max(0, total_carrito - desc_global)
+
             col_t1, col_t2 = st.columns([2, 1])
             with col_t2:
-                desc_global = st.number_input("Descuento global ($)", min_value=0.0, step=1000.0, key="descuento_pos")
-                total_final = max(0, total_carrito - desc_global)
                 st.markdown(f"### Total: {formato_cop(total_final)}")
+                if desc_global > 0:
+                    st.caption(f"Ahorro: {formato_cop(desc_global)}")
             with col_t1:
                 if st.button("🗑️ Limpiar carrito", use_container_width=True):
                     limpiar_carrito()
@@ -253,9 +317,15 @@ with tab_pos:
         else:
             total_carrito = sum(i["subtotal"] for i in st.session_state.carrito)
             desc_global = st.session_state.get("descuento_pos", 0)
+            # Si el descuento es por porcentaje, recalcular
+            pct_g = st.session_state.get("descuento_pct_global", 0)
+            if st.session_state.get("tipo_desc_global") == "% Porcentaje" and pct_g > 0:
+                desc_global = total_carrito * (pct_g / 100)
             total_final = max(0, total_carrito - desc_global)
 
             st.markdown(f"**Total: {formato_cop(total_final)}**")
+            if desc_global > 0:
+                st.caption(f"Descuento aplicado: {formato_cop(desc_global)}")
             st.markdown("---")
 
             tipo_pago = st.selectbox(
