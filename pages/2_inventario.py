@@ -273,7 +273,7 @@ with tab_entradas:
 
     with col_cab2:
         if dict_proveedores:
-            prov_sel = st.selectbox("Proveedor", ["-- Sin proveedor --"] + list(dict_proveedores.keys()))
+            prov_sel = st.selectbox("Proveedor", ["-- Sin proveedor --"] + list(dict_proveedores.keys()), key="prov_entrada")
         else:
             prov_sel = "-- Sin proveedor --"
             st.caption("Sin proveedores registrados.")
