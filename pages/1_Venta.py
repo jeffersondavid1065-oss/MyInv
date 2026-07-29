@@ -34,13 +34,15 @@ if "cajero_activo_id" not in st.session_state:
 if "cajero_activo_nombre" not in st.session_state:
     st.session_state.cajero_activo_nombre = None
 
-with engine.connect() as conn:
-    # activo = 1 funciona tanto en SQLite (1) como Postgres (TRUE)
-    cajeros = conn.execute(text("""
-        SELECT id, nombre, pin FROM Cajeros
-        WHERE usuario_id = :uid AND activo = 1
-        ORDER BY nombre ASC
-    """), {"uid": user_id}).fetchall()
+try:
+    with engine.connect() as conn:
+        cajeros = conn.execute(text("""
+            SELECT id, nombre, pin FROM Cajeros
+            WHERE usuario_id = :uid AND activo = 1
+            ORDER BY nombre ASC
+        """), {"uid": user_id}).fetchall()
+except Exception:
+    cajeros = []
 
 if cajeros:
     if not st.session_state.cajero_activo_id:
