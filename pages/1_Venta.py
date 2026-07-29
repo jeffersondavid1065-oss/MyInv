@@ -204,7 +204,8 @@ with col_der:
 
         tipo_pago = st.selectbox(
             "Tipo de Pago",
-            ["Efectivo", "Transferencia", "Crédito", "Mixto"],
+            ["Efectivo", "Transferencia", "Credito", "Mixto"],
+            format_func=lambda x: "Crédito" if x == "Credito" else x,
             key="tipo_pago_sel"
         )
 
@@ -227,7 +228,7 @@ with col_der:
             monto_transferencia = total_final
             st.info(f"Total a transferir: {formato_cop(total_final)}")
 
-        elif tipo_pago == "Crédito":
+        elif tipo_pago == "Credito":
             clientes = obtener_clientes(user_id)
             if clientes:
                 dict_clientes = {c[1]: c[0] for c in clientes}
@@ -269,7 +270,7 @@ with col_der:
                 with engine.begin() as conn:
                     is_sqlite = "sqlite" in str(engine.url)
 
-                    estado_venta = "Credito" if tipo_pago == "Crédito" else "Pagada"
+                    estado_venta = "Credito" if tipo_pago == "Credito" else "Pagada"
 
                     # 1. Crear venta
                     if is_sqlite:
@@ -330,7 +331,7 @@ with col_der:
                             raise ValueError(f"Stock insuficiente para '{item['nombre']}'.")
 
                     # 3. Si es crédito, crear el registro de deuda
-                    if tipo_pago == "Crédito" and cliente_id:
+                    if tipo_pago == "Credito" and cliente_id:
                         conn.execute(text("""
                             INSERT INTO Creditos
                             (usuario_id, venta_id, cliente_id, total, saldo_pendiente,
@@ -342,8 +343,8 @@ with col_der:
                             "total": total_final, "saldo": total_final,
                             "f_ini": date.today().strftime('%Y-%m-%d'),
                             "f_lim": fecha_limite.strftime('%Y-%m-%d'),
-                            "tipo_c": tipo_cuota if tipo_pago == "Crédito" else "Libre",
-                            "val_c": valor_cuota if tipo_pago == "Crédito" else 0,
+                            "tipo_c": tipo_cuota if tipo_pago == "Credito" else "Libre",
+                            "val_c": valor_cuota if tipo_pago == "Credito" else 0,
                         })
                         invalidar_cache_creditos()
 
