@@ -79,6 +79,8 @@ if cajeros:
         st.markdown("")
 
 cajero_id_actual = st.session_state.get("cajero_activo_id")
+if "limpiar_buscador" not in st.session_state:
+    st.session_state.limpiar_buscador = False
 if "carrito" not in st.session_state:
     st.session_state.carrito = []
 if "ultima_venta_id" not in st.session_state:
@@ -130,6 +132,11 @@ with tab_pos:
         st.subheader("🔍 Buscar Producto")
         st.caption("Escanea el código de barras o escribe el nombre.")
 
+        # Limpiar buscador si viene de un escaneo exitoso
+        if st.session_state.get("limpiar_buscador", False):
+            st.session_state.limpiar_buscador = False
+            st.session_state.buscador_pos = ""
+
         busqueda = st.text_input(
             "Código o nombre", placeholder="Escanea o escribe aquí...",
             key="buscador_pos", label_visibility="collapsed"
@@ -147,7 +154,8 @@ with tab_pos:
                     precio=producto_encontrado[4],
                     stock_actual=int(producto_encontrado[3]),
                 )
-                st.success(f"✅ {producto_encontrado[1]} agregado.")
+                # Limpiar campo automáticamente para siguiente escaneo
+                st.session_state.limpiar_buscador = True
                 st.rerun()
             else:
                 df_productos = obtener_productos_activos(user_id)
