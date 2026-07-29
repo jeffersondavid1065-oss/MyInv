@@ -85,11 +85,18 @@ with tab_stock:
             st.info("No hay productos que coincidan con los filtros.")
         else:
             st.caption(f"Mostrando {len(df_inv)} producto(s). Edita directamente en la tabla y guarda.")
+            st.caption("💡 Puedes agregar o editar el **código de barras** directamente en la columna 'Código Barras'.")
+
+            # Reemplazar None por string vacío para que la tabla sea editable
+            df_show = df_inv[['id', 'nombre', 'codigo_barras', 'codigo_ref',
+                               'categoria', 'stock_actual', 'stock_minimo',
+                               'costo_compra', 'precio_venta']].copy()
+            df_show['codigo_barras'] = df_show['codigo_barras'].fillna("").astype(str).replace("None", "")
+            df_show['codigo_ref'] = df_show['codigo_ref'].fillna("").astype(str).replace("None", "")
+            df_show['categoria'] = df_show['categoria'].fillna("General")
 
             df_edit = st.data_editor(
-                df_inv[['id', 'nombre', 'codigo_barras', 'codigo_ref',
-                        'categoria', 'stock_actual', 'stock_minimo',
-                        'costo_compra', 'precio_venta']],
+                df_show,
                 hide_index=True,
                 use_container_width=True,
                 disabled=["id"],
