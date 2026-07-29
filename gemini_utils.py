@@ -36,7 +36,7 @@ def leer_factura_imagen(imagen_bytes, tipo_mime="image/jpeg"):
         return None
 
     try:
-        model = genai.GenerativeModel("gemini-2.0-flash")
+        model = genai.GenerativeModel("gemini-2.5-flash")
 
         prompt = """
         Analiza esta factura de compra y extrae TODOS los productos/artículos que aparecen.
@@ -98,7 +98,7 @@ def leer_factura_pdf(pdf_bytes):
 
     try:
         # Intentar con Gemini directamente con el PDF
-        model = genai.GenerativeModel("gemini-2.0-flash")
+        model = genai.GenerativeModel("gemini-2.5-flash")
 
         prompt = """
         Analiza esta factura de compra y extrae TODOS los productos/artículos que aparecen.
