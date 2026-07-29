@@ -228,6 +228,18 @@ def init_db():
                 )
             '''))
 
+            conn.execute(text('''
+                CREATE TABLE IF NOT EXISTS Cajeros (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    usuario_id INTEGER NOT NULL,
+                    nombre TEXT NOT NULL,
+                    pin TEXT NOT NULL,
+                    activo BOOLEAN DEFAULT 1,
+                    fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE
+                )
+            '''))
+
         else:
             # ==========================================
             # POSTGRES / SUPABASE
@@ -412,6 +424,18 @@ def init_db():
                 )
             '''))
 
+            conn.execute(text('''
+                CREATE TABLE IF NOT EXISTS Cajeros (
+                    id SERIAL PRIMARY KEY,
+                    usuario_id INTEGER NOT NULL,
+                    nombre TEXT NOT NULL,
+                    pin TEXT NOT NULL,
+                    activo BOOLEAN DEFAULT TRUE,
+                    fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE
+                )
+            '''))
+
         # ==========================================
         # ÍNDICES (SQLite y Postgres)
         # ==========================================
@@ -427,6 +451,7 @@ def init_db():
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_entradas_usuario ON Entradas_Inventario(usuario_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_detalles_entrada ON Detalles_Entrada(entrada_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cierres_caja_usuario ON Cierres_Caja(usuario_id, fecha)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cajeros_usuario ON Cajeros(usuario_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_creditos_usuario ON Creditos(usuario_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_creditos_cliente ON Creditos(cliente_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_creditos_estado ON Creditos(usuario_id, estado)"))
@@ -458,6 +483,14 @@ def init_db():
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS direccion TEXT"))
 
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_usuarios_token ON Usuarios(token_sesion)"))
+
+            # Columna cajero_id en Ventas
+            if is_sqlite:
+                cols_v = [r[1] for r in conn.execute(text("PRAGMA table_info(Ventas)")).fetchall()]
+                if 'cajero_id' not in cols_v:
+                    conn.execute(text("ALTER TABLE Ventas ADD COLUMN cajero_id INTEGER"))
+            else:
+                conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS cajero_id INTEGER"))
         except Exception:
             pass
 
