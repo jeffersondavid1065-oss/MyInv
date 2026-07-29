@@ -380,6 +380,12 @@ with col_der:
                     FROM Detalles_Venta WHERE venta_id = :vid
                 """), con=conn, params={"vid": vid})
 
+                venta_info = conn.execute(text("""
+                    SELECT subtotal, descuento, total, tipo_pago,
+                           monto_efectivo, cambio, fecha, cliente_id
+                    FROM Ventas WHERE id = :vid
+                """), {"vid": vid}).fetchone()
+
             st.write(f"**Venta #{vid}** — {st.session_state.ultima_venta_tipo}")
             if not detalles.empty:
                 st.dataframe(
@@ -395,6 +401,56 @@ with col_der:
             st.success(f"**Total: {formato_cop(st.session_state.ultima_venta_total)}**")
             if st.session_state.ultima_venta_cambio > 0:
                 st.info(f"Cambio: {formato_cop(st.session_state.ultima_venta_cambio)}")
+
+            # Botón de descarga PDF
+            try:
+                from pdf_utils import generar_ticket_venta
+                cfg = st.session_state.get("taller_config", {})
+
+                # Cargar logo_path desde BD si no está en session_state
+                logo_path = cfg.get("logo_path")
+                if not logo_path:
+                    with engine.connect() as conn_logo:
+                        logo_row = conn_logo.execute(
+                            text("SELECT logo_path, nit, telefono, direccion FROM Usuarios WHERE id = :uid"),
+                            {"uid": user_id}
+                        ).fetchone()
+                        if logo_row:
+                            logo_path = logo_row[0]
+                            cfg = {
+                                "logo_path": logo_row[0],
+                                "nit": logo_row[1] or "",
+                                "telefono": logo_row[2] or "",
+                                "direccion": logo_row[3] or "",
+                            }
+
+                if venta_info:
+                    pdf_ticket = generar_ticket_venta(
+                        negocio_nombre=nombre_negocio,
+                        negocio_nit=cfg.get("nit", ""),
+                        negocio_telefono=cfg.get("telefono", ""),
+                        negocio_direccion=cfg.get("direccion", ""),
+                        negocio_logo_path=logo_path,
+                        venta_id=vid,
+                        fecha=venta_info[6],
+                        cliente="",
+                        tipo_pago=venta_info[3],
+                        monto_efectivo=float(venta_info[4] or 0),
+                        cambio=float(venta_info[5] or 0),
+                        df_items=detalles,
+                        subtotal=float(venta_info[0] or 0),
+                        descuento=float(venta_info[1] or 0),
+                        total=float(venta_info[2] or 0),
+                    )
+                    st.download_button(
+                        label="🧾 Descargar Ticket PDF",
+                        data=pdf_ticket,
+                        file_name=f"Ticket_{vid}.pdf",
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
+            except Exception as e:
+                st.caption(f"PDF no disponible: {e}")
 
             if st.button("🖨️ Nueva Venta", use_container_width=True):
                 st.session_state.ultima_venta_id = None
