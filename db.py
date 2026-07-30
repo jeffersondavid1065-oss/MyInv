@@ -61,8 +61,9 @@ def init_db():
                     codigo_barras TEXT,
                     codigo_ref TEXT,
                     categoria TEXT DEFAULT 'General',
-                    stock_actual INTEGER NOT NULL DEFAULT 0,
-                    stock_minimo INTEGER NOT NULL DEFAULT 2,
+                    unidad_medida TEXT DEFAULT 'Unidad',
+                    stock_actual REAL NOT NULL DEFAULT 0,
+                    stock_minimo REAL NOT NULL DEFAULT 2,
                     costo_compra REAL DEFAULT 0,
                     precio_venta REAL NOT NULL DEFAULT 0,
                     activo BOOLEAN DEFAULT 1,
@@ -255,8 +256,9 @@ def init_db():
                     codigo_barras VARCHAR(100),
                     codigo_ref VARCHAR(100),
                     categoria TEXT DEFAULT 'General',
-                    stock_actual INTEGER NOT NULL DEFAULT 0,
-                    stock_minimo INTEGER NOT NULL DEFAULT 2,
+                    unidad_medida VARCHAR(20) DEFAULT 'Unidad',
+                    stock_actual NUMERIC(12,3) NOT NULL DEFAULT 0,
+                    stock_minimo NUMERIC(12,3) NOT NULL DEFAULT 2,
                     costo_compra NUMERIC(12,2) DEFAULT 0,
                     precio_venta NUMERIC(12,2) NOT NULL DEFAULT 0,
                     activo BOOLEAN DEFAULT TRUE,
@@ -429,6 +431,7 @@ def init_db():
         try:
             if is_sqlite:
                 cols = [r[1] for r in conn.execute(text("PRAGMA table_info(Usuarios)")).fetchall()]
+                cols_p = [r[1] for r in conn.execute(text("PRAGMA table_info(Productos)")).fetchall()]
                 if 'token_sesion' not in cols:
                     conn.execute(text("ALTER TABLE Usuarios ADD COLUMN token_sesion TEXT"))
                 if 'logo_path' not in cols:
@@ -439,6 +442,8 @@ def init_db():
                     conn.execute(text("ALTER TABLE Usuarios ADD COLUMN telefono TEXT"))
                 if 'direccion' not in cols:
                     conn.execute(text("ALTER TABLE Usuarios ADD COLUMN direccion TEXT"))
+                if 'unidad_medida' not in cols_p:
+                    conn.execute(text("ALTER TABLE Productos ADD COLUMN unidad_medida TEXT DEFAULT 'Unidad'"))
                 cols_v = [r[1] for r in conn.execute(text("PRAGMA table_info(Ventas)")).fetchall()]
                 if 'cajero_id' not in cols_v:
                     conn.execute(text("ALTER TABLE Ventas ADD COLUMN cajero_id INTEGER"))
@@ -449,6 +454,9 @@ def init_db():
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS telefono TEXT"))
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS direccion TEXT"))
                 conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS cajero_id INTEGER"))
+                conn.execute(text("ALTER TABLE Productos ADD COLUMN IF NOT EXISTS unidad_medida VARCHAR(20) DEFAULT 'Unidad'"))
+                conn.execute(text("ALTER TABLE Productos ALTER COLUMN stock_actual TYPE NUMERIC(12,3)"))
+                conn.execute(text("ALTER TABLE Productos ALTER COLUMN stock_minimo TYPE NUMERIC(12,3)"))
         except Exception:
             pass
 
