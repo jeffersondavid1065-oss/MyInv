@@ -197,13 +197,24 @@ def generar_ticket_venta(
     if df_items is not None and not df_items.empty:
         for _, row in df_items.iterrows():
             nombre = safe_str(row.get('nombre_producto', ''))[:68]
-            cantidad = int(row.get('cantidad', 1))
+            cantidad = float(row.get('cantidad', 1))
             precio_u = float(row.get('precio_unitario', 0))
             subtotal_item = float(row.get('subtotal', 0))
 
+            # Formatear cantidad con unidad si está disponible
+            unidad = safe_str(row.get('unidad_medida', 'Unidad'), 'Unidad')
+            unidades_decimales = {"kg", "g", "lb", "m", "cm", "vara", "pie",
+                                  "L", "mL", "galón", "m²", "m³"}
+            if unidad in unidades_decimales:
+                cant_str = f"{cantidad:.3f}".rstrip('0').rstrip('.') + f" {unidad}"
+            elif unidad and unidad != "Unidad":
+                cant_str = f"{int(cantidad)} {unidad}"
+            else:
+                cant_str = str(int(cantidad))
+
             pdf.set_xy(12, y_item)
             pdf.cell(95, 5, nombre)
-            pdf.cell(25, 5, str(cantidad), align="C")
+            pdf.cell(25, 5, cant_str, align="C")
             pdf.cell(33, 5, f"${precio_u:,.0f}".replace(",", "."), align="R")
             pdf.cell(33, 5, f"${subtotal_item:,.0f}".replace(",", "."), align="R")
             y_item += 5
