@@ -409,15 +409,26 @@ with tab_entradas:
                     um_sel = st.selectbox("Unidad", UNIDADES, index=um_idx, key=f"um_{i}")
                     st.session_state.items_entrada[i]["unidad_medida"] = um_sel
                 with col_f3:
+                    # --- FIX: separar en dos ramas para no mezclar int y float ---
                     es_dec = um_sel in UNIDADES_DECIMALES
-                    cant_nueva = st.number_input(
-                        f"Cant. ({um_sel})",
-                        min_value=0.0 if es_dec else 1,
-                        value=float(item.get("cantidad", 1)),
-                        step=0.5 if es_dec else 1,
-                        key=f"cant_{i}"
-                    )
-                    st.session_state.items_entrada[i]["cantidad"] = cant_nueva
+                    if es_dec:
+                        cant_nueva = st.number_input(
+                            f"Cant. ({um_sel})",
+                            min_value=0.0,
+                            value=float(item.get("cantidad", 1)),
+                            step=0.5,
+                            key=f"cant_{i}"
+                        )
+                    else:
+                        cant_nueva = st.number_input(
+                            f"Cant. ({um_sel})",
+                            min_value=0,
+                            value=int(round(float(item.get("cantidad", 1)))),
+                            step=1,
+                            key=f"cant_{i}"
+                        )
+                    st.session_state.items_entrada[i]["cantidad"] = float(cant_nueva)
+                    # --- FIN FIX ---
                 with col_f4:
                     costo_nuevo = st.number_input(
                         f"Costo/$/{um_sel}", min_value=0.0,
