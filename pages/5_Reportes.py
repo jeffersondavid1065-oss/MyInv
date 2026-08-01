@@ -157,7 +157,10 @@ with tab_dia:
                 'total': 'Total ($)', 'tipo_pago': 'Pago', 'estado': 'Estado'
             }),
             use_container_width=True,
-            hide_index=True
+            hide_index=True,
+            column_config={
+                "Total ($)": st.column_config.NumberColumn(format="$%,d"),
+            }
         )
 
         # Ver detalle de una venta
@@ -182,7 +185,11 @@ with tab_dia:
                     'nombre_producto': 'Producto', 'cantidad': 'Cant.',
                     'precio_unitario': 'Precio Unit.', 'subtotal': 'Subtotal'
                 }),
-                use_container_width=True, hide_index=True
+                use_container_width=True, hide_index=True,
+                column_config={
+                    "Precio Unit.": st.column_config.NumberColumn(format="$%,d"),
+                    "Subtotal": st.column_config.NumberColumn(format="$%,d"),
+                }
             )
     else:
         st.info("No hay ventas registradas hoy todavía.")
@@ -262,7 +269,10 @@ with tab_periodo:
                 'id': 'ID', 'fecha': 'Fecha', 'cliente': 'Cliente',
                 'total': 'Total ($)', 'tipo_pago': 'Pago', 'estado': 'Estado'
             }),
-            use_container_width=True, hide_index=True
+            use_container_width=True, hide_index=True,
+            column_config={
+                "Total ($)": st.column_config.NumberColumn(format="$%,d"),
+            }
         )
 
         # Descargar Excel
@@ -321,7 +331,10 @@ with tab_productos:
                     'unidades_vendidas': 'Unidades Vendidas',
                     'total_vendido': 'Total Vendido ($)'
                 }),
-                use_container_width=True, hide_index=True
+                use_container_width=True, hide_index=True,
+                column_config={
+                    "Total Vendido ($)": st.column_config.NumberColumn(format="$%,d"),
+                }
             )
         else:
             st.info("No hay ventas en este período.")
@@ -356,7 +369,11 @@ with tab_cartera:
                 'creditos_activos': 'Créditos', 'total_prestado': 'Total Prestado ($)',
                 'saldo_pendiente': 'Saldo Pendiente ($)', 'proxima_fecha': 'Próximo Vence'
             }),
-            use_container_width=True, hide_index=True
+            use_container_width=True, hide_index=True,
+            column_config={
+                "Total Prestado ($)": st.column_config.NumberColumn(format="$%,d"),
+                "Saldo Pendiente ($)": st.column_config.NumberColumn(format="$%,d"),
+            }
         )
 
         # Descargar cartera en Excel
