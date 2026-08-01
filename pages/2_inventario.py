@@ -103,22 +103,29 @@ with tab_stock:
             df_show['codigo_ref'] = df_show['codigo_ref'].fillna("").astype(str).replace("None", "")
             df_show['categoria'] = df_show['categoria'].fillna("General")
 
-            # Agregar columna unidad_medida si no existe (productos creados antes de la actualización)
             if 'unidad_medida' not in df_show.columns:
                 df_show['unidad_medida'] = 'Unidad'
             else:
                 df_show['unidad_medida'] = df_show['unidad_medida'].fillna("Unidad")
 
+            # Calcular ganancia
+            df_show['ganancia'] = df_show['precio_venta'] - df_show['costo_compra']
+            df_show['pct_ganancia'] = df_show.apply(
+                lambda r: round((r['ganancia'] / r['costo_compra']) * 100, 1)
+                if r['costo_compra'] > 0 else 0.0, axis=1
+            )
+
             cols_mostrar = ['id', 'nombre', 'codigo_barras', 'codigo_ref',
                             'categoria', 'unidad_medida', 'stock_actual',
-                            'stock_minimo', 'costo_compra', 'precio_venta']
+                            'stock_minimo', 'costo_compra', 'precio_venta',
+                            'ganancia', 'pct_ganancia']
             cols_disponibles = [c for c in cols_mostrar if c in df_show.columns]
 
             df_edit = st.data_editor(
                 df_show[cols_disponibles],
                 hide_index=True,
                 use_container_width=True,
-                disabled=["id"],
+                disabled=["id", "ganancia", "pct_ganancia"],
                 column_config={
                     "id": None,
                     "nombre": "Producto",
@@ -126,8 +133,7 @@ with tab_stock:
                     "codigo_ref": "Referencia",
                     "categoria": "Categoría",
                     "unidad_medida": st.column_config.SelectboxColumn(
-                        "Unidad",
-                        options=UNIDADES,
+                        "Unidad", options=UNIDADES,
                         help="Ej: kg para granel, m para cable, Unidad para repuestos"
                     ),
                     "stock_actual": st.column_config.NumberColumn(
@@ -138,6 +144,8 @@ with tab_stock:
                     ),
                     "costo_compra": st.column_config.NumberColumn("Costo ($)", format="$%d"),
                     "precio_venta": st.column_config.NumberColumn("Precio Venta ($)", format="$%d"),
+                    "ganancia": st.column_config.NumberColumn("Ganancia ($)", format="$%d"),
+                    "pct_ganancia": st.column_config.NumberColumn("% Ganancia", format="%.1f%%"),
                 },
                 key=f"editor_inv_{busqueda_inv}_{filtro_estado}"
             )
@@ -156,14 +164,18 @@ with tab_stock:
                                     costo_compra = :costo, precio_venta = :pvp
                                 WHERE id = :id AND usuario_id = :uid
                             """), {
-                                "nom": row['nombre'], "cod": row['codigo_barras'] or None,
-                                "ref": row['codigo_ref'] or None, "cat": row['categoria'],
+                                "nom": row['nombre'],
+                                "cod": row['codigo_barras'] or None,
+                                "ref": row['codigo_ref'] or None,
+                                "cat": row['categoria'],
                                 "um": um,
                                 "st_act": float(row['stock_actual']),
                                 "st_min": float(row['stock_minimo']),
                                 "costo": float(row['costo_compra']),
                                 "pvp": float(row['precio_venta']),
-                                "id": int(row['id']), "uid": user_id
+                                # ganancia y pct_ganancia son calculadas, NO se guardan
+                                "id": int(row['id']),
+                                "uid": user_id
                             })
                     invalidar_cache_productos()
                     st.success("Inventario actualizado correctamente.")
@@ -409,26 +421,15 @@ with tab_entradas:
                     um_sel = st.selectbox("Unidad", UNIDADES, index=um_idx, key=f"um_{i}")
                     st.session_state.items_entrada[i]["unidad_medida"] = um_sel
                 with col_f3:
-                    # --- FIX: separar en dos ramas para no mezclar int y float ---
                     es_dec = um_sel in UNIDADES_DECIMALES
-                    if es_dec:
-                        cant_nueva = st.number_input(
-                            f"Cant. ({um_sel})",
-                            min_value=0.0,
-                            value=float(item.get("cantidad", 1)),
-                            step=0.5,
-                            key=f"cant_{i}"
-                        )
-                    else:
-                        cant_nueva = st.number_input(
-                            f"Cant. ({um_sel})",
-                            min_value=0,
-                            value=int(round(float(item.get("cantidad", 1)))),
-                            step=1,
-                            key=f"cant_{i}"
-                        )
-                    st.session_state.items_entrada[i]["cantidad"] = float(cant_nueva)
-                    # --- FIN FIX ---
+                    cant_nueva = st.number_input(
+                        f"Cant. ({um_sel})",
+                        min_value=0.0 if es_dec else 1,
+                        value=float(item.get("cantidad", 1)),
+                        step=0.5 if es_dec else 1,
+                        key=f"cant_{i}"
+                    )
+                    st.session_state.items_entrada[i]["cantidad"] = cant_nueva
                 with col_f4:
                     costo_nuevo = st.number_input(
                         f"Costo/$/{um_sel}", min_value=0.0,
