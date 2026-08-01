@@ -139,14 +139,14 @@ with tab_stock:
                         help="Ej: kg para granel, m para cable, Unidad para repuestos"
                     ),
                     "stock_actual": st.column_config.NumberColumn(
-                        "Stock", min_value=0
+                        "Stock", min_value=0, format="localized"
                     ),
                     "stock_minimo": st.column_config.NumberColumn(
-                        "Stock Mín.", min_value=0
+                        "Stock Mín.", min_value=0, format="localized"
                     ),
-                    "costo_compra": st.column_config.NumberColumn("Costo ($)", format="$%d"),
-                    "precio_venta": st.column_config.NumberColumn("Precio Venta ($)", format="$%d"),
-                    "ganancia": st.column_config.NumberColumn("Ganancia ($)", format="$%d"),
+                    "costo_compra": st.column_config.NumberColumn("Costo ($)", format="$%,d"),
+                    "precio_venta": st.column_config.NumberColumn("Precio Venta ($)", format="$%,d"),
+                    "ganancia": st.column_config.NumberColumn("Ganancia ($)", format="$%,d"),
                     "pct_ganancia": st.column_config.NumberColumn("% Ganancia", format="%.1f%%"),
                 },
                 key=f"editor_inv_{busqueda_inv}_{filtro_estado}"
