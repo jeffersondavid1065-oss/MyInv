@@ -50,13 +50,15 @@ tab_stock, tab_nuevo, tab_entradas = st.tabs([
 with tab_stock:
     metricas = obtener_metricas_inventario(user_id)
     if metricas:
-        col1, col2, col3, col4, col5 = st.columns(5)
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
         col1.metric("Total Productos", int(metricas[2]))
         col2.metric("Inversión (Costo)", formato_cop(metricas[0]))
         col3.metric("Valor Comercial", formato_cop(metricas[1]))
-        col4.metric("Agotados", int(metricas[3]),
+        ganancia_inv = float(metricas[1]) - float(metricas[0])
+        col4.metric("Ganancia Potencial", formato_cop(ganancia_inv))
+        col5.metric("Agotados", int(metricas[3]),
                     delta="⚠️" if int(metricas[3]) > 0 else None, delta_color="inverse")
-        col5.metric("Por Agotarse", int(metricas[4]),
+        col6.metric("Por Agotarse", int(metricas[4]),
                     delta="⚠️" if int(metricas[4]) > 0 else None, delta_color="inverse")
 
     st.markdown("---")
