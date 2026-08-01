@@ -133,11 +133,13 @@ with tab_creditos:
 
                 col_ab1, col_ab2 = st.columns(2)
                 with col_ab1:
+                    min_abono = min(1000.0, float(saldo_actual))
                     monto_abono = st.number_input(
                         "Monto del abono ($)",
-                        min_value=1000.0,
+                        min_value=min_abono,
                         max_value=float(saldo_actual),
-                        step=1000.0
+                        value=min_abono,
+                        step=min_abono
                     )
                 with col_ab2:
                     notas_abono = st.text_input("Notas (opcional)")
