@@ -4,8 +4,15 @@ from io import BytesIO
 from fpdf import FPDF
 from sqlalchemy import text
 from db import obtener_conexion
-from queries import obtener_todos_productos
+from queries import obtener_todos_productos, invalidar_cache_productos
 from utils import verificar_auth
+
+try:
+    import barcode as barcode_lib
+    from barcode.writer import ImageWriter
+    BARCODE_DISPONIBLE = True
+except ImportError:
+    BARCODE_DISPONIBLE = False
 
 st.set_page_config(page_title="Etiquetas de Precio", layout="wide")
 user_id, nombre_negocio = verificar_auth()
@@ -14,6 +21,30 @@ engine = obtener_conexion()
 
 def formato_cop(numero):
     return f"${float(numero):,.0f}".replace(",", ".")
+
+
+def generar_codigo_interno(producto_id):
+    """Código numérico interno único para productos que llegaron sin código de fábrica."""
+    return f"{int(producto_id):08d}"
+
+
+def generar_imagen_codigo_barras(codigo, alto_modulo=8.0):
+    """Genera una imagen (en memoria) del código de barras Code128 para el PDF."""
+    if not BARCODE_DISPONIBLE or not codigo:
+        return None
+    try:
+        Code128 = barcode_lib.get_barcode_class("code128")
+        buf = BytesIO()
+        Code128(str(codigo), writer=ImageWriter()).write(buf, options={
+            "module_height": alto_modulo,
+            "module_width": 0.28,
+            "quiet_zone": 1.0,
+            "write_text": False,
+        })
+        buf.seek(0)
+        return buf
+    except Exception:
+        return None
 
 
 def generar_etiquetas_pdf(productos_sel, nombre_negocio, tamano, mostrar_codigo, mostrar_nombre_negocio):
@@ -31,9 +62,9 @@ def generar_etiquetas_pdf(productos_sel, nombre_negocio, tamano, mostrar_codigo,
 
     # Configuración por tamaño
     config = {
-        "pequena": {"w": 44, "h": 22, "cols": 4, "font_nombre": 7, "font_precio": 11, "font_cod": 6},
-        "mediana": {"w": 63, "h": 30, "cols": 3, "font_nombre": 8, "font_precio": 14, "font_cod": 7},
-        "grande":  {"w": 90, "h": 40, "cols": 2, "font_nombre": 10, "font_precio": 18, "font_cod": 8},
+        "pequena": {"w": 44, "h": 22, "cols": 4, "font_nombre": 7, "font_precio": 11, "font_cod": 6, "barcode_h": 6, "barcode_mod_h": 6},
+        "mediana": {"w": 63, "h": 30, "cols": 3, "font_nombre": 8, "font_precio": 14, "font_cod": 7, "barcode_h": 8, "barcode_mod_h": 9},
+        "grande":  {"w": 90, "h": 40, "cols": 2, "font_nombre": 10, "font_precio": 18, "font_cod": 8, "barcode_h": 10, "barcode_mod_h": 12},
     }
     cfg = config[tamano]
 
@@ -74,19 +105,26 @@ def generar_etiquetas_pdf(productos_sel, nombre_negocio, tamano, mostrar_codigo,
         pdf.multi_cell(cfg['w'] - 2, 3.5, nombre, align="C")
 
         # Precio (grande y destacado)
+        tiene_codigo = mostrar_codigo and bool(codigo)
+        zona_inferior = (cfg['barcode_h'] + 3.5) if tiene_codigo else 0
+
         pdf.set_font("Helvetica", "B", cfg['font_precio'])
         pdf.set_text_color(20, 20, 20)
         precio_str = formato_cop(precio)
-        y_precio = y_actual + cfg['h'] - (10 if mostrar_codigo and codigo else 7)
+        y_precio = y_actual + cfg['h'] - zona_inferior - 7
         pdf.set_xy(x_actual + 1, y_precio)
         pdf.cell(cfg['w'] - 2, 6, precio_str, align="C")
 
-        # Código de barras (texto)
-        if mostrar_codigo and codigo:
+        # Código de barras (gráfico escaneable + texto)
+        if tiene_codigo:
+            y_barcode = y_actual + cfg['h'] - zona_inferior
+            imagen_barras = generar_imagen_codigo_barras(codigo, alto_modulo=cfg['barcode_mod_h'])
+            if imagen_barras is not None:
+                pdf.image(imagen_barras, x=x_actual + 4, y=y_barcode, w=cfg['w'] - 8, h=cfg['barcode_h'])
             pdf.set_font("Helvetica", "", cfg['font_cod'])
-            pdf.set_text_color(100, 100, 100)
-            pdf.set_xy(x_actual + 1, y_actual + cfg['h'] - 4)
-            pdf.cell(cfg['w'] - 2, 3, f"Cód: {codigo}", align="C")
+            pdf.set_text_color(90, 90, 90)
+            pdf.set_xy(x_actual + 1, y_barcode + cfg['barcode_h'])
+            pdf.cell(cfg['w'] - 2, 3, codigo, align="C")
 
         # Avanzar posición
         col_actual += 1
@@ -124,7 +162,7 @@ with col_conf1:
     )
 
 with col_conf2:
-    mostrar_codigo = st.checkbox("Mostrar código de barras/ref", value=True)
+    mostrar_codigo = st.checkbox("Imprimir código de barras escaneable", value=True)
     mostrar_nombre_negocio = st.checkbox("Mostrar nombre del negocio", value=True)
 
 with col_conf3:
@@ -146,6 +184,34 @@ df_todos = obtener_todos_productos(user_id)
 if df_todos.empty:
     st.info("No tienes productos registrados.")
 else:
+    sin_codigo_mask = (
+        df_todos['codigo_barras'].isna() | (df_todos['codigo_barras'].astype(str).str.strip() == "")
+    ) & (
+        df_todos['codigo_ref'].isna() | (df_todos['codigo_ref'].astype(str).str.strip() == "")
+    )
+    productos_sin_codigo = df_todos[sin_codigo_mask]
+
+    if not productos_sin_codigo.empty:
+        st.warning(
+            f"⚠️ **{len(productos_sin_codigo)} producto(s)** no tienen código de barras "
+            "(llegaron sin código en la entrada de mercancía). Genérales uno interno para poder "
+            "escanearlos en el punto de venta y agilizar la venta."
+        )
+        if st.button(f"🏷️ Generar código para los {len(productos_sin_codigo)} producto(s) sin código", type="primary"):
+            with engine.begin() as conn:
+                for _, row in productos_sin_codigo.iterrows():
+                    conn.execute(text("""
+                        UPDATE Productos SET codigo_barras = :cod
+                        WHERE id = :id AND usuario_id = :uid
+                    """), {
+                        "cod": generar_codigo_interno(row['id']),
+                        "id": int(row['id']),
+                        "uid": user_id
+                    })
+            invalidar_cache_productos()
+            st.success("Códigos de barras generados. Ya puedes imprimir las etiquetas.")
+            st.rerun()
+
     col_filtro1, col_filtro2 = st.columns(2)
     with col_filtro1:
         busq_etiq = st.text_input("Buscar producto", placeholder="Nombre o categoría...")
@@ -185,8 +251,10 @@ else:
     for idx, (i, prod) in enumerate(df_filtrado.iterrows()):
         col = cols[idx % 3]
         with col:
+            tiene_cod = bool(str(prod.get('codigo_barras') or prod.get('codigo_ref') or '').strip())
+            etiqueta_cod = "" if tiene_cod else " ⚠️ sin código"
             seleccionado = st.checkbox(
-                f"**{prod['nombre']}**\n{formato_cop(prod['precio_venta'])}",
+                f"**{prod['nombre']}**\n{formato_cop(prod['precio_venta'])}{etiqueta_cod}",
                 key=f"etiq_{i}",
                 value=st.session_state.get(f"etiq_{i}", False)
             )
