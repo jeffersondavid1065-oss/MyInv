@@ -424,10 +424,11 @@ with tab_entradas:
                     st.session_state.items_entrada[i]["unidad_medida"] = um_sel
                 with col_f3:
                     es_dec = um_sel in UNIDADES_DECIMALES
+                    cant_actual = item.get("cantidad", 1)
                     cant_nueva = st.number_input(
                         f"Cant. ({um_sel})",
                         min_value=0.0 if es_dec else 1,
-                        value=float(item.get("cantidad", 1)),
+                        value=float(cant_actual) if es_dec else int(float(cant_actual)),
                         step=0.5 if es_dec else 1,
                         key=f"cant_{i}"
                     )
