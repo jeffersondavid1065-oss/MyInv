@@ -57,8 +57,8 @@ def generar_etiquetas_pdf(productos_sel, nombre_negocio, tamano, mostrar_codigo,
     - grande:  8x4 cm (3 por fila)
     """
     pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=False)
     pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=5)
 
     # Configuración por tamaño
     config = {
@@ -78,6 +78,10 @@ def generar_etiquetas_pdf(productos_sel, nombre_negocio, tamano, mostrar_codigo,
     col_actual = 0
 
     for prod in productos_sel:
+        if col_actual == 0 and y_actual + cfg['h'] > pdf.h - margen_y:
+            pdf.add_page()
+            y_actual = margen_y
+
         nombre = str(prod['nombre'])[:35]
         precio = float(prod['precio_venta'])
         costo = float(prod.get('costo_compra', 0))
