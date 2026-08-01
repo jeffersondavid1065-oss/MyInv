@@ -82,7 +82,7 @@ def obtener_productos_activos(uid):
         return pd.read_sql_query(
             text("""
                 SELECT id, nombre, codigo_barras, codigo_ref, categoria,
-                       stock_actual, precio_venta, costo_compra, stock_minimo
+                       stock_actual, stock_minimo, precio_venta, costo_compra
                 FROM Productos
                 WHERE usuario_id = :uid AND activo = TRUE AND stock_actual > 0
                 ORDER BY nombre ASC
@@ -99,7 +99,7 @@ def obtener_todos_productos(uid):
         return pd.read_sql_query(
             text("""
                 SELECT id, nombre, descripcion, codigo_barras, codigo_ref,
-                       categoria, stock_actual, stock_minimo,
+                       categoria, unidad_medida, stock_actual, stock_minimo,
                        costo_compra, precio_venta, activo
                 FROM Productos
                 WHERE usuario_id = :uid
