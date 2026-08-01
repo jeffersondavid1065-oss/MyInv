@@ -139,10 +139,10 @@ with tab_stock:
                         help="Ej: kg para granel, m para cable, Unidad para repuestos"
                     ),
                     "stock_actual": st.column_config.NumberColumn(
-                        "Stock", min_value=0, step=0.001, format="%.3f"
+                        "Stock", min_value=0
                     ),
                     "stock_minimo": st.column_config.NumberColumn(
-                        "Stock Mín.", min_value=0, step=0.001, format="%.3f"
+                        "Stock Mín.", min_value=0
                     ),
                     "costo_compra": st.column_config.NumberColumn("Costo ($)", format="$%d"),
                     "precio_venta": st.column_config.NumberColumn("Precio Venta ($)", format="$%d"),
