@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from sqlalchemy import text
 from db import obtener_conexion
 from utils import verificar_auth
+from queries import obtener_ganancia_dia
 from tz_utils import hoy_bogota, ahora_bogota_naive
 
 st.set_page_config(page_title="Cierre de Caja", layout="wide")
@@ -81,6 +82,14 @@ with tab_cierre:
 
         if ventas_anuladas > 0:
             st.warning(f"⚠️ {ventas_anuladas} venta(s) anulada(s) hoy.")
+
+        ingresos_dia, costos_dia, ganancia_dia = obtener_ganancia_dia(user_id, fecha_cierre.strftime('%Y-%m-%d'))
+        col_g1, col_g2 = st.columns([1, 3])
+        with col_g1:
+            st.metric("📈 Ganancia del Día", formato_cop(ganancia_dia),
+                       delta_color="inverse" if ganancia_dia < 0 else "normal")
+        with col_g2:
+            st.caption(f"Ingresos: {formato_cop(ingresos_dia)} — Costo de mercancía vendida: {formato_cop(costos_dia)}")
 
         # Ver detalle de ventas del día
         with st.expander("Ver detalle de ventas del día"):

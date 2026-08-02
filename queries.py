@@ -1,3 +1,4 @@
+import calendar
 import streamlit as st
 import pandas as pd
 from sqlalchemy import text
@@ -263,15 +264,16 @@ def obtener_top_productos(uid, fecha_inicio, fecha_fin, limite=10):
 def obtener_metricas_mes(uid, año, mes):
     """Ingresos, costos y margen del mes."""
     engine = obtener_conexion()
+    f_ini = date(año, mes, 1).strftime('%Y-%m-%d')
+    f_fin = date(año, mes, calendar.monthrange(año, mes)[1]).strftime('%Y-%m-%d')
     with engine.connect() as conn:
         ingresos = conn.execute(text("""
             SELECT COALESCE(SUM(total), 0)
             FROM Ventas
             WHERE usuario_id = :uid
             AND estado != 'Anulada'
-            AND EXTRACT(YEAR FROM fecha) = :año
-            AND EXTRACT(MONTH FROM fecha) = :mes
-        """), {"uid": uid, "año": año, "mes": mes}).scalar()
+            AND DATE(fecha) >= :f_ini AND DATE(fecha) <= :f_fin
+        """), {"uid": uid, "f_ini": f_ini, "f_fin": f_fin}).scalar()
 
         costos = conn.execute(text("""
             SELECT COALESCE(SUM(dv.costo_unitario * dv.cantidad), 0)
@@ -279,13 +281,62 @@ def obtener_metricas_mes(uid, año, mes):
             JOIN Ventas v ON dv.venta_id = v.id
             WHERE v.usuario_id = :uid
             AND v.estado != 'Anulada'
-            AND EXTRACT(YEAR FROM v.fecha) = :año
-            AND EXTRACT(MONTH FROM v.fecha) = :mes
-        """), {"uid": uid, "año": año, "mes": mes}).scalar()
+            AND DATE(v.fecha) >= :f_ini AND DATE(v.fecha) <= :f_fin
+        """), {"uid": uid, "f_ini": f_ini, "f_fin": f_fin}).scalar()
 
     ingresos = float(ingresos) if ingresos else 0
     costos = float(costos) if costos else 0
     return ingresos, costos, ingresos - costos
+
+
+@st.cache_data(ttl=60)
+def obtener_ganancia_dia(uid, fecha):
+    """Ingresos, costos y ganancia de un día específico (para Cierre de Caja)."""
+    engine = obtener_conexion()
+    with engine.connect() as conn:
+        ingresos = conn.execute(text("""
+            SELECT COALESCE(SUM(total), 0)
+            FROM Ventas
+            WHERE usuario_id = :uid
+            AND estado != 'Anulada'
+            AND DATE(fecha) = :fecha
+        """), {"uid": uid, "fecha": fecha}).scalar()
+
+        costos = conn.execute(text("""
+            SELECT COALESCE(SUM(dv.costo_unitario * dv.cantidad), 0)
+            FROM Detalles_Venta dv
+            JOIN Ventas v ON dv.venta_id = v.id
+            WHERE v.usuario_id = :uid
+            AND v.estado != 'Anulada'
+            AND DATE(v.fecha) = :fecha
+        """), {"uid": uid, "fecha": fecha}).scalar()
+
+    ingresos = float(ingresos) if ingresos else 0
+    costos = float(costos) if costos else 0
+    return ingresos, costos, ingresos - costos
+
+
+@st.cache_data(ttl=120)
+def obtener_ganancia_acumulada(uid):
+    """Ganancia bruta acumulada histórica: ingresos - costos de todas las ventas no anuladas."""
+    engine = obtener_conexion()
+    with engine.connect() as conn:
+        ingresos = conn.execute(text("""
+            SELECT COALESCE(SUM(total), 0)
+            FROM Ventas
+            WHERE usuario_id = :uid AND estado != 'Anulada'
+        """), {"uid": uid}).scalar()
+
+        costos = conn.execute(text("""
+            SELECT COALESCE(SUM(dv.costo_unitario * dv.cantidad), 0)
+            FROM Detalles_Venta dv
+            JOIN Ventas v ON dv.venta_id = v.id
+            WHERE v.usuario_id = :uid AND v.estado != 'Anulada'
+        """), {"uid": uid}).scalar()
+
+    ingresos = float(ingresos) if ingresos else 0
+    costos = float(costos) if costos else 0
+    return ingresos - costos
 
 
 # ==========================================
@@ -308,6 +359,8 @@ def invalidar_cache_ventas():
     obtener_metricas_mes.clear()
     obtener_productos_activos.clear()
     obtener_metricas_inventario.clear()
+    obtener_ganancia_dia.clear()
+    obtener_ganancia_acumulada.clear()
 
 
 def invalidar_cache_clientes():
