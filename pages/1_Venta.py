@@ -677,6 +677,31 @@ with tab_devolucion:
     st.subheader("Devoluciones y Anulaciones")
     st.caption("Busca la venta por número para anularla. El stock se restaura automáticamente.")
 
+    with engine.connect() as conn:
+        df_hoy_dev = pd.read_sql_query(text("""
+            SELECT v.id, v.fecha, COALESCE(cl.nombre, 'Venta directa') as cliente,
+                   v.total, v.tipo_pago
+            FROM Ventas v
+            LEFT JOIN Clientes cl ON v.cliente_id = cl.id
+            WHERE v.usuario_id = :uid
+            AND DATE(v.fecha) = :hoy
+            AND v.estado != 'Anulada'
+            ORDER BY v.fecha DESC
+        """), con=conn, params={"uid": user_id, "hoy": hoy_bogota().strftime('%Y-%m-%d')})
+
+    if not df_hoy_dev.empty:
+        st.markdown("**Ventas de hoy** (para identificar el número de venta):")
+        st.dataframe(
+            df_hoy_dev.assign(total=df_hoy_dev['total'].apply(formato_cop)).rename(columns={
+                'id': 'N°', 'fecha': 'Hora', 'cliente': 'Cliente',
+                'total': 'Total', 'tipo_pago': 'Pago'
+            }),
+            hide_index=True, use_container_width=True
+        )
+    else:
+        st.caption("No hay ventas registradas hoy todavía.")
+
+    st.markdown("---")
     col_d1, col_d2 = st.columns(2)
     with col_d1:
         venta_num = st.text_input("Número de venta", placeholder="Ej: 25")
