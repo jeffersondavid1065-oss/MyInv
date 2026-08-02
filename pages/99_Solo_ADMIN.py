@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from sqlalchemy import text
 from db import obtener_conexion
 from utils import aplicar_estilos
+from tz_utils import hoy_bogota
 
 st.set_page_config(page_title="Administración - MyAlmacén", layout="wide")
 aplicar_estilos()
@@ -79,7 +80,7 @@ if not df_almacenes.empty:
 
             with col_a1:
                 if st.button("✅ Activar 30 días", type="primary", use_container_width=True):
-                    nueva_fecha = date.today() + timedelta(days=30)
+                    nueva_fecha = hoy_bogota() + timedelta(days=30)
                     try:
                         with engine.begin() as conn:
                             conn.execute(
@@ -94,7 +95,7 @@ if not df_almacenes.empty:
 
             with col_a2:
                 if st.button("🚫 Suspender", use_container_width=True):
-                    fecha_vencida = date.today() - timedelta(days=1)
+                    fecha_vencida = hoy_bogota() - timedelta(days=1)
                     try:
                         with engine.begin() as conn:
                             conn.execute(
@@ -109,7 +110,7 @@ if not df_almacenes.empty:
 
             # Extender fecha personalizada
             st.markdown("**O elige una fecha específica:**")
-            fecha_custom = st.date_input("Fecha de corte", value=date.today() + timedelta(days=30))
+            fecha_custom = st.date_input("Fecha de corte", value=hoy_bogota() + timedelta(days=30))
             if st.button("Guardar Fecha", use_container_width=True):
                 try:
                     with engine.begin() as conn:

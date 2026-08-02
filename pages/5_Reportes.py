@@ -12,6 +12,7 @@ from queries import (
     obtener_metricas_mes,
 )
 from utils import aplicar_estilos, verificar_auth
+from tz_utils import hoy_bogota, ahora_bogota
 
 st.set_page_config(page_title="Reportes", layout="wide")
 aplicar_estilos()
@@ -128,9 +129,9 @@ tab_dia, tab_periodo, tab_productos, tab_cartera = st.tabs([
 # TAB 1: VENTAS DEL DÍA
 # ==========================================
 with tab_dia:
-    st.subheader(f"Ventas de Hoy — {date.today().strftime('%d/%m/%Y')}")
+    st.subheader(f"Ventas de Hoy — {hoy_bogota().strftime('%d/%m/%Y')}")
 
-    hoy = date.today()
+    hoy = hoy_bogota()
     df_hoy = obtener_ventas_periodo(user_id, hoy, hoy)
 
     if not df_hoy.empty:
@@ -202,11 +203,11 @@ with tab_periodo:
 
     col_f1, col_f2 = st.columns(2)
     with col_f1:
-        hoy = date.today()
+        hoy = hoy_bogota()
         hace_30 = hoy - timedelta(days=30)
         fechas_rango = st.date_input("Rango de fechas", [hace_30, hoy], key="fechas_periodo")
     with col_f2:
-        hoy_dt = datetime.today()
+        hoy_dt = ahora_bogota()
         mes_sel = st.selectbox("O selecciona un mes", range(1, 13),
                                index=hoy_dt.month - 1,
                                format_func=lambda m: ["Enero", "Febrero", "Marzo", "Abril",
@@ -227,7 +228,7 @@ with tab_periodo:
         if len(fechas_rango) == 2:
             fecha_ini_rep, fecha_fin_rep = fechas_rango
         else:
-            fecha_ini_rep = fecha_fin_rep = date.today()
+            fecha_ini_rep = fecha_fin_rep = hoy_bogota()
 
     df_periodo = obtener_ventas_periodo(user_id, fecha_ini_rep, fecha_fin_rep)
 
@@ -299,7 +300,7 @@ with tab_productos:
 
     col_tp1, col_tp2 = st.columns(2)
     with col_tp1:
-        hoy = date.today()
+        hoy = hoy_bogota()
         hace_30 = hoy - timedelta(days=30)
         fechas_top = st.date_input("Período", [hace_30, hoy], key="fechas_top")
     with col_tp2:
@@ -381,7 +382,7 @@ with tab_cartera:
         ws_c = wb_c.active
         ws_c.title = "Cartera"
         ws_c.append(["REPORTE DE CARTERA — " + nombre_negocio])
-        ws_c.append([f"Generado: {date.today().strftime('%d/%m/%Y')}"])
+        ws_c.append([f"Generado: {hoy_bogota().strftime('%d/%m/%Y')}"])
         ws_c.append([])
         ws_c.append(["Cliente", "Teléfono", "Créditos Activos", "Total Prestado", "Saldo Pendiente", "Próximo Vence"])
         for _, row in df_cartera.iterrows():
@@ -402,7 +403,7 @@ with tab_cartera:
         st.download_button(
             label="📥 Descargar Cartera en Excel",
             data=buf_c,
-            file_name=f"Cartera_{date.today()}.xlsx",
+            file_name=f"Cartera_{hoy_bogota()}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )

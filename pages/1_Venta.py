@@ -12,6 +12,7 @@ from queries import (
     invalidar_cache_productos,
 )
 from utils import aplicar_estilos, verificar_auth
+from tz_utils import hoy_bogota, ahora_bogota_naive
 
 st.set_page_config(page_title="Punto de Venta", layout="wide")
 aplicar_estilos()
@@ -351,7 +352,7 @@ with tab_pos:
             cliente_id = None
             tipo_cuota = "Libre"
             valor_cuota = 0
-            fecha_limite = date.today()
+            fecha_limite = hoy_bogota()
 
             if tipo_pago == "Efectivo":
                 monto_efectivo_input = st.number_input(
@@ -379,7 +380,7 @@ with tab_pos:
                     tipo_cuota = st.selectbox("Tipo de cuota", ["Libre", "Semanal", "Quincenal", "Mensual"])
                     if tipo_cuota != "Libre":
                         valor_cuota = st.number_input("Valor por cuota ($)", min_value=0.0, step=10000.0)
-                    fecha_limite = st.date_input("Fecha límite", value=date.today())
+                    fecha_limite = st.date_input("Fecha límite", value=hoy_bogota())
                 else:
                     st.warning("No tienes clientes registrados.")
                     tipo_pago = None
@@ -400,29 +401,31 @@ with tab_pos:
                         is_sqlite = "sqlite" in str(engine.url)
                         estado_venta = "Credito" if tipo_pago == "Credito" else "Pagada"
 
+                        fecha_venta = ahora_bogota_naive()
+
                         if is_sqlite:
                             cur = conn.execute(text("""
                                 INSERT INTO Ventas
                                 (usuario_id, cliente_id, subtotal, descuento, total,
-                                 tipo_pago, monto_efectivo, monto_transferencia, cambio, estado, cajero_id)
+                                 tipo_pago, monto_efectivo, monto_transferencia, cambio, estado, cajero_id, fecha)
                                 VALUES (:uid, :cid, :sub, :desc, :total,
-                                        :tipo, :efec, :trans, :cambio, :est, :cajero)
+                                        :tipo, :efec, :trans, :cambio, :est, :cajero, :fecha)
                             """), {
                                 "uid": user_id, "cid": cliente_id,
                                 "sub": total_carrito, "desc": desc_global,
                                 "total": total_final, "tipo": tipo_pago,
                                 "efec": monto_efectivo, "trans": monto_transferencia,
                                 "cambio": cambio, "est": estado_venta,
-                                "cajero": cajero_id_actual
+                                "cajero": cajero_id_actual, "fecha": fecha_venta
                             })
                             venta_id = cur.lastrowid
                         else:
                             res = conn.execute(text("""
                                 INSERT INTO Ventas
                                 (usuario_id, cliente_id, subtotal, descuento, total,
-                                 tipo_pago, monto_efectivo, monto_transferencia, cambio, estado, cajero_id)
+                                 tipo_pago, monto_efectivo, monto_transferencia, cambio, estado, cajero_id, fecha)
                                 VALUES (:uid, :cid, :sub, :desc, :total,
-                                        :tipo, :efec, :trans, :cambio, :est, :cajero)
+                                        :tipo, :efec, :trans, :cambio, :est, :cajero, :fecha)
                                 RETURNING id
                             """), {
                                 "uid": user_id, "cid": cliente_id,
@@ -430,7 +433,7 @@ with tab_pos:
                                 "total": total_final, "tipo": tipo_pago,
                                 "efec": monto_efectivo, "trans": monto_transferencia,
                                 "cambio": cambio, "est": estado_venta,
-                                "cajero": cajero_id_actual
+                                "cajero": cajero_id_actual, "fecha": fecha_venta
                             })
                             venta_id = res.scalar()
 
@@ -464,7 +467,7 @@ with tab_pos:
                             """), {
                                 "uid": user_id, "vid": venta_id, "cid": cliente_id,
                                 "total": total_final, "saldo": total_final,
-                                "f_ini": date.today().strftime('%Y-%m-%d'),
+                                "f_ini": hoy_bogota().strftime('%Y-%m-%d'),
                                 "f_lim": fecha_limite.strftime('%Y-%m-%d'),
                                 "tipo_c": tipo_cuota, "val_c": valor_cuota,
                             })
@@ -566,7 +569,7 @@ with tab_pos:
 # TAB 2: HISTORIAL DEL DÍA
 # ==========================================
 with tab_historial:
-    st.subheader(f"Ventas de Hoy — {date.today().strftime('%d/%m/%Y')}")
+    st.subheader(f"Ventas de Hoy — {hoy_bogota().strftime('%d/%m/%Y')}")
 
     with engine.connect() as conn:
         df_hoy = pd.read_sql_query(text("""
@@ -578,7 +581,7 @@ with tab_historial:
             AND DATE(v.fecha) = :hoy
             AND v.estado != 'Anulada'
             ORDER BY v.fecha DESC
-        """), con=conn, params={"uid": user_id, "hoy": date.today().strftime('%Y-%m-%d')})
+        """), con=conn, params={"uid": user_id, "hoy": hoy_bogota().strftime('%Y-%m-%d')})
 
     if not df_hoy.empty:
         total_dia = df_hoy['total'].sum()

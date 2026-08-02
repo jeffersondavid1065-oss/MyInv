@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from sqlalchemy import text
 from db import obtener_conexion
 from utils import verificar_auth
+from tz_utils import hoy_bogota, ahora_bogota_naive
 
 st.set_page_config(page_title="Cierre de Caja", layout="wide")
 user_id, nombre_negocio = verificar_auth()
@@ -23,7 +24,7 @@ tab_cierre, tab_historial = st.tabs(["Hacer Cierre de Hoy", "Historial de Cierre
 # TAB 1: CIERRE DEL DÍA
 # ==========================================
 with tab_cierre:
-    fecha_cierre = st.date_input("Fecha del cierre", value=date.today())
+    fecha_cierre = st.date_input("Fecha del cierre", value=hoy_bogota())
 
     # Verificar si ya hay cierre para esta fecha
     with engine.connect() as conn:
@@ -141,9 +142,9 @@ with tab_cierre:
                             INSERT INTO Cierres_Caja
                             (usuario_id, fecha, total_ventas, total_efectivo,
                              total_transferencias, total_creditos,
-                             efectivo_contado, diferencia, notas, cerrado_por)
+                             efectivo_contado, diferencia, notas, cerrado_por, fecha_cierre)
                             VALUES (:uid, :fecha, :tv, :tef, :ttr, :tcr,
-                                    :ec, :dif, :notas, :por)
+                                    :ec, :dif, :notas, :por, :fecha_cierre)
                         """), {
                             "uid": user_id,
                             "fecha": fecha_cierre.strftime('%Y-%m-%d'),
@@ -155,6 +156,7 @@ with tab_cierre:
                             "dif": diferencia,
                             "notas": notas_cierre or None,
                             "por": cerrado_por or None,
+                            "fecha_cierre": ahora_bogota_naive(),
                         })
                     st.success(f"✅ Cierre de caja del {fecha_cierre.strftime('%d/%m/%Y')} registrado.")
                     if diferencia == 0:
@@ -171,7 +173,7 @@ with tab_historial:
 
     col_f1, col_f2 = st.columns(2)
     with col_f1:
-        hoy = date.today()
+        hoy = hoy_bogota()
         fecha_ini_h = hoy - timedelta(days=30)
         fechas_h = st.date_input("Rango de fechas", [fecha_ini_h, hoy], key="fechas_hist_caja")
     with col_f2:

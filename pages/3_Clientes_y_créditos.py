@@ -11,6 +11,7 @@ from queries import (
     invalidar_cache_creditos,
 )
 from utils import aplicar_estilos, verificar_auth
+from tz_utils import hoy_bogota
 
 st.set_page_config(page_title="Clientes y Créditos", layout="wide")
 aplicar_estilos()
@@ -45,7 +46,7 @@ with tab_creditos:
         vencidos = df_creditos[df_creditos['vencido'] == True]
         por_vencer = df_creditos[
             (df_creditos['vencido'] == False) &
-            (pd.to_datetime(df_creditos['fecha_limite']) <= pd.Timestamp(date.today() + timedelta(days=7)))
+            (pd.to_datetime(df_creditos['fecha_limite']) <= pd.Timestamp(hoy_bogota() + timedelta(days=7)))
         ]
 
         col_m1, col_m2, col_m3 = st.columns(3)

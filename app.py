@@ -7,6 +7,7 @@ from sqlalchemy import text
 from db import obtener_conexion, init_db
 from queries import obtener_metricas_dashboard
 from datetime import datetime, date
+from tz_utils import hoy_bogota, ahora_bogota
 
 # ==========================================
 # 1. CONFIGURACIÓN DE PÁGINA
@@ -153,7 +154,7 @@ if not is_logged:
 
                         if credenciales_ok:
                             fecha_limite = user[3]
-                            hoy = date.today()
+                            hoy = hoy_bogota()
                             if fecha_limite is None or fecha_limite < hoy:
                                 st.error("Tu suscripción está inactiva. Contacta al administrador.")
                             else:
@@ -243,7 +244,7 @@ else:
     st.markdown("---")
 
     # Fila 3: Margen del mes
-    hoy = datetime.today()
+    hoy = ahora_bogota()
     from queries import obtener_metricas_mes
     ingresos_mes, costos_mes, margen_mes = obtener_metricas_mes(user_id, hoy.year, hoy.month)
 

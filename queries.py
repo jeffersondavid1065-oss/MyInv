@@ -3,6 +3,7 @@ import pandas as pd
 from sqlalchemy import text
 from db import obtener_conexion
 from datetime import datetime, date
+from tz_utils import hoy_bogota
 
 
 # ==========================================
@@ -19,7 +20,7 @@ def obtener_metricas_dashboard(uid):
     - Clientes con deuda activa
     """
     engine = obtener_conexion()
-    hoy = date.today().strftime('%Y-%m-%d')
+    hoy = hoy_bogota().strftime('%Y-%m-%d')
     with engine.connect() as conn:
         ventas_hoy = conn.execute(text("""
             SELECT 
@@ -184,12 +185,12 @@ def obtener_creditos_pendientes(uid):
             SELECT cr.id, cl.nombre as cliente, cl.telefono,
                    cr.total, cr.saldo_pendiente,
                    cr.fecha_limite, cr.tipo_cuota, cr.estado,
-                   CASE WHEN cr.fecha_limite < CURRENT_DATE THEN TRUE ELSE FALSE END as vencido
+                   CASE WHEN cr.fecha_limite < :hoy THEN TRUE ELSE FALSE END as vencido
             FROM Creditos cr
             JOIN Clientes cl ON cr.cliente_id = cl.id
             WHERE cr.usuario_id = :uid AND cr.estado = 'Activo'
             ORDER BY cr.fecha_limite ASC
-        """), con=conn, params={"uid": uid})
+        """), con=conn, params={"uid": uid, "hoy": hoy_bogota().strftime('%Y-%m-%d')})
 
 
 # ==========================================

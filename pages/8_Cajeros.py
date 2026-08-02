@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from sqlalchemy import text
 from db import obtener_conexion
 from utils import aplicar_estilos, verificar_auth
+from tz_utils import hoy_bogota
 
 st.set_page_config(page_title="Cajeros", layout="wide")
 aplicar_estilos()
@@ -168,7 +169,7 @@ with tab_rendimiento:
 
     col_f1, col_f2 = st.columns(2)
     with col_f1:
-        hoy = date.today()
+        hoy = hoy_bogota()
         hace_30 = hoy - timedelta(days=30)
         fechas_rend = st.date_input("Período", [hace_30, hoy], key="fechas_rend")
     with col_f2:

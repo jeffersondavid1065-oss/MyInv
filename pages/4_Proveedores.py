@@ -5,6 +5,7 @@ from sqlalchemy import text
 from db import obtener_conexion
 from queries import obtener_proveedores, invalidar_cache_proveedores
 from utils import aplicar_estilos, verificar_auth
+from tz_utils import hoy_bogota
 
 st.set_page_config(page_title="Proveedores", layout="wide")
 aplicar_estilos()
@@ -126,7 +127,7 @@ with tab_historial:
 
     col_h1, col_h2 = st.columns(2)
     with col_h1:
-        hoy = date.today()
+        hoy = hoy_bogota()
         hace_30 = hoy - timedelta(days=30)
         fechas = st.date_input("Rango de fechas", [hace_30, hoy])
     with col_h2:
