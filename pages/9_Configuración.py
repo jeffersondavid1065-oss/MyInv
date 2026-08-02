@@ -80,7 +80,7 @@ with tab_datos:
                     "direccion": direccion_completa,
                     "email": email_input,
                 })
-                st.success("✅ Datos guardados. Aparecerán en tus próximas facturas.")
+                st.success("Datos guardados. Aparecerán en tus próximas facturas.")
             except Exception as e:
                 st.error(f"Error al guardar: {e}")
 
@@ -139,14 +139,14 @@ with tab_logo:
                     st.session_state.taller_config = {}
                 st.session_state.taller_config["logo_path"] = logo_path
 
-                st.success("✅ Logo subido exitosamente. Aparecerá en tus próximas facturas.")
+                st.success("Logo subido exitosamente. Aparecerá en tus próximas facturas.")
                 st.image(archivo_logo, width=150)
 
     with col_l2:
         st.markdown("**Logo actual:**")
         if logo_actual and os.path.exists(logo_actual):
             st.image(logo_actual, width=120)
-            if st.button("🗑️ Eliminar logo"):
+            if st.button("Eliminar logo"):
                 try:
                     os.remove(logo_actual)
                     with engine.begin() as conn:
@@ -164,4 +164,4 @@ with tab_logo:
             st.info("Sin logotipo.\nSe mostrará un placeholder en el PDF.")
 
 st.markdown("---")
-st.caption("💡 Después de configurar tu logo y datos, descarga una factura de prueba desde el **Punto de Venta** para verificar cómo queda.")
+st.caption("Después de configurar tu logo y datos, descarga una factura de prueba desde el **Punto de Venta** para verificar cómo queda.")

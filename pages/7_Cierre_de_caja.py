@@ -37,7 +37,7 @@ with tab_cierre:
         """), {"uid": user_id, "fecha": fecha_cierre.strftime('%Y-%m-%d')}).fetchone()
 
     if cierre_existente:
-        st.warning(f"⚠️ Ya existe un cierre para el {fecha_cierre.strftime('%d/%m/%Y')}.")
+        st.warning(f"Ya existe un cierre para el {fecha_cierre.strftime('%d/%m/%Y')}.")
         with st.container(border=True):
             col1, col2, col3 = st.columns(3)
             col1.metric("Efectivo Sistema", formato_cop(cierre_existente[1]))
@@ -76,17 +76,17 @@ with tab_cierre:
         col_r1, col_r2, col_r3, col_r4, col_r5 = st.columns(5)
         col_r1.metric("Ventas Realizadas", total_ventas - ventas_anuladas)
         col_r2.metric("Total General", formato_cop(total_general))
-        col_r3.metric("💵 Efectivo Sistema", formato_cop(total_efectivo))
-        col_r4.metric("🏦 Transferencias", formato_cop(total_transferencias))
-        col_r5.metric("📋 Créditos", formato_cop(total_creditos))
+        col_r3.metric("Efectivo Sistema", formato_cop(total_efectivo))
+        col_r4.metric("Transferencias", formato_cop(total_transferencias))
+        col_r5.metric("Créditos", formato_cop(total_creditos))
 
         if ventas_anuladas > 0:
-            st.warning(f"⚠️ {ventas_anuladas} venta(s) anulada(s) hoy.")
+            st.warning(f"{ventas_anuladas} venta(s) anulada(s) hoy.")
 
         ingresos_dia, costos_dia, ganancia_dia = obtener_ganancia_dia(user_id, fecha_cierre.strftime('%Y-%m-%d'))
         col_g1, col_g2 = st.columns([1, 3])
         with col_g1:
-            st.metric("📈 Ganancia del Día", formato_cop(ganancia_dia),
+            st.metric("Ganancia del Día", formato_cop(ganancia_dia),
                        delta_color="inverse" if ganancia_dia < 0 else "normal")
         with col_g2:
             st.caption(f"Ingresos: {formato_cop(ingresos_dia)} — Costo de mercancía vendida: {formato_cop(costos_dia)}")
@@ -118,7 +118,7 @@ with tab_cierre:
         col_c1, col_c2 = st.columns(2)
         with col_c1:
             efectivo_contado = st.number_input(
-                "💵 Efectivo físico contado ($)",
+                "Efectivo físico contado ($)",
                 min_value=0.0, step=1000.0,
                 help="Cuenta los billetes y monedas en caja y escribe el total aquí."
             )
@@ -133,14 +133,14 @@ with tab_cierre:
                 st.write(f"**Efectivo físico contado:** {formato_cop(efectivo_contado)}")
                 st.markdown("---")
                 if diferencia == 0:
-                    st.success(f"✅ **Cuadra perfectamente: {formato_cop(diferencia)}**")
+                    st.success(f"**Cuadra perfectamente: {formato_cop(diferencia)}**")
                 elif diferencia > 0:
-                    st.warning(f"🟡 **Sobrante: +{formato_cop(diferencia)}**")
+                    st.warning(f"**Sobrante: +{formato_cop(diferencia)}**")
                 else:
-                    st.error(f"🔴 **Faltante: {formato_cop(diferencia)}**")
+                    st.error(f"**Faltante: {formato_cop(diferencia)}**")
 
         st.markdown("")
-        if st.button("🔒 Registrar Cierre de Caja", type="primary", use_container_width=True):
+        if st.button("Registrar Cierre de Caja", type="primary", use_container_width=True):
             if total_ventas == 0 and total_efectivo == 0:
                 st.warning("No hay ventas para cerrar en esta fecha.")
             else:
@@ -167,7 +167,7 @@ with tab_cierre:
                             "por": cerrado_por or None,
                             "fecha_cierre": ahora_bogota_naive(),
                         })
-                    st.success(f"✅ Cierre de caja del {fecha_cierre.strftime('%d/%m/%Y')} registrado.")
+                    st.success(f"Cierre de caja del {fecha_cierre.strftime('%d/%m/%Y')} registrado.")
                     if diferencia == 0:
                         st.balloons()
                     st.rerun()

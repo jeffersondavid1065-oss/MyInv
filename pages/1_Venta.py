@@ -48,7 +48,7 @@ except Exception:
 if cajeros:
     if not st.session_state.cajero_activo_id:
         with st.container(border=True):
-            st.subheader("👤 Identificación del Cajero")
+            st.subheader("Identificación del Cajero")
             col_id1, col_id2, col_id3 = st.columns([2, 1, 1])
             with col_id1:
                 dict_cajeros = {c[1]: (c[0], c[2]) for c in cajeros}
@@ -71,7 +71,7 @@ if cajeros:
     else:
         col_caj1, col_caj2 = st.columns([3, 1])
         with col_caj1:
-            st.success(f"👤 Cajero activo: **{st.session_state.cajero_activo_nombre}**")
+            st.success(f"Cajero activo: **{st.session_state.cajero_activo_nombre}**")
         with col_caj2:
             if st.button("Cambiar cajero"):
                 st.session_state.cajero_activo_id = None
@@ -98,7 +98,7 @@ def agregar_al_carrito(producto_id, nombre, codigo_barras, precio, stock_actual,
             item["subtotal"] = nueva_cant * item["precio_unitario"]
             return
     if stock_actual <= 3:
-        st.warning(f"⚠️ Stock bajo: solo quedan **{stock_actual}** unidades de '{nombre}'.")
+        st.warning(f"Stock bajo: solo quedan **{stock_actual}** unidades de '{nombre}'.")
     st.session_state.carrito.append({
         "producto_id": producto_id,
         "nombre": nombre,
@@ -118,9 +118,9 @@ def limpiar_carrito():
 # TABS
 # ==========================================
 tab_pos, tab_historial, tab_devolucion = st.tabs([
-    "🛒 Nueva Venta",
-    "📋 Historial del Día",
-    "↩️ Devoluciones"
+    "Nueva Venta",
+    "Historial del Día",
+    "Devoluciones"
 ])
 
 # ==========================================
@@ -130,7 +130,7 @@ with tab_pos:
     col_izq, col_der = st.columns([3, 2])
 
     with col_izq:
-        st.subheader("🔍 Buscar Producto")
+        st.subheader("Buscar Producto")
         st.caption("Escanea el código de barras o escribe el nombre.")
 
         # Limpiar buscador si viene de un escaneo exitoso
@@ -190,7 +190,7 @@ with tab_pos:
                         st.warning(f"No se encontró '{busqueda}'.")
 
         st.markdown("---")
-        st.subheader("🛒 Carrito")
+        st.subheader("Carrito")
 
         if not st.session_state.carrito:
             st.info("El carrito está vacío.")
@@ -316,12 +316,12 @@ with tab_pos:
                 if desc_global > 0:
                     st.caption(f"Ahorro: {formato_cop(desc_global)}")
             with col_t1:
-                if st.button("🗑️ Limpiar carrito", use_container_width=True):
+                if st.button("Limpiar carrito", use_container_width=True):
                     limpiar_carrito()
                     st.rerun()
 
     with col_der:
-        st.subheader("💰 Cobrar")
+        st.subheader("Cobrar")
 
         if not st.session_state.carrito:
             st.info("Agrega productos al carrito para cobrar.")
@@ -362,7 +362,7 @@ with tab_pos:
                 cambio = max(0, monto_efectivo_input - total_final)
                 monto_efectivo = min(monto_efectivo_input, total_final)
                 if cambio > 0:
-                    st.success(f"💵 Cambio: {formato_cop(cambio)}")
+                    st.success(f"Cambio: {formato_cop(cambio)}")
 
             elif tipo_pago == "Transferencia":
                 monto_transferencia = total_final
@@ -395,7 +395,7 @@ with tab_pos:
 
             st.markdown("---")
 
-            if tipo_pago and st.button("✅ Confirmar Venta", type="primary", use_container_width=True):
+            if tipo_pago and st.button("Confirmar Venta", type="primary", use_container_width=True):
                 try:
                     with engine.begin() as conn:
                         is_sqlite = "sqlite" in str(engine.url)
@@ -482,9 +482,9 @@ with tab_pos:
                     st.session_state.ultima_venta_tipo = tipo_pago
 
                     limpiar_carrito()
-                    st.success(f"✅ Venta #{venta_id} registrada.")
+                    st.success(f"Venta #{venta_id} registrada.")
                     if cambio > 0:
-                        st.info(f"💵 Cambio: {formato_cop(cambio)}")
+                        st.info(f"Cambio: {formato_cop(cambio)}")
                     st.rerun()
 
                 except ValueError as ve:
@@ -495,7 +495,7 @@ with tab_pos:
             # Última venta + ticket
             if st.session_state.ultima_venta_id:
                 st.markdown("---")
-                st.subheader("🧾 Última Venta")
+                st.subheader("Última Venta")
                 vid = st.session_state.ultima_venta_id
 
                 with engine.connect() as conn:
@@ -552,7 +552,7 @@ with tab_pos:
                             total=float(venta_info[2] or 0),
                         )
                         st.download_button(
-                            label="🧾 Descargar Ticket PDF",
+                            label="Descargar Ticket PDF",
                             data=pdf_bytes,
                             file_name=f"Ticket_{vid}.pdf",
                             mime="application/pdf",
@@ -561,7 +561,7 @@ with tab_pos:
                 except Exception as e:
                     st.caption(f"PDF no disponible: {e}")
 
-                if st.button("🛒 Nueva Venta", use_container_width=True, type="primary"):
+                if st.button("Nueva Venta", use_container_width=True, type="primary"):
                     st.session_state.ultima_venta_id = None
                     st.rerun()
 
@@ -602,7 +602,7 @@ with tab_historial:
         )
 
         st.markdown("---")
-        st.markdown("**🖨️ Reimprimir ticket:**")
+        st.markdown("**Reimprimir ticket:**")
         dict_ventas = {
             f"Venta #{r['id']} — {formato_cop(r['total'])} — {r['cliente']}": r['id']
             for _, r in df_hoy.iterrows()
@@ -659,7 +659,7 @@ with tab_historial:
                 total=float(info_reimp[2] or 0) if info_reimp else 0,
             )
             st.download_button(
-                label="🖨️ Reimprimir Ticket PDF",
+                label="Reimprimir Ticket PDF",
                 data=pdf_reimp,
                 file_name=f"Ticket_{venta_id_reimp}.pdf",
                 mime="application/pdf",
@@ -752,7 +752,7 @@ with tab_devolucion:
                 col_b1, col_b2 = st.columns(2)
 
                 with col_b1:
-                    if st.button("🚫 Anular Venta Completa", use_container_width=True, type="primary"):
+                    if st.button("Anular Venta Completa", use_container_width=True, type="primary"):
                         try:
                             with engine.begin() as conn:
                                 conn.execute(text("""
@@ -780,12 +780,12 @@ with tab_devolucion:
 
                             invalidar_cache_ventas()
                             invalidar_cache_productos()
-                            st.success(f"✅ Venta #{vid_dev} anulada. Stock restaurado.")
+                            st.success(f"Venta #{vid_dev} anulada. Stock restaurado.")
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error al anular: {e}")
 
                 with col_b2:
-                    st.info("💡 Al anular se restaura el stock y la venta queda marcada como anulada en los reportes.")
+                    st.info("Al anular se restaura el stock y la venta queda marcada como anulada en los reportes.")
         else:
             st.warning(f"No se encontró la venta #{vid_dev}.")

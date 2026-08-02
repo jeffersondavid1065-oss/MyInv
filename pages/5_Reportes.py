@@ -283,7 +283,7 @@ with tab_periodo:
             ingresos_rep, costos_rep, margen_rep, nombre_negocio
         )
         st.download_button(
-            label="📥 Descargar Reporte en Excel (para DIAN)",
+            label="Descargar Reporte en Excel (para DIAN)",
             data=excel_buf,
             file_name=f"Ventas_{fecha_ini_rep}_{fecha_fin_rep}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -401,11 +401,11 @@ with tab_cartera:
         buf_c.seek(0)
 
         st.download_button(
-            label="📥 Descargar Cartera en Excel",
+            label="Descargar Cartera en Excel",
             data=buf_c,
             file_name=f"Cartera_{hoy_bogota()}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
     else:
-        st.success("🎉 No hay créditos activos. ¡Cartera limpia!")
+        st.success("No hay créditos activos. ¡Cartera limpia!")

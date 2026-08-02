@@ -197,11 +197,11 @@ else:
 
     if not productos_sin_codigo.empty:
         st.warning(
-            f"⚠️ **{len(productos_sin_codigo)} producto(s)** no tienen código de barras "
+            f"**{len(productos_sin_codigo)} producto(s)** no tienen código de barras "
             "(llegaron sin código en la entrada de mercancía). Genérales uno interno para poder "
             "escanearlos en el punto de venta y agilizar la venta."
         )
-        if st.button(f"🏷️ Generar código para los {len(productos_sin_codigo)} producto(s) sin código", type="primary"):
+        if st.button(f"Generar código para los {len(productos_sin_codigo)} producto(s) sin código", type="primary"):
             with engine.begin() as conn:
                 for _, row in productos_sin_codigo.iterrows():
                     conn.execute(text("""
@@ -236,12 +236,12 @@ else:
 
     col_sel1, col_sel2 = st.columns(2)
     with col_sel1:
-        if st.button("✅ Seleccionar todos", use_container_width=True):
+        if st.button("Seleccionar todos", use_container_width=True):
             for i in df_filtrado.index:
                 st.session_state[f"etiq_{i}"] = True
             st.rerun()
     with col_sel2:
-        if st.button("❌ Deseleccionar todos", use_container_width=True):
+        if st.button("Deseleccionar todos", use_container_width=True):
             for i in df_filtrado.index:
                 st.session_state[f"etiq_{i}"] = False
             st.rerun()
@@ -256,7 +256,7 @@ else:
         col = cols[idx % 3]
         with col:
             tiene_cod = bool(str(prod.get('codigo_barras') or prod.get('codigo_ref') or '').strip())
-            etiqueta_cod = "" if tiene_cod else " ⚠️ sin código"
+            etiqueta_cod = "" if tiene_cod else " sin código"
             seleccionado = st.checkbox(
                 f"**{prod['nombre']}**\n{formato_cop(prod['precio_venta'])}{etiqueta_cod}",
                 key=f"etiq_{i}",
@@ -290,7 +290,7 @@ else:
         with col_prev2:
             st.markdown("**Generar PDF:**")
             st.info(f"""
-            📋 **Configuración:**
+            **Configuración:**
             - Tamaño: {tamano}
             - Etiquetas: {len(productos_seleccionados)}
             - Código: {'Sí' if mostrar_codigo else 'No'}
@@ -306,7 +306,7 @@ else:
             )
 
             st.download_button(
-                label="🖨️ Descargar Etiquetas PDF",
+                label="Descargar Etiquetas PDF",
                 data=pdf_etiquetas,
                 file_name=f"Etiquetas_{nombre_negocio}_{tamano}.pdf",
                 mime="application/pdf",
@@ -314,6 +314,6 @@ else:
                 use_container_width=True
             )
 
-            st.caption("💡 Imprime en papel adhesivo A4 para mejores resultados.")
+            st.caption("Imprime en papel adhesivo A4 para mejores resultados.")
     else:
         st.info("Selecciona al menos un producto para generar etiquetas.")

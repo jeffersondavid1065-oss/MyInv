@@ -52,17 +52,17 @@ with tab_creditos:
         col_m1, col_m2, col_m3 = st.columns(3)
         col_m1.metric("Total en Cartera", formato_cop(total_deuda))
         col_m2.metric("Créditos Vencidos", len(vencidos),
-                      delta="⚠️ Cobrar ya" if len(vencidos) > 0 else None,
+                      delta="Cobrar ya" if len(vencidos) > 0 else None,
                       delta_color="inverse")
         col_m3.metric("Vencen esta semana", len(por_vencer),
-                      delta="⚠️ Avisar" if len(por_vencer) > 0 else None,
+                      delta="Avisar" if len(por_vencer) > 0 else None,
                       delta_color="inverse")
 
         st.markdown("---")
 
         # Alertas de vencidos
         if not vencidos.empty:
-            st.error(f"⚠️ **{len(vencidos)} crédito(s) vencido(s):**")
+            st.error(f"**{len(vencidos)} crédito(s) vencido(s):**")
             for _, v in vencidos.iterrows():
                 st.write(f"• **{v['cliente']}** — Saldo: {formato_cop(v['saldo_pendiente'])} — Tel: {v['telefono'] or 'N/A'} — Venció: {v['fecha_limite']}")
 
@@ -148,7 +148,7 @@ with tab_creditos:
                 nuevo_saldo = float(saldo_actual) - float(monto_abono)
                 st.info(f"Saldo actual: {formato_cop(saldo_actual)} → Nuevo saldo: {formato_cop(nuevo_saldo)}")
 
-                if st.button("💵 Registrar Abono", type="primary", use_container_width=True):
+                if st.button("Registrar Abono", type="primary", use_container_width=True):
                     try:
                         with engine.begin() as conn:
                             conn.execute(text("""
@@ -175,9 +175,9 @@ with tab_creditos:
 
                         invalidar_cache_creditos()
                         if nuevo_estado == "Pagado":
-                            st.success(f"✅ Abono registrado. ¡Crédito #{credito_id_abono} pagado completamente!")
+                            st.success(f"Abono registrado. ¡Crédito #{credito_id_abono} pagado completamente!")
                         else:
-                            st.success(f"✅ Abono de {formato_cop(monto_abono)} registrado. Saldo pendiente: {formato_cop(nuevo_saldo)}")
+                            st.success(f"Abono de {formato_cop(monto_abono)} registrado. Saldo pendiente: {formato_cop(nuevo_saldo)}")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error al registrar abono: {e}")
@@ -199,9 +199,9 @@ with tab_creditos:
                     else:
                         st.info("Sin abonos registrados para este crédito.")
             else:
-                st.success(f"{cliente_abono} no tiene créditos activos. ¡Está al día! ✅")
+                st.success(f"{cliente_abono} no tiene créditos activos. ¡Está al día!")
     else:
-        st.success("🎉 No hay créditos activos. ¡Cartera limpia!")
+        st.success("No hay créditos activos. ¡Cartera limpia!")
 
 # ==========================================
 # TAB 2: DIRECTORIO DE CLIENTES

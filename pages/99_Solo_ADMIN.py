@@ -69,7 +69,7 @@ if not df_almacenes.empty:
         with col1:
             st.info(
                 f"**Propietario:** {row['nombre_dueno']}\n\n"
-                f"**Estado:** {'Activa ✅' if row['activo'] else 'Inactiva ❌'}\n\n"
+                f"**Estado:** {'Activa' if row['activo'] else 'Inactiva'}\n\n"
                 f"**Fecha de corte:** {row['fecha_pago_limite'] or 'Sin fecha'}"
             )
 
@@ -79,7 +79,7 @@ if not df_almacenes.empty:
             col_a1, col_a2 = st.columns(2)
 
             with col_a1:
-                if st.button("✅ Activar 30 días", type="primary", use_container_width=True):
+                if st.button("Activar 30 días", type="primary", use_container_width=True):
                     nueva_fecha = hoy_bogota() + timedelta(days=30)
                     try:
                         with engine.begin() as conn:
@@ -94,7 +94,7 @@ if not df_almacenes.empty:
                         st.error(f"Error: {e}")
 
             with col_a2:
-                if st.button("🚫 Suspender", use_container_width=True):
+                if st.button("Suspender", use_container_width=True):
                     fecha_vencida = hoy_bogota() - timedelta(days=1)
                     try:
                         with engine.begin() as conn:

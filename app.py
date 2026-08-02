@@ -235,13 +235,13 @@ else:
     # Fila 2: Alertas
     col5, col6, col7, col8 = st.columns(4)
     col5.metric("Productos Agotados", metricas["agotados"],
-                delta="⚠️ Reabastecer" if metricas["agotados"] > 0 else None,
+                delta="Reabastecer" if metricas["agotados"] > 0 else None,
                 delta_color="inverse")
     col6.metric("Por Agotarse", metricas["por_agotarse"],
-                delta="⚠️ Revisar" if metricas["por_agotarse"] > 0 else None,
+                delta="Revisar" if metricas["por_agotarse"] > 0 else None,
                 delta_color="inverse")
     col7.metric("Créditos Vencidos", metricas["creditos_vencidos"],
-                delta="⚠️ Cobrar" if metricas["creditos_vencidos"] > 0 else None,
+                delta="Cobrar" if metricas["creditos_vencidos"] > 0 else None,
                 delta_color="inverse")
     col8.metric("Total en Deudas", formato_cop(metricas["total_deuda"]))
 
@@ -258,20 +258,20 @@ else:
     col10.metric("Costo de Ventas", formato_cop(costos_mes))
     col11.metric("Margen Bruto del Mes", formato_cop(margen_mes),
                  delta_color="inverse" if margen_mes < 0 else "normal")
-    col12.metric("💰 Ganancia Acumulada", formato_cop(ganancia_acumulada),
+    col12.metric("Ganancia Acumulada", formato_cop(ganancia_acumulada),
                  delta_color="inverse" if ganancia_acumulada < 0 else "normal")
 
     st.markdown("---")
 
     # Alertas visuales
     if metricas["creditos_vencidos"] > 0:
-        st.error(f"⚠️ Tienes **{metricas['creditos_vencidos']} créditos vencidos**. Ve a Clientes y Créditos para gestionar los cobros.")
+        st.error(f"Tienes **{metricas['creditos_vencidos']} créditos vencidos**. Ve a Clientes y Créditos para gestionar los cobros.")
 
     if metricas["agotados"] > 0:
-        st.warning(f"📦 Tienes **{metricas['agotados']} productos agotados**. Ve a Inventario para registrar entradas.")
+        st.warning(f"Tienes **{metricas['agotados']} productos agotados**. Ve a Inventario para registrar entradas.")
 
     if metricas["por_agotarse"] > 0:
-        st.info(f"🔔 **{metricas['por_agotarse']} productos** están por agotarse pronto.")
+        st.info(f"**{metricas['por_agotarse']} productos** están por agotarse pronto.")
 
     st.markdown("---")
 
@@ -288,11 +288,11 @@ else:
     with col_a2:
         with st.container(border=True):
             st.subheader("Resumen del Negocio")
-            st.write(f"📅 **Fecha:** {hoy.strftime('%d/%m/%Y')}")
-            st.write(f"🏪 **Negocio:** {nombre_negocio}")
-            st.write(f"💰 **Ventas hoy:** {metricas['ventas_hoy']} transacciones")
-            st.write(f"📊 **Margen del mes:** {formato_cop(margen_mes)}")
-            st.write(f"📈 **Ganancia acumulada:** {formato_cop(ganancia_acumulada)}")
+            st.write(f"**Fecha:** {hoy.strftime('%d/%m/%Y')}")
+            st.write(f"**Negocio:** {nombre_negocio}")
+            st.write(f"**Ventas hoy:** {metricas['ventas_hoy']} transacciones")
+            st.write(f"**Margen del mes:** {formato_cop(margen_mes)}")
+            st.write(f"**Ganancia acumulada:** {formato_cop(ganancia_acumulada)}")
 
     st.markdown("")
     if st.button("Cerrar Sesión"):

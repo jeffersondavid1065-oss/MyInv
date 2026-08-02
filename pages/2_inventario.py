@@ -41,7 +41,7 @@ st.markdown("---")
 tab_stock, tab_nuevo, tab_entradas = st.tabs([
     "Stock Actual",
     "Agregar Producto",
-    "Entradas de Mercancía 🤖"
+    "Entradas de Mercancía"
 ])
 
 # ==========================================
@@ -98,7 +98,7 @@ with tab_stock:
             st.info("No hay productos que coincidan con los filtros.")
         else:
             st.caption(f"Mostrando {len(df_inv)} producto(s). Edita directamente en la tabla y guarda.")
-            st.caption("💡 Puedes editar **código de barras** y **unidad de medida** directamente aquí.")
+            st.caption("Puedes editar **código de barras** y **unidad de medida** directamente aquí.")
 
             df_show = df_inv.copy()
             df_show['codigo_barras'] = df_show['codigo_barras'].fillna("").astype(str).replace("None", "")
@@ -152,7 +152,7 @@ with tab_stock:
                 key=f"editor_inv_{busqueda_inv}_{filtro_estado}"
             )
 
-            if st.button("💾 Guardar Cambios", type="primary"):
+            if st.button("Guardar Cambios", type="primary"):
                 try:
                     with engine.begin() as conn:
                         for _, row in df_edit.iterrows():
@@ -213,7 +213,7 @@ with tab_nuevo:
             "Bulto": "Ej: cemento, harina",
         }
         if unidad_p in hints:
-            st.caption(f"💡 {hints[unidad_p]}")
+            st.caption(f"{hints[unidad_p]}")
 
     with col_n2:
         es_decimal = unidad_p in UNIDADES_DECIMALES
@@ -230,7 +230,7 @@ with tab_nuevo:
             step=0.5 if es_decimal else 1
         )
 
-        st.markdown(f"**💰 Precio de Venta (por {unidad_p})**")
+        st.markdown(f"**Precio de Venta (por {unidad_p})**")
         costo_p = st.number_input(f"Costo de Compra ($ por {unidad_p}) *",
                                    min_value=0.0, step=1000.0, key="costo_nuevo")
         modo_precio = st.radio("Calcular precio por:",
@@ -265,7 +265,7 @@ with tab_nuevo:
                 st.caption(f"{color} Ganancia: {formato_cop(ganancia)} ({pct:.1f}%)")
 
     st.markdown("")
-    if st.button("💾 Guardar Producto", type="primary", use_container_width=True):
+    if st.button("Guardar Producto", type="primary", use_container_width=True):
         if nom_p and precio_p > 0:
             try:
                 with engine.begin() as conn:
@@ -283,7 +283,7 @@ with tab_nuevo:
                         "costo": float(costo_p), "pvp": float(precio_p)
                     })
                 invalidar_cache_productos()
-                st.success(f"✅ '{nom_p}' registrado — {formato_cant(stock_inicial, unidad_p)} en stock a {formato_cop(precio_p)}/{unidad_p}.")
+                st.success(f"'{nom_p}' registrado — {formato_cant(stock_inicial, unidad_p)} en stock a {formato_cop(precio_p)}/{unidad_p}.")
                 st.rerun()
             except Exception as e:
                 st.error(f"Error al guardar: {e}")
@@ -303,7 +303,7 @@ with tab_entradas:
     col_cab1, col_cab2 = st.columns(2)
     with col_cab1:
         factura_img = st.file_uploader(
-            "📸 Foto o PDF de la factura",
+            "Foto o PDF de la factura",
             type=["jpg", "jpeg", "png", "pdf"],
             help="Sube la factura y la IA detecta los productos automáticamente."
         )
@@ -311,10 +311,10 @@ with tab_entradas:
             if factura_img.type != "application/pdf":
                 st.image(factura_img, use_container_width=True)
             else:
-                st.success(f"📄 {factura_img.name}")
+                st.success(f"{factura_img.name}")
 
         if factura_img:
-            if st.button("🤖 Analizar con IA", type="primary",
+            if st.button("Analizar con IA", type="primary",
                          use_container_width=True, key="btn_analizar_ia"):
                 with st.spinner("Gemini está leyendo la factura..."):
                     try:
@@ -336,7 +336,7 @@ with tab_entradas:
                             ]
                             if datos.get("numero_factura"):
                                 st.session_state.num_factura_ia = datos["numero_factura"]
-                            st.success(f"✅ IA detectó **{len(datos['productos'])} producto(s)**. Revisa abajo.")
+                            st.success(f"IA detectó **{len(datos['productos'])} producto(s)**. Revisa abajo.")
                             st.rerun()
                         else:
                             st.error("No se detectaron productos. Intenta con imagen más clara.")
@@ -362,7 +362,7 @@ with tab_entradas:
 
     col_btn1, col_btn2 = st.columns(2)
     with col_btn1:
-        if st.button("➕ Agregar producto manualmente",
+        if st.button("Agregar producto manualmente",
                      use_container_width=True, key="btn_agregar_manual"):
             st.session_state.items_entrada.append({
                 "nombre": "", "cantidad": 1.0, "costo": 0.0,
@@ -370,7 +370,7 @@ with tab_entradas:
             })
             st.rerun()
     with col_btn2:
-        if st.button("🗑️ Limpiar todo", use_container_width=True, key="btn_limpiar_entrada"):
+        if st.button("Limpiar todo", use_container_width=True, key="btn_limpiar_entrada"):
             st.session_state.items_entrada = []
             if "num_factura_ia" in st.session_state:
                 del st.session_state.num_factura_ia
@@ -403,10 +403,10 @@ with tab_entradas:
                     if producto_match is not None:
                         um_match = producto_match.get('unidad_medida', 'Unidad') \
                                    if 'unidad_medida' in producto_match else 'Unidad'
-                        st.success(f"✅ Encontrado: **{producto_match['nombre']}** "
+                        st.success(f"Encontrado: **{producto_match['nombre']}** "
                                    f"(Stock: {formato_cant(producto_match['stock_actual'], um_match)})")
                     else:
-                        st.warning("⚠️ Producto nuevo — se creará en el inventario")
+                        st.warning("Producto nuevo — se creará en el inventario")
                 with col_h2:
                     if st.button("❌", key=f"del_item_{i}"):
                         items_a_eliminar.append(i)
@@ -491,7 +491,7 @@ with tab_entradas:
             st.info(f"**Total de la entrada: {formato_cop(total_entrada)}**")
 
         if st.session_state.items_entrada and st.button(
-            "✅ Registrar Entrada", type="primary",
+            "Registrar Entrada", type="primary",
             use_container_width=True, key="btn_registrar_entrada"
         ):
             items_validos = [i for i in st.session_state.items_entrada
@@ -584,9 +584,9 @@ with tab_entradas:
                     if "num_factura_ia" in st.session_state:
                         del st.session_state.num_factura_ia
 
-                    st.success(f"✅ Entrada #{entrada_id}: **{nuevos}** nuevo(s), **{actualizados}** actualizado(s).")
+                    st.success(f"Entrada #{entrada_id}: **{nuevos}** nuevo(s), **{actualizados}** actualizado(s).")
                     if nuevos > 0:
-                        st.info("💡 Productos nuevos creados con 30% de ganancia sugerida. Ajusta precios en Stock Actual.")
+                        st.info("Productos nuevos creados con 30% de ganancia sugerida. Ajusta precios en Stock Actual.")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error al registrar: {e}")

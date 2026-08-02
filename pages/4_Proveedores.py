@@ -65,11 +65,11 @@ with tab_lista:
                     if prov['contacto']:
                         st.caption(f"Contacto: {prov['contacto']}")
                 with col_p2:
-                    st.write(f"📞 {prov['telefono'] or 'Sin teléfono'}")
+                    st.write(f"{prov['telefono'] or 'Sin teléfono'}")
                     if prov['nit']:
                         st.write(f"NIT: {prov['nit']}")
                     if prov['email']:
-                        st.write(f"✉️ {prov['email']}")
+                        st.write(f"{prov['email']}")
                 with col_p3:
                     st.metric("Compras", int(prov['total_entradas']))
                     st.metric("Total", formato_cop(prov['total_comprado']))

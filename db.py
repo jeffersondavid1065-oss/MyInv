@@ -21,7 +21,7 @@ def obtener_conexion():
             conn.execute(text("SELECT 1"))
     except Exception as e:
         st.warning(
-            f"⚠️ No se pudo conectar a Postgres/Supabase, usando base local de respaldo. "
+            f"No se pudo conectar a Postgres/Supabase, usando base local de respaldo. "
             f"Detalle: {e}"
         )
         engine = create_engine(f"sqlite:///{LOCAL_DB_PATH}")

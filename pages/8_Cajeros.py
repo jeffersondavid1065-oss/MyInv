@@ -208,7 +208,7 @@ with tab_rendimiento:
             for _, row in df_rend.iterrows():
                 with st.container(border=True):
                     col_r1, col_r2, col_r3, col_r4 = st.columns(4)
-                    col_r1.markdown(f"### 👤 {row['cajero']}")
+                    col_r1.markdown(f"### {row['cajero']}")
                     col_r2.metric("Ventas", int(row['total_ventas']))
                     col_r3.metric("Total Vendido", formato_cop(row['total_vendido']))
                     col_r4.metric("Ticket Promedio", formato_cop(row['ticket_promedio']))
