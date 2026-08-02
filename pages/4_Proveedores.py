@@ -187,7 +187,10 @@ with tab_historial:
                     'notas': 'Notas'
                 }),
                 use_container_width=True,
-                hide_index=True
+                hide_index=True,
+                column_config={
+                    "Total ($)": st.column_config.NumberColumn("Total ($)", format="$%,d"),
+                }
             )
 
             # Detalle de una entrada
@@ -221,7 +224,11 @@ with tab_historial:
                         'subtotal': 'Subtotal ($)'
                     }),
                     use_container_width=True,
-                    hide_index=True
+                    hide_index=True,
+                    column_config={
+                        "Costo Unitario ($)": st.column_config.NumberColumn("Costo Unitario ($)", format="$%,d"),
+                        "Subtotal ($)": st.column_config.NumberColumn("Subtotal ($)", format="$%,d"),
+                    }
                 )
         else:
             st.info("No hay entradas en este período.")

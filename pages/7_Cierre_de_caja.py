@@ -107,7 +107,10 @@ with tab_cierre:
                 st.dataframe(df_ventas.rename(columns={
                     'id': 'N°', 'fecha': 'Fecha', 'cliente': 'Cliente',
                     'total': 'Total', 'tipo_pago': 'Pago', 'estado': 'Estado'
-                }), hide_index=True, use_container_width=True)
+                }), hide_index=True, use_container_width=True,
+                column_config={
+                    "Total": st.column_config.NumberColumn("Total", format="$%,d"),
+                })
             else:
                 st.info("Sin ventas en esta fecha.")
 
@@ -224,7 +227,14 @@ with tab_historial:
                     'cerrado_por': 'Cerrado por',
                     'notas': 'Notas'
                 }),
-                use_container_width=True, hide_index=True
+                use_container_width=True, hide_index=True,
+                column_config={
+                    "Efectivo Sistema": st.column_config.NumberColumn("Efectivo Sistema", format="$%,d"),
+                    "Transferencias": st.column_config.NumberColumn("Transferencias", format="$%,d"),
+                    "Créditos": st.column_config.NumberColumn("Créditos", format="$%,d"),
+                    "Efectivo Contado": st.column_config.NumberColumn("Efectivo Contado", format="$%,d"),
+                    "Diferencia": st.column_config.NumberColumn("Diferencia", format="$%,d"),
+                }
             )
         else:
             st.info("No hay cierres de caja en este período.")

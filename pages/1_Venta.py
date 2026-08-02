@@ -598,7 +598,10 @@ with tab_historial:
                 'id': 'N°', 'fecha': 'Hora', 'cliente': 'Cliente',
                 'total': 'Total', 'tipo_pago': 'Pago', 'estado': 'Estado'
             }),
-            use_container_width=True, hide_index=True
+            use_container_width=True, hide_index=True,
+            column_config={
+                "Total": st.column_config.NumberColumn("Total", format="$%,d"),
+            }
         )
 
         st.markdown("---")
@@ -625,7 +628,11 @@ with tab_historial:
             st.dataframe(detalles_reimp.rename(columns={
                 "nombre_producto": "Producto", "cantidad": "Cant.",
                 "precio_unitario": "Precio", "subtotal": "Subtotal"
-            }), hide_index=True, use_container_width=True)
+            }), hide_index=True, use_container_width=True,
+            column_config={
+                "Precio": st.column_config.NumberColumn("Precio", format="$%,d"),
+                "Subtotal": st.column_config.NumberColumn("Subtotal", format="$%,d"),
+            })
 
         try:
             from pdf_utils import generar_ticket_venta
@@ -692,11 +699,14 @@ with tab_devolucion:
     if not df_hoy_dev.empty:
         st.markdown("**Ventas de hoy** (para identificar el número de venta):")
         st.dataframe(
-            df_hoy_dev.assign(total=df_hoy_dev['total'].apply(formato_cop)).rename(columns={
+            df_hoy_dev.rename(columns={
                 'id': 'N°', 'fecha': 'Hora', 'cliente': 'Cliente',
                 'total': 'Total', 'tipo_pago': 'Pago'
             }),
-            hide_index=True, use_container_width=True
+            hide_index=True, use_container_width=True,
+            column_config={
+                "Total": st.column_config.NumberColumn("Total", format="$%,d"),
+            }
         )
     else:
         st.caption("No hay ventas registradas hoy todavía.")
@@ -745,7 +755,11 @@ with tab_devolucion:
                             'nombre_producto': 'Producto', 'cantidad': 'Cant.',
                             'precio_unitario': 'Precio', 'subtotal': 'Subtotal'
                         }),
-                        hide_index=True, use_container_width=True
+                        hide_index=True, use_container_width=True,
+                        column_config={
+                            "Precio": st.column_config.NumberColumn("Precio", format="$%,d"),
+                            "Subtotal": st.column_config.NumberColumn("Subtotal", format="$%,d"),
+                        }
                     )
 
                 st.markdown("---")

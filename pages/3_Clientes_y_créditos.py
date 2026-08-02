@@ -241,7 +241,11 @@ with tab_clientes:
                 'activo': 'Activo', 'deuda_actual': 'Deuda Actual'
             }),
             use_container_width=True,
-            hide_index=True
+            hide_index=True,
+            column_config={
+                "Cupo Crédito": st.column_config.NumberColumn("Cupo Crédito", format="$%,d"),
+                "Deuda Actual": st.column_config.NumberColumn("Deuda Actual", format="$%,d"),
+            }
         )
     else:
         st.info("No tienes clientes registrados todavía.")
