@@ -316,6 +316,30 @@ def obtener_ganancia_dia(uid, fecha):
     return ingresos, costos, ingresos - costos
 
 
+@st.cache_data(ttl=60)
+def obtener_ganancia_por_producto_dia(uid, fecha):
+    """Ganancia detallada por producto vendido en una fecha (para Cierre de Caja)."""
+    engine = obtener_conexion()
+    with engine.connect() as conn:
+        df = pd.read_sql_query(text("""
+            SELECT dv.nombre_producto AS producto,
+                   SUM(dv.cantidad) AS cantidad,
+                   SUM(dv.costo_unitario * dv.cantidad) / SUM(dv.cantidad) AS costo_unitario,
+                   SUM(dv.subtotal) / SUM(dv.cantidad) AS precio_unitario,
+                   SUM(dv.costo_unitario * dv.cantidad) AS costo_total,
+                   SUM(dv.subtotal) AS venta_total,
+                   SUM(dv.subtotal) - SUM(dv.costo_unitario * dv.cantidad) AS ganancia
+            FROM Detalles_Venta dv
+            JOIN Ventas v ON dv.venta_id = v.id
+            WHERE v.usuario_id = :uid
+            AND v.estado != 'Anulada'
+            AND DATE(v.fecha) = :fecha
+            GROUP BY dv.nombre_producto
+            ORDER BY ganancia DESC
+        """), con=conn, params={"uid": uid, "fecha": fecha})
+    return df
+
+
 @st.cache_data(ttl=120)
 def obtener_ganancia_acumulada(uid):
     """Ganancia bruta acumulada histórica: ingresos - costos de todas las ventas no anuladas."""
@@ -360,6 +384,7 @@ def invalidar_cache_ventas():
     obtener_productos_activos.clear()
     obtener_metricas_inventario.clear()
     obtener_ganancia_dia.clear()
+    obtener_ganancia_por_producto_dia.clear()
     obtener_ganancia_acumulada.clear()
 
 

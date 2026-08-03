@@ -87,7 +87,7 @@ if "carrito" not in st.session_state:
 if "ultima_venta_id" not in st.session_state:
     st.session_state.ultima_venta_id = None
 
-def agregar_al_carrito(producto_id, nombre, codigo_barras, precio, stock_actual, cantidad=1):
+def agregar_al_carrito(producto_id, nombre, codigo_barras, precio, stock_actual, costo=0, cantidad=1):
     for item in st.session_state.carrito:
         if item["producto_id"] == producto_id:
             nueva_cant = item["cantidad"] + cantidad
@@ -104,6 +104,7 @@ def agregar_al_carrito(producto_id, nombre, codigo_barras, precio, stock_actual,
         "nombre": nombre,
         "codigo_barras": codigo_barras,
         "precio_unitario": float(precio),
+        "costo_unitario": float(costo or 0),
         "descuento_item": 0.0,
         "descuento_pct_item": 0.0,
         "cantidad": cantidad,
@@ -154,6 +155,7 @@ with tab_pos:
                     codigo_barras=producto_encontrado[2],
                     precio=producto_encontrado[4],
                     stock_actual=int(producto_encontrado[3]),
+                    costo=producto_encontrado[5],
                 )
                 # Limpiar campo automáticamente para siguiente escaneo
                 st.session_state.limpiar_buscador = True
@@ -184,6 +186,7 @@ with tab_pos:
                                         codigo_barras=prod['codigo_barras'] or "",
                                         precio=float(prod['precio_venta']),
                                         stock_actual=int(prod['stock_actual']),
+                                        costo=float(prod['costo_compra'] or 0),
                                     )
                                     st.rerun()
                     else:
@@ -442,12 +445,13 @@ with tab_pos:
                             conn.execute(text("""
                                 INSERT INTO Detalles_Venta
                                 (venta_id, producto_id, nombre_producto, codigo_barras,
-                                 cantidad, precio_unitario, subtotal)
-                                VALUES (:vid, :pid, :nom, :cod, :cant, :pvp, :sub)
+                                 cantidad, precio_unitario, costo_unitario, subtotal)
+                                VALUES (:vid, :pid, :nom, :cod, :cant, :pvp, :costo, :sub)
                             """), {
                                 "vid": venta_id, "pid": item["producto_id"],
                                 "nom": item["nombre"], "cod": item["codigo_barras"],
                                 "cant": item["cantidad"], "pvp": max(0, precio_neto),
+                                "costo": item.get("costo_unitario", 0),
                                 "sub": item["subtotal"]
                             })
                             resultado = conn.execute(text("""

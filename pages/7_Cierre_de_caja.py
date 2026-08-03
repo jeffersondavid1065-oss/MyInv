@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from sqlalchemy import text
 from db import obtener_conexion
 from utils import verificar_auth
-from queries import obtener_ganancia_dia
+from queries import obtener_ganancia_dia, obtener_ganancia_por_producto_dia, obtener_ganancia_acumulada
 from tz_utils import hoy_bogota, ahora_bogota_naive
 
 st.set_page_config(page_title="Cierre de Caja", layout="wide")
@@ -84,12 +84,37 @@ with tab_cierre:
             st.warning(f"{ventas_anuladas} venta(s) anulada(s) hoy.")
 
         ingresos_dia, costos_dia, ganancia_dia = obtener_ganancia_dia(user_id, fecha_cierre.strftime('%Y-%m-%d'))
-        col_g1, col_g2 = st.columns([1, 3])
-        with col_g1:
-            st.metric("Ganancia del Día", formato_cop(ganancia_dia),
-                       delta_color="inverse" if ganancia_dia < 0 else "normal")
-        with col_g2:
-            st.caption(f"Ingresos: {formato_cop(ingresos_dia)} — Costo de mercancía vendida: {formato_cop(costos_dia)}")
+        ganancia_acumulada = obtener_ganancia_acumulada(user_id)
+
+        col_g1, col_g2 = st.columns(2)
+        col_g1.metric("Ganancia del Día", formato_cop(ganancia_dia),
+                      delta_color="inverse" if ganancia_dia < 0 else "normal")
+        col_g2.metric("Ganancia Acumulada", formato_cop(ganancia_acumulada),
+                      delta_color="inverse" if ganancia_acumulada < 0 else "normal")
+        st.caption(f"Ingresos del día: {formato_cop(ingresos_dia)} — Costo de mercancía vendida: {formato_cop(costos_dia)}")
+
+        # Ganancia por producto vendido en el día
+        with st.expander("Ver ganancia por producto vendido hoy", expanded=(ganancia_dia != 0)):
+            df_prod = obtener_ganancia_por_producto_dia(user_id, fecha_cierre.strftime('%Y-%m-%d'))
+            if not df_prod.empty:
+                st.dataframe(
+                    df_prod.rename(columns={
+                        'producto': 'Producto', 'cantidad': 'Cant.',
+                        'costo_unitario': 'Costo Unitario', 'precio_unitario': 'Precio Venta Unitario',
+                        'costo_total': 'Costo Total', 'venta_total': 'Venta Total',
+                        'ganancia': 'Ganancia',
+                    }),
+                    use_container_width=True, hide_index=True,
+                    column_config={
+                        "Costo Unitario": st.column_config.NumberColumn("Costo Unitario", format="$%,d"),
+                        "Precio Venta Unitario": st.column_config.NumberColumn("Precio Venta Unitario", format="$%,d"),
+                        "Costo Total": st.column_config.NumberColumn("Costo Total", format="$%,d"),
+                        "Venta Total": st.column_config.NumberColumn("Venta Total", format="$%,d"),
+                        "Ganancia": st.column_config.NumberColumn("Ganancia", format="$%,d"),
+                    }
+                )
+            else:
+                st.info("Sin productos vendidos en esta fecha.")
 
         # Ver detalle de ventas del día
         with st.expander("Ver detalle de ventas del día"):
