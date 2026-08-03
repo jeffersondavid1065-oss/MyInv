@@ -61,6 +61,54 @@ if not df_almacenes.empty:
 
     sel = st.selectbox("Selecciona el almacén:", options=list(dict_almacenes.keys()))
 
+    st.markdown("---")
+    st.subheader("Mantenimiento: Recalcular Costo de Ventas Antiguas")
+    st.caption(
+        "Antes de esta actualización, las ventas no guardaban el costo del producto vendido, "
+        "por lo que 'Costo de Ventas' y la ganancia quedaban en $0 para esas ventas. "
+        "Esta acción rellena el costo faltante usando el **costo de compra actual** de cada "
+        "producto como mejor aproximación (no es el costo exacto histórico si el precio de compra "
+        "cambió desde entonces). Es segura de ejecutar varias veces: solo toca ventas con costo en $0."
+    )
+
+    with engine.connect() as conn:
+        pendientes = conn.execute(text("""
+            SELECT COUNT(*) FROM Detalles_Venta dv
+            JOIN Productos p ON p.id = dv.producto_id
+            WHERE (dv.costo_unitario IS NULL OR dv.costo_unitario = 0)
+        """)).scalar()
+
+    if pendientes and pendientes > 0:
+        st.warning(f"Hay **{pendientes}** línea(s) de venta sin costo registrado en todos los almacenes.")
+        if st.button("Recalcular costos faltantes ahora", type="primary"):
+            try:
+                with engine.begin() as conn:
+                    resultado = conn.execute(text("""
+                        UPDATE Detalles_Venta
+                        SET costo_unitario = (
+                            SELECT p.costo_compra FROM Productos p WHERE p.id = Detalles_Venta.producto_id
+                        )
+                        WHERE (costo_unitario IS NULL OR costo_unitario = 0)
+                        AND producto_id IS NOT NULL
+                        AND EXISTS (SELECT 1 FROM Productos p WHERE p.id = Detalles_Venta.producto_id)
+                    """))
+                from queries import (
+                    obtener_ganancia_dia, obtener_ganancia_por_producto_dia,
+                    obtener_ganancia_acumulada, obtener_metricas_mes,
+                )
+                obtener_ganancia_dia.clear()
+                obtener_ganancia_por_producto_dia.clear()
+                obtener_ganancia_acumulada.clear()
+                obtener_metricas_mes.clear()
+                st.success(f"Costos recalculados en {resultado.rowcount} línea(s) de venta.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error: {e}")
+    else:
+        st.success("Todas las ventas ya tienen su costo registrado.")
+
+    st.markdown("---")
+
     if sel:
         almacen_id = dict_almacenes[sel]
         row = df_almacenes[df_almacenes['id'] == almacen_id].iloc[0]
