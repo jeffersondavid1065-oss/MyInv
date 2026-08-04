@@ -213,7 +213,7 @@ def obtener_creditos_cliente(uid, cliente_id):
         return pd.read_sql_query(text("""
             SELECT c.id, v.id as venta_id, c.total, c.saldo_pendiente,
                    c.fecha_inicio, c.fecha_limite, c.tipo_cuota,
-                   c.valor_cuota, c.estado, v.factura_estado, v.factura_pdf_url,
+                   c.valor_cuota, c.estado, v.factura_estado, v.factura_pdf_url, v.factura_xml_url,
                    v.factura_prefijo, v.factura_numero
             FROM Creditos c
             JOIN Ventas v ON c.venta_id = v.id
@@ -230,7 +230,8 @@ def obtener_historial_ventas_cliente(uid, cliente_id):
         return pd.read_sql_query(text("""
             SELECT v.id, v.fecha, v.total, v.tipo_pago, v.estado,
                    v.factura_estado, v.factura_prefijo, v.factura_numero,
-                   v.factura_pdf_url, v.nota_credito_alegra_id, v.nota_credito_pdf_url
+                   v.factura_pdf_url, v.factura_xml_url,
+                   v.nota_credito_alegra_id, v.nota_credito_pdf_url, v.nota_credito_xml_url
             FROM Ventas v
             WHERE v.usuario_id = :uid AND v.cliente_id = :cid
             ORDER BY v.fecha DESC
@@ -261,7 +262,8 @@ def obtener_creditos_pendientes(uid):
                    cr.total, cr.saldo_pendiente,
                    cr.fecha_limite, cr.tipo_cuota, cr.estado,
                    CASE WHEN cr.fecha_limite < :hoy THEN TRUE ELSE FALSE END as vencido,
-                   v.factura_estado, v.factura_prefijo, v.factura_numero, v.factura_pdf_url
+                   v.factura_estado, v.factura_prefijo, v.factura_numero,
+                   v.factura_pdf_url, v.factura_xml_url
             FROM Creditos cr
             JOIN Clientes cl ON cr.cliente_id = cl.id
             JOIN Ventas v ON cr.venta_id = v.id
@@ -492,7 +494,8 @@ def obtener_facturas_periodo(uid, fecha_inicio, fecha_fin):
                    cl.documento as cliente_documento,
                    v.total, v.tipo_pago, v.estado as estado_venta, v.factura_estado, v.factura_alegra_id,
                    v.factura_prefijo, v.factura_numero,
-                   v.factura_cufe, v.factura_pdf_url, v.nota_credito_alegra_id, v.nota_credito_pdf_url
+                   v.factura_cufe, v.factura_pdf_url, v.factura_xml_url,
+                   v.nota_credito_alegra_id, v.nota_credito_pdf_url, v.nota_credito_xml_url
             FROM Ventas v
             LEFT JOIN Clientes cl ON v.cliente_id = cl.id
             WHERE v.usuario_id = :uid
@@ -512,7 +515,8 @@ def obtener_venta_para_facturar(uid, venta_id):
         return conn.execute(text("""
             SELECT id, cliente_id, total, tipo_pago, factura_alegra_id,
                    factura_estado, nota_credito_alegra_id,
-                   factura_cufe, factura_pdf_url, nota_credito_pdf_url
+                   factura_cufe, factura_pdf_url, factura_xml_url,
+                   nota_credito_pdf_url, nota_credito_xml_url
             FROM Ventas
             WHERE id = :vid AND usuario_id = :uid
         """), {"vid": venta_id, "uid": uid}).fetchone()
@@ -529,15 +533,15 @@ def obtener_credito_de_venta(venta_id):
         """), {"vid": venta_id}).fetchone()
 
 
-def guardar_nota_credito(venta_id, nota_credito_alegra_id, pdf_url=None):
-    """Guarda el id (y PDF) de la nota crédito emitida en Alegra para una venta anulada."""
+def guardar_nota_credito(venta_id, nota_credito_alegra_id, pdf_url=None, xml_url=None):
+    """Guarda el id (y PDF/XML) de la nota crédito emitida en Alegra para una venta anulada."""
     engine = obtener_conexion()
     with engine.begin() as conn:
         conn.execute(text("""
             UPDATE Ventas SET nota_credito_alegra_id = :ncid, nota_credito_pdf_url = :pdf_url,
-                   factura_estado = 'anulada'
+                   nota_credito_xml_url = :xml_url, factura_estado = 'anulada'
             WHERE id = :vid
-        """), {"ncid": nota_credito_alegra_id, "pdf_url": pdf_url, "vid": venta_id})
+        """), {"ncid": nota_credito_alegra_id, "pdf_url": pdf_url, "xml_url": xml_url, "vid": venta_id})
     invalidar_cache_ventas()
 
 
@@ -553,26 +557,26 @@ def obtener_items_venta(venta_id):
         """), {"vid": venta_id}).fetchall()
 
 
-def guardar_resultado_factura(venta_id, alegra_id=None, cufe=None, pdf_url=None, estado="emitida",
-                               prefijo=None, numero=None):
+def guardar_resultado_factura(venta_id, alegra_id=None, cufe=None, pdf_url=None, xml_url=None,
+                               estado="emitida", prefijo=None, numero=None):
     """Guarda el resultado de emitir (o intentar emitir) la factura electrónica de una venta."""
     engine = obtener_conexion()
     with engine.begin() as conn:
         conn.execute(text("""
             UPDATE Ventas
             SET factura_alegra_id = :alegra_id, factura_cufe = :cufe,
-                factura_pdf_url = :pdf_url, factura_estado = :estado,
+                factura_pdf_url = :pdf_url, factura_xml_url = :xml_url, factura_estado = :estado,
                 factura_prefijo = :prefijo, factura_numero = :numero
             WHERE id = :vid
         """), {
-            "alegra_id": alegra_id, "cufe": cufe, "pdf_url": pdf_url,
+            "alegra_id": alegra_id, "cufe": cufe, "pdf_url": pdf_url, "xml_url": xml_url,
             "estado": estado, "prefijo": prefijo, "numero": numero, "vid": venta_id
         })
     invalidar_cache_ventas()
 
 
-def actualizar_datos_factura(venta_id, cufe=None, pdf_url=None, prefijo=None, numero=None):
-    """Completa CUFE/PDF/prefijo/número de una factura ya emitida sin pisar lo que ya
+def actualizar_datos_factura(venta_id, cufe=None, pdf_url=None, xml_url=None, prefijo=None, numero=None):
+    """Completa CUFE/PDF/XML/prefijo/número de una factura ya emitida sin pisar lo que ya
     estaba guardado. Se usa al refrescar facturas cuya validación DIAN no estuvo lista
     al momento de emitirlas."""
     engine = obtener_conexion()
@@ -581,21 +585,27 @@ def actualizar_datos_factura(venta_id, cufe=None, pdf_url=None, prefijo=None, nu
             UPDATE Ventas
             SET factura_cufe = COALESCE(:cufe, factura_cufe),
                 factura_pdf_url = COALESCE(:pdf_url, factura_pdf_url),
+                factura_xml_url = COALESCE(:xml_url, factura_xml_url),
                 factura_prefijo = COALESCE(:prefijo, factura_prefijo),
                 factura_numero = COALESCE(:numero, factura_numero)
             WHERE id = :vid
-        """), {"cufe": cufe, "pdf_url": pdf_url, "prefijo": prefijo, "numero": numero, "vid": venta_id})
+        """), {
+            "cufe": cufe, "pdf_url": pdf_url, "xml_url": xml_url,
+            "prefijo": prefijo, "numero": numero, "vid": venta_id
+        })
     invalidar_cache_ventas()
 
 
-def actualizar_pdf_nota_credito(venta_id, pdf_url):
-    """Completa el PDF de una nota crédito ya emitida, cuando no llegó en la respuesta de creación."""
+def actualizar_pdf_nota_credito(venta_id, pdf_url, xml_url=None):
+    """Completa el PDF/XML de una nota crédito ya emitida, cuando no llegaron en la respuesta de creación."""
     engine = obtener_conexion()
     with engine.begin() as conn:
         conn.execute(text("""
-            UPDATE Ventas SET nota_credito_pdf_url = COALESCE(:pdf_url, nota_credito_pdf_url)
+            UPDATE Ventas
+            SET nota_credito_pdf_url = COALESCE(:pdf_url, nota_credito_pdf_url),
+                nota_credito_xml_url = COALESCE(:xml_url, nota_credito_xml_url)
             WHERE id = :vid
-        """), {"pdf_url": pdf_url, "vid": venta_id})
+        """), {"pdf_url": pdf_url, "xml_url": xml_url, "vid": venta_id})
     invalidar_cache_ventas()
 
 

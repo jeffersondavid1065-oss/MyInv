@@ -548,31 +548,38 @@ with tab_facturas:
             )
 
             dict_pdfs = {}
-            for _, r in df_mostrar_fe[df_mostrar_fe['factura_pdf_url'].notna()].iterrows():
-                etiqueta = f"Venta #{r['id']} — {r['cliente']} — {formato_cop(r['total'])} — Factura"
-                dict_pdfs[etiqueta] = r['factura_pdf_url']
-            for _, r in df_mostrar_fe[df_mostrar_fe['nota_credito_pdf_url'].notna()].iterrows():
-                etiqueta = f"Venta #{r['id']} — {r['cliente']} — {formato_cop(r['total'])} — Nota Crédito"
-                dict_pdfs[etiqueta] = r['nota_credito_pdf_url']
+            for _, r in df_mostrar_fe.iterrows():
+                base = f"Venta #{r['id']} — {r['cliente']} — {formato_cop(r['total'])}"
+                if pd.notna(r['factura_pdf_url']):
+                    dict_pdfs[f"{base} — Factura (PDF)"] = r['factura_pdf_url']
+                if pd.notna(r.get('factura_xml_url')):
+                    dict_pdfs[f"{base} — Factura (XML)"] = r['factura_xml_url']
+                if pd.notna(r['nota_credito_pdf_url']):
+                    dict_pdfs[f"{base} — Nota Crédito (PDF)"] = r['nota_credito_pdf_url']
+                if pd.notna(r.get('nota_credito_xml_url')):
+                    dict_pdfs[f"{base} — Nota Crédito (XML)"] = r['nota_credito_xml_url']
 
             if dict_pdfs:
                 st.markdown("---")
-                st.markdown("**Descargar factura o nota crédito:**")
+                st.markdown("**Descargar factura o nota crédito (PDF o XML):**")
+                st.caption("El XML es el documento legal timbrado ante la DIAN; el PDF es solo su representación gráfica.")
                 pdf_sel = st.selectbox("Selecciona el documento", options=list(dict_pdfs.keys()), key="pdf_factura_sel")
-                st.link_button("Abrir PDF", dict_pdfs[pdf_sel], use_container_width=True)
+                st.link_button("Abrir / Descargar", dict_pdfs[pdf_sel], use_container_width=True)
 
             pendientes_pdf = df_facturas[
                 (df_facturas['factura_alegra_id'].notna()
-                 & (df_facturas['factura_cufe'].isna() | df_facturas['factura_pdf_url'].isna()))
-                | (df_facturas['nota_credito_alegra_id'].notna() & df_facturas['nota_credito_pdf_url'].isna())
+                 & (df_facturas['factura_cufe'].isna() | df_facturas['factura_pdf_url'].isna()
+                    | df_facturas['factura_xml_url'].isna()))
+                | (df_facturas['nota_credito_alegra_id'].notna()
+                   & (df_facturas['nota_credito_pdf_url'].isna() | df_facturas['nota_credito_xml_url'].isna()))
             ]
             if not pendientes_pdf.empty:
                 st.markdown("---")
                 st.caption(
-                    f"{len(pendientes_pdf)} venta(s) sin CUFE o PDF confirmado todavía — "
+                    f"{len(pendientes_pdf)} venta(s) sin CUFE, PDF o XML confirmado todavía — "
                     "Alegra puede tardar unos minutos en validarlas ante la DIAN."
                 )
-                if st.button("Actualizar CUFE/PDF pendientes", use_container_width=True):
+                if st.button("Actualizar CUFE/PDF/XML pendientes", use_container_width=True):
                     with st.spinner("Consultando Alegra..."):
                         actualizadas = sum(
                             actualizar_pdf_cufe_venta(user_id, int(r['id']))

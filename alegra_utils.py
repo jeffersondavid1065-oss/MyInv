@@ -125,11 +125,12 @@ def crear_factura_venta(email, token, cliente_id, items, due_date=None, periodic
 
 def obtener_factura(email, token, factura_id):
     """Consulta el estado actual de una factura en Alegra, pidiendo explícitamente
-    el PDF: Alegra no lo incluye por defecto, hay que pedirlo con ?fields=pdf."""
+    el PDF y el XML timbrado (el documento legal ante la DIAN): Alegra no los
+    incluye por defecto, hay que pedirlos con ?fields=pdf,xml."""
     try:
         resp = requests.get(
             f"{BASE_URL}/invoices/{factura_id}", headers=_headers(email, token),
-            params={"fields": "pdf"}, timeout=15,
+            params={"fields": "pdf,xml"}, timeout=15,
         )
         if resp.status_code == 200:
             return resp.json()
@@ -140,11 +141,11 @@ def obtener_factura(email, token, factura_id):
 
 def obtener_nota_credito(email, token, nota_id):
     """Consulta el estado actual de una nota crédito en Alegra, pidiendo explícitamente
-    el PDF (igual que las facturas, Alegra no lo incluye por defecto)."""
+    el PDF y el XML timbrado (igual que las facturas, Alegra no los incluye por defecto)."""
     try:
         resp = requests.get(
             f"{BASE_URL}/credit-notes/{nota_id}", headers=_headers(email, token),
-            params={"fields": "pdf"}, timeout=15,
+            params={"fields": "pdf,xml"}, timeout=15,
         )
         if resp.status_code == 200:
             return resp.json()
@@ -440,16 +441,20 @@ def facturar_venta(uid, venta_id):
     number_template = factura.get("numberTemplate") if isinstance(factura.get("numberTemplate"), dict) else {}
     cufe = factura.get("stamp", {}).get("cufe") if isinstance(factura.get("stamp"), dict) else None
     pdf_url = factura.get("pdf") if isinstance(factura.get("pdf"), str) else None
+    xml_url = factura.get("xml") if isinstance(factura.get("xml"), str) else None
 
-    # La creación no trae el PDF (Alegra solo lo incluye si se pide con
-    # ?fields=pdf, y ese parámetro no aplica al crear). Se consulta de una vez
-    # para que el PDF quede listo sin que el negocio tenga que ir a
+    # La creación no trae el PDF ni el XML (Alegra solo los incluye si se piden
+    # con ?fields=pdf,xml, y ese parámetro no aplica al crear). Se consultan de
+    # una vez para que queden listos sin que el negocio tenga que ir a
     # "Actualizar CUFE/PDF pendientes" — el cliente a veces necesita la
     # factura impresa de inmediato.
-    if not pdf_url:
+    if not pdf_url or not xml_url:
         factura_completa = obtener_factura(email, token, factura.get("id"))
         if factura_completa:
-            pdf_url = factura_completa.get("pdf") if isinstance(factura_completa.get("pdf"), str) else None
+            if not pdf_url:
+                pdf_url = factura_completa.get("pdf") if isinstance(factura_completa.get("pdf"), str) else None
+            if not xml_url:
+                xml_url = factura_completa.get("xml") if isinstance(factura_completa.get("xml"), str) else None
             if not cufe and isinstance(factura_completa.get("stamp"), dict):
                 cufe = factura_completa["stamp"].get("cufe")
 
@@ -458,6 +463,7 @@ def facturar_venta(uid, venta_id):
         alegra_id=factura.get("id"),
         cufe=cufe,
         pdf_url=pdf_url,
+        xml_url=xml_url,
         estado="emitida",
         prefijo=number_template.get("prefix"),
         numero=str(number_template["number"]) if number_template.get("number") is not None else None,
@@ -516,12 +522,16 @@ def anular_factura_venta(uid, venta_id):
         return False, "Alegra rechazó la nota crédito. Revisa el error mostrado arriba."
 
     pdf_url_nc = nota.get("pdf") if isinstance(nota.get("pdf"), str) else None
-    if not pdf_url_nc:
+    xml_url_nc = nota.get("xml") if isinstance(nota.get("xml"), str) else None
+    if not pdf_url_nc or not xml_url_nc:
         nota_completa = obtener_nota_credito(email, token, nota.get("id"))
         if nota_completa:
-            pdf_url_nc = nota_completa.get("pdf") if isinstance(nota_completa.get("pdf"), str) else None
+            if not pdf_url_nc:
+                pdf_url_nc = nota_completa.get("pdf") if isinstance(nota_completa.get("pdf"), str) else None
+            if not xml_url_nc:
+                xml_url_nc = nota_completa.get("xml") if isinstance(nota_completa.get("xml"), str) else None
 
-    queries.guardar_nota_credito(venta_id, nota.get("id"), pdf_url=pdf_url_nc)
+    queries.guardar_nota_credito(venta_id, nota.get("id"), pdf_url=pdf_url_nc, xml_url=xml_url_nc)
     return True, f"Nota crédito emitida (Alegra #{nota.get('id')})."
 
 
@@ -545,26 +555,28 @@ def actualizar_pdf_cufe_venta(uid, venta_id):
 
     actualizo = False
 
-    if venta.factura_alegra_id and (not venta.factura_cufe or not venta.factura_pdf_url):
+    if venta.factura_alegra_id and (not venta.factura_cufe or not venta.factura_pdf_url or not venta.factura_xml_url):
         factura = obtener_factura(email, token, venta.factura_alegra_id)
         if factura:
             cufe = factura.get("stamp", {}).get("cufe") if isinstance(factura.get("stamp"), dict) else None
             pdf_url = factura.get("pdf") if isinstance(factura.get("pdf"), str) else None
+            xml_url = factura.get("xml") if isinstance(factura.get("xml"), str) else None
             number_template = factura.get("numberTemplate") if isinstance(factura.get("numberTemplate"), dict) else {}
-            if cufe or pdf_url:
+            if cufe or pdf_url or xml_url:
                 queries.actualizar_datos_factura(
-                    venta_id, cufe=cufe, pdf_url=pdf_url,
+                    venta_id, cufe=cufe, pdf_url=pdf_url, xml_url=xml_url,
                     prefijo=number_template.get("prefix"),
                     numero=str(number_template["number"]) if number_template.get("number") is not None else None,
                 )
                 actualizo = True
 
-    if venta.nota_credito_alegra_id and not venta.nota_credito_pdf_url:
+    if venta.nota_credito_alegra_id and (not venta.nota_credito_pdf_url or not venta.nota_credito_xml_url):
         nota = obtener_nota_credito(email, token, venta.nota_credito_alegra_id)
         if nota:
             pdf_url_nc = nota.get("pdf") if isinstance(nota.get("pdf"), str) else None
-            if pdf_url_nc:
-                queries.actualizar_pdf_nota_credito(venta_id, pdf_url_nc)
+            xml_url_nc = nota.get("xml") if isinstance(nota.get("xml"), str) else None
+            if pdf_url_nc or xml_url_nc:
+                queries.actualizar_pdf_nota_credito(venta_id, pdf_url_nc, xml_url=xml_url_nc)
                 actualizo = True
 
     return actualizo

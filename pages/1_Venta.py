@@ -714,14 +714,17 @@ with tab_pos:
                 venta_factura = conn_factura = None
                 with engine.connect() as conn_factura:
                     venta_factura = conn_factura.execute(text("""
-                        SELECT cliente_id, factura_estado, factura_alegra_id, factura_pdf_url
+                        SELECT cliente_id, factura_estado, factura_alegra_id, factura_pdf_url, factura_xml_url
                         FROM Ventas WHERE id = :vid
                     """), {"vid": vid}).fetchone()
 
                 if venta_factura and venta_factura[1] == "emitida":
                     st.success(f"Factura electrónica emitida (Alegra #{venta_factura[2]}).")
+                    col_fpdf, col_fxml = st.columns(2)
                     if venta_factura[3]:
-                        st.link_button("Ver PDF de la factura", venta_factura[3], use_container_width=True)
+                        col_fpdf.link_button("Ver PDF de la factura", venta_factura[3], use_container_width=True)
+                    if venta_factura[4]:
+                        col_fxml.link_button("Descargar XML (DIAN)", venta_factura[4], use_container_width=True)
                 elif not venta_factura or not venta_factura[0]:
                     st.caption("Esta venta no tiene cliente asociado — no se puede facturar electrónicamente.")
                 else:
@@ -778,15 +781,21 @@ with tab_historial:
         )
 
         dict_pdfs_hoy = {}
-        for _, r in df_hoy[df_hoy['factura_pdf_url'].notna()].iterrows():
-            dict_pdfs_hoy[f"Venta #{r['id']} — {r['cliente']} — {formato_cop(r['total'])} — Factura"] = r['factura_pdf_url']
-        for _, r in df_hoy[df_hoy['nota_credito_pdf_url'].notna()].iterrows():
-            dict_pdfs_hoy[f"Venta #{r['id']} — {r['cliente']} — {formato_cop(r['total'])} — Nota Crédito"] = r['nota_credito_pdf_url']
+        for _, r in df_hoy.iterrows():
+            base = f"Venta #{r['id']} — {r['cliente']} — {formato_cop(r['total'])}"
+            if pd.notna(r['factura_pdf_url']):
+                dict_pdfs_hoy[f"{base} — Factura (PDF)"] = r['factura_pdf_url']
+            if pd.notna(r.get('factura_xml_url')):
+                dict_pdfs_hoy[f"{base} — Factura (XML)"] = r['factura_xml_url']
+            if pd.notna(r['nota_credito_pdf_url']):
+                dict_pdfs_hoy[f"{base} — Nota Crédito (PDF)"] = r['nota_credito_pdf_url']
+            if pd.notna(r.get('nota_credito_xml_url')):
+                dict_pdfs_hoy[f"{base} — Nota Crédito (XML)"] = r['nota_credito_xml_url']
         if dict_pdfs_hoy:
             st.markdown("---")
-            st.markdown("**Descargar factura o nota crédito:**")
+            st.markdown("**Descargar factura o nota crédito (PDF o XML):**")
             pdf_hoy_sel = st.selectbox("Selecciona el documento", options=list(dict_pdfs_hoy.keys()), key="pdf_hoy_sel")
-            st.link_button("Abrir PDF", dict_pdfs_hoy[pdf_hoy_sel], use_container_width=True)
+            st.link_button("Abrir / Descargar", dict_pdfs_hoy[pdf_hoy_sel], use_container_width=True)
 
         st.markdown("---")
         st.markdown("**Reimprimir ticket:**")
@@ -918,7 +927,8 @@ with tab_devolucion:
                        DATE(v.fecha) as fecha,
                        COALESCE(cl.nombre, 'Venta directa') as cliente,
                        v.factura_estado, v.factura_alegra_id, v.factura_prefijo,
-                       v.factura_numero, v.nota_credito_alegra_id, v.nota_credito_pdf_url
+                       v.factura_numero, v.nota_credito_alegra_id, v.nota_credito_pdf_url,
+                       v.nota_credito_xml_url
                 FROM Ventas v
                 LEFT JOIN Clientes cl ON v.cliente_id = cl.id
                 WHERE v.id = :vid AND v.usuario_id = :uid
@@ -940,8 +950,11 @@ with tab_devolucion:
                         f"Factura electrónica {numero_factura_dev} anulada mediante "
                         f"nota crédito (Alegra #{venta_dev[10]})."
                     )
+                    col_ncpdf, col_ncxml = st.columns(2)
                     if venta_dev[11]:
-                        st.link_button("Abrir PDF de la Nota Crédito", venta_dev[11], use_container_width=True)
+                        col_ncpdf.link_button("Ver PDF de la Nota Crédito", venta_dev[11], use_container_width=True)
+                    if venta_dev[12]:
+                        col_ncxml.link_button("Descargar XML (DIAN)", venta_dev[12], use_container_width=True)
                 elif venta_dev[7]:
                     st.warning(
                         "Esta venta tenía factura electrónica emitida pero no se confirmó la nota crédito."
