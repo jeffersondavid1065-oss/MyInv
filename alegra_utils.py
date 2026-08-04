@@ -124,11 +124,13 @@ def crear_factura_venta(email, token, cliente_id, items, due_date=None, periodic
 
 
 def obtener_factura(email, token, factura_id):
-    """Consulta el estado actual de una factura en Alegra. Se usa para completar
-    CUFE/PDF cuando la validación DIAN no estuvo lista al momento de emitirla
-    (Alegra la procesa de forma asíncrona, no siempre llega en la respuesta de creación)."""
+    """Consulta el estado actual de una factura en Alegra, pidiendo explícitamente
+    el PDF: Alegra no lo incluye por defecto, hay que pedirlo con ?fields=pdf."""
     try:
-        resp = requests.get(f"{BASE_URL}/invoices/{factura_id}", headers=_headers(email, token), timeout=15)
+        resp = requests.get(
+            f"{BASE_URL}/invoices/{factura_id}", headers=_headers(email, token),
+            params={"fields": "pdf"}, timeout=15,
+        )
         if resp.status_code == 200:
             return resp.json()
         return None
@@ -137,10 +139,13 @@ def obtener_factura(email, token, factura_id):
 
 
 def obtener_nota_credito(email, token, nota_id):
-    """Consulta el estado actual de una nota crédito en Alegra, para completar su PDF
-    cuando no llegó en la respuesta de creación."""
+    """Consulta el estado actual de una nota crédito en Alegra, pidiendo explícitamente
+    el PDF (igual que las facturas, Alegra no lo incluye por defecto)."""
     try:
-        resp = requests.get(f"{BASE_URL}/credit-notes/{nota_id}", headers=_headers(email, token), timeout=15)
+        resp = requests.get(
+            f"{BASE_URL}/credit-notes/{nota_id}", headers=_headers(email, token),
+            params={"fields": "pdf"}, timeout=15,
+        )
         if resp.status_code == 200:
             return resp.json()
         return None
