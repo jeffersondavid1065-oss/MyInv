@@ -1,4 +1,5 @@
 import streamlit as st
+from db import init_db
 
 
 def aplicar_estilos(is_logged=True):
@@ -62,6 +63,7 @@ def verificar_auth():
         st.stop()
 
     aplicar_estilos(is_logged=True)
+    init_db()
 
     return (
         st.session_state.auth["user_id"],
