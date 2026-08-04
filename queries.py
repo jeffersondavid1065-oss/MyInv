@@ -481,7 +481,8 @@ def obtener_venta_para_facturar(uid, venta_id):
     with engine.connect() as conn:
         return conn.execute(text("""
             SELECT id, cliente_id, total, tipo_pago, factura_alegra_id,
-                   factura_estado, nota_credito_alegra_id
+                   factura_estado, nota_credito_alegra_id,
+                   factura_cufe, factura_pdf_url, nota_credito_pdf_url
             FROM Ventas
             WHERE id = :vid AND usuario_id = :uid
         """), {"vid": venta_id, "uid": uid}).fetchone()
@@ -537,6 +538,34 @@ def guardar_resultado_factura(venta_id, alegra_id=None, cufe=None, pdf_url=None,
             "alegra_id": alegra_id, "cufe": cufe, "pdf_url": pdf_url,
             "estado": estado, "prefijo": prefijo, "numero": numero, "vid": venta_id
         })
+    invalidar_cache_ventas()
+
+
+def actualizar_datos_factura(venta_id, cufe=None, pdf_url=None, prefijo=None, numero=None):
+    """Completa CUFE/PDF/prefijo/número de una factura ya emitida sin pisar lo que ya
+    estaba guardado. Se usa al refrescar facturas cuya validación DIAN no estuvo lista
+    al momento de emitirlas."""
+    engine = obtener_conexion()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE Ventas
+            SET factura_cufe = COALESCE(:cufe, factura_cufe),
+                factura_pdf_url = COALESCE(:pdf_url, factura_pdf_url),
+                factura_prefijo = COALESCE(:prefijo, factura_prefijo),
+                factura_numero = COALESCE(:numero, factura_numero)
+            WHERE id = :vid
+        """), {"cufe": cufe, "pdf_url": pdf_url, "prefijo": prefijo, "numero": numero, "vid": venta_id})
+    invalidar_cache_ventas()
+
+
+def actualizar_pdf_nota_credito(venta_id, pdf_url):
+    """Completa el PDF de una nota crédito ya emitida, cuando no llegó en la respuesta de creación."""
+    engine = obtener_conexion()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE Ventas SET nota_credito_pdf_url = COALESCE(:pdf_url, nota_credito_pdf_url)
+            WHERE id = :vid
+        """), {"pdf_url": pdf_url, "vid": venta_id})
     invalidar_cache_ventas()
 
 

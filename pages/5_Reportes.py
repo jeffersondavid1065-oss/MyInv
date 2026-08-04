@@ -14,7 +14,7 @@ from queries import (
 )
 from utils import aplicar_estilos, verificar_auth
 from tz_utils import hoy_bogota, ahora_bogota
-from alegra_utils import facturar_venta
+from alegra_utils import facturar_venta, actualizar_pdf_cufe_venta
 
 st.set_page_config(page_title="Reportes", layout="wide")
 aplicar_estilos()
@@ -560,6 +560,29 @@ with tab_facturas:
                 st.markdown("**Descargar factura o nota crédito:**")
                 pdf_sel = st.selectbox("Selecciona el documento", options=list(dict_pdfs.keys()), key="pdf_factura_sel")
                 st.link_button("Abrir PDF", dict_pdfs[pdf_sel], use_container_width=True)
+
+            pendientes_pdf = df_facturas[
+                (df_facturas['factura_alegra_id'].notna()
+                 & (df_facturas['factura_cufe'].isna() | df_facturas['factura_pdf_url'].isna()))
+                | (df_facturas['nota_credito_alegra_id'].notna() & df_facturas['nota_credito_pdf_url'].isna())
+            ]
+            if not pendientes_pdf.empty:
+                st.markdown("---")
+                st.caption(
+                    f"{len(pendientes_pdf)} venta(s) sin CUFE o PDF confirmado todavía — "
+                    "Alegra puede tardar unos minutos en validarlas ante la DIAN."
+                )
+                if st.button("Actualizar CUFE/PDF pendientes", use_container_width=True):
+                    with st.spinner("Consultando Alegra..."):
+                        actualizadas = sum(
+                            actualizar_pdf_cufe_venta(user_id, int(r['id']))
+                            for _, r in pendientes_pdf.iterrows()
+                        )
+                    if actualizadas:
+                        st.success(f"Se completaron datos de {actualizadas} venta(s).")
+                    else:
+                        st.info("Todavía no hay novedades en Alegra para estas facturas/notas crédito.")
+                    st.rerun()
 
             facturas_con_error = df_facturas[df_facturas['factura_estado'] == 'error']
             if not facturas_con_error.empty:

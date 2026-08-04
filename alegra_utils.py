@@ -123,6 +123,31 @@ def crear_factura_venta(email, token, cliente_id, items, due_date=None, periodic
         return None
 
 
+def obtener_factura(email, token, factura_id):
+    """Consulta el estado actual de una factura en Alegra. Se usa para completar
+    CUFE/PDF cuando la validación DIAN no estuvo lista al momento de emitirla
+    (Alegra la procesa de forma asíncrona, no siempre llega en la respuesta de creación)."""
+    try:
+        resp = requests.get(f"{BASE_URL}/invoices/{factura_id}", headers=_headers(email, token), timeout=15)
+        if resp.status_code == 200:
+            return resp.json()
+        return None
+    except requests.RequestException:
+        return None
+
+
+def obtener_nota_credito(email, token, nota_id):
+    """Consulta el estado actual de una nota crédito en Alegra, para completar su PDF
+    cuando no llegó en la respuesta de creación."""
+    try:
+        resp = requests.get(f"{BASE_URL}/credit-notes/{nota_id}", headers=_headers(email, token), timeout=15)
+        if resp.status_code == 200:
+            return resp.json()
+        return None
+    except requests.RequestException:
+        return None
+
+
 def enviar_factura_email(email, token, factura_id, destinatario):
     """Envía una factura ya emitida (estado 'open') al correo del cliente. Devuelve (True, msg) o (False, msg)."""
     try:
@@ -475,6 +500,51 @@ def anular_factura_venta(uid, venta_id):
         pdf_url=nota.get("pdf") if isinstance(nota.get("pdf"), str) else None,
     )
     return True, f"Nota crédito emitida (Alegra #{nota.get('id')})."
+
+
+def actualizar_pdf_cufe_venta(uid, venta_id):
+    """
+    Vuelve a consultar en Alegra la factura y/o nota crédito de una venta para
+    completar el CUFE y el PDF cuando no llegaron en la respuesta de creación
+    (la validación ante la DIAN puede quedar pendiente en ese momento).
+    Devuelve True si completó algún dato nuevo, False si no había nada pendiente
+    o Alegra todavía no tiene la validación lista.
+    """
+    import queries
+
+    venta = queries.obtener_venta_para_facturar(uid, venta_id)
+    if not venta:
+        return False
+
+    email, token = obtener_credenciales(uid)
+    if not email or not token:
+        return False
+
+    actualizo = False
+
+    if venta.factura_alegra_id and (not venta.factura_cufe or not venta.factura_pdf_url):
+        factura = obtener_factura(email, token, venta.factura_alegra_id)
+        if factura:
+            cufe = factura.get("stamp", {}).get("cufe") if isinstance(factura.get("stamp"), dict) else None
+            pdf_url = factura.get("pdf") if isinstance(factura.get("pdf"), str) else None
+            number_template = factura.get("numberTemplate") if isinstance(factura.get("numberTemplate"), dict) else {}
+            if cufe or pdf_url:
+                queries.actualizar_datos_factura(
+                    venta_id, cufe=cufe, pdf_url=pdf_url,
+                    prefijo=number_template.get("prefix"),
+                    numero=str(number_template["number"]) if number_template.get("number") is not None else None,
+                )
+                actualizo = True
+
+    if venta.nota_credito_alegra_id and not venta.nota_credito_pdf_url:
+        nota = obtener_nota_credito(email, token, venta.nota_credito_alegra_id)
+        if nota:
+            pdf_url_nc = nota.get("pdf") if isinstance(nota.get("pdf"), str) else None
+            if pdf_url_nc:
+                queries.actualizar_pdf_nota_credito(venta_id, pdf_url_nc)
+                actualizo = True
+
+    return actualizo
 
 
 def registrar_abono_credito(uid, venta_id, monto, metodo_pago="Efectivo"):
