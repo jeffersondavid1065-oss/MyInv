@@ -493,7 +493,20 @@ with tab_pos:
 
             st.markdown("---")
 
-            if tipo_pago and st.button("Confirmar Venta", type="primary", use_container_width=True):
+            col_venta1, col_venta2 = st.columns(2)
+            confirmar_venta = tipo_pago and col_venta1.button(
+                "Registrar Venta", type="primary", use_container_width=True
+            )
+            confirmar_venta_factura = tipo_pago and col_venta2.button(
+                "Registrar Venta con Factura Electrónica", use_container_width=True
+            )
+
+            if confirmar_venta_factura and not cliente_id:
+                st.warning(
+                    "Selecciona un cliente registrado (con documento) en 'Cliente' "
+                    "para poder facturar electrónicamente."
+                )
+            elif confirmar_venta or confirmar_venta_factura:
                 try:
                     # Subtotal bruto (antes de cualquier descuento) y descuento total
                     # (suma de descuentos por ítem + descuento global), para que el
@@ -600,6 +613,15 @@ with tab_pos:
                     st.success(f"Venta #{venta_id} registrada.")
                     if cambio > 0:
                         st.info(f"Cambio: {formato_cop(cambio)}")
+
+                    if confirmar_venta_factura:
+                        with st.spinner("Emitiendo factura ante Alegra..."):
+                            ok_f, msg_f = facturar_venta(user_id, venta_id)
+                        if ok_f:
+                            st.success(msg_f)
+                        else:
+                            st.warning(msg_f)
+
                     st.rerun()
 
                 except ValueError as ve:
