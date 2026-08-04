@@ -213,7 +213,7 @@ def obtener_creditos_cliente(uid, cliente_id):
         return pd.read_sql_query(text("""
             SELECT c.id, v.id as venta_id, c.total, c.saldo_pendiente,
                    c.fecha_inicio, c.fecha_limite, c.tipo_cuota,
-                   c.valor_cuota, c.estado
+                   c.valor_cuota, c.estado, v.factura_estado, v.factura_pdf_url
             FROM Creditos c
             JOIN Ventas v ON c.venta_id = v.id
             WHERE c.usuario_id = :uid AND c.cliente_id = :cid
@@ -230,9 +230,11 @@ def obtener_creditos_pendientes(uid):
             SELECT cr.id, cl.nombre as cliente, cl.telefono,
                    cr.total, cr.saldo_pendiente,
                    cr.fecha_limite, cr.tipo_cuota, cr.estado,
-                   CASE WHEN cr.fecha_limite < :hoy THEN TRUE ELSE FALSE END as vencido
+                   CASE WHEN cr.fecha_limite < :hoy THEN TRUE ELSE FALSE END as vencido,
+                   v.factura_estado
             FROM Creditos cr
             JOIN Clientes cl ON cr.cliente_id = cl.id
+            JOIN Ventas v ON cr.venta_id = v.id
             WHERE cr.usuario_id = :uid AND cr.estado = 'Activo'
             ORDER BY cr.fecha_limite ASC
         """), con=conn, params={"uid": uid, "hoy": hoy_bogota().strftime('%Y-%m-%d')})
@@ -436,6 +438,15 @@ def eliminar_credenciales_alegra(uid):
         conn.execute(text("""
             UPDATE Usuarios SET alegra_email = NULL, alegra_token = NULL WHERE id = :uid
         """), {"uid": uid})
+
+
+def obtener_venta_id_de_credito(credito_id):
+    """Devuelve el venta_id ligado a un crédito, para poder sincronizar abonos con Alegra."""
+    engine = obtener_conexion()
+    with engine.connect() as conn:
+        return conn.execute(text("""
+            SELECT venta_id FROM Creditos WHERE id = :cid
+        """), {"cid": credito_id}).scalar()
 
 
 @st.cache_data(ttl=30)

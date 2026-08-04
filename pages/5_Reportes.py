@@ -375,9 +375,11 @@ with tab_cartera:
                    COUNT(cr.id) as creditos_activos,
                    SUM(cr.total) as total_prestado,
                    SUM(cr.saldo_pendiente) as saldo_pendiente,
-                   MAX(cr.fecha_limite) as proxima_fecha
+                   MAX(cr.fecha_limite) as proxima_fecha,
+                   SUM(CASE WHEN v.factura_estado = 'emitida' THEN 1 ELSE 0 END) as creditos_facturados
             FROM Creditos cr
             JOIN Clientes cl ON cr.cliente_id = cl.id
+            JOIN Ventas v ON cr.venta_id = v.id
             WHERE cr.usuario_id = :uid AND cr.estado = 'Activo'
             GROUP BY cl.id, cl.nombre, cl.telefono
             ORDER BY saldo_pendiente DESC
@@ -391,7 +393,8 @@ with tab_cartera:
             df_cartera.rename(columns={
                 'cliente': 'Cliente', 'telefono': 'Teléfono',
                 'creditos_activos': 'Créditos', 'total_prestado': 'Total Prestado ($)',
-                'saldo_pendiente': 'Saldo Pendiente ($)', 'proxima_fecha': 'Próximo Vence'
+                'saldo_pendiente': 'Saldo Pendiente ($)', 'proxima_fecha': 'Próximo Vence',
+                'creditos_facturados': 'Facturados'
             }),
             use_container_width=True, hide_index=True,
             column_config={

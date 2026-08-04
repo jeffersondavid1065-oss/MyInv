@@ -131,6 +131,54 @@ def enviar_factura_email(email, token, factura_id, destinatario):
         return False, f"Error de conexión al enviar correo: {e}"
 
 
+@st.cache_data(ttl=3600)
+def obtener_cuenta_por_tipo(email, token, tipo):
+    """
+    Busca en el catálogo de cuentas bancarias/caja de Alegra la primera que
+    coincida con el tipo dado ('cash' para efectivo, 'bank' para transferencia).
+    Devuelve el id, o None si no encuentra ninguna.
+    """
+    try:
+        resp = requests.get(f"{BASE_URL}/bank-accounts", headers=_headers(email, token), params={"limit": 30}, timeout=15)
+        if resp.status_code != 200:
+            return None
+        cuentas = resp.json()
+        for c in cuentas:
+            if c.get("type") == tipo:
+                return c.get("id")
+        return None
+    except (requests.RequestException, ValueError):
+        return None
+
+
+def registrar_pago_factura(email, token, factura_id, contacto_id, monto, metodo_pago="cash"):
+    """
+    Registra un abono/pago sobre una factura ya emitida en Alegra.
+    metodo_pago: 'cash' (efectivo) o 'transfer' (transferencia).
+    Devuelve (True, mensaje) o (False, mensaje).
+    """
+    tipo_cuenta = "bank" if metodo_pago == "transfer" else "cash"
+    cuenta_id = obtener_cuenta_por_tipo(email, token, tipo_cuenta)
+    if not cuenta_id:
+        return False, f"No se encontró una cuenta de tipo '{tipo_cuenta}' en tu cuenta de Alegra para registrar el pago."
+
+    payload = {
+        "date": hoy_bogota().isoformat(),
+        "bankAccount": {"id": cuenta_id},
+        "paymentMethod": metodo_pago,
+        "client": {"id": contacto_id},
+        "invoices": [{"id": factura_id, "amount": float(monto)}],
+    }
+
+    try:
+        resp = requests.post(f"{BASE_URL}/payments", headers=_headers(email, token), json=payload, timeout=20)
+        if resp.status_code in (200, 201):
+            return True, "Pago registrado en Alegra."
+        return False, f"Alegra rechazó el pago ({resp.status_code}): {resp.text}"
+    except requests.RequestException as e:
+        return False, f"Error de conexión al registrar el pago: {e}"
+
+
 def crear_nota_credito(email, token, factura_alegra_id, cliente_id, items, total):
     """
     Crea una nota crédito en Alegra que anula (total o parcialmente) una factura ya emitida.
@@ -386,3 +434,31 @@ def anular_factura_venta(uid, venta_id):
 
     queries.guardar_nota_credito(venta_id, nota.get("id"))
     return True, f"Nota crédito emitida (Alegra #{nota.get('id')})."
+
+
+def registrar_abono_credito(uid, venta_id, monto, metodo_pago="Efectivo"):
+    """
+    Sincroniza con Alegra un abono hecho en MyInv sobre una venta a crédito:
+    si esa venta tiene factura electrónica emitida, registra el pago contra
+    esa factura en Alegra. Si la venta nunca se facturó, no hace nada (no es
+    un error). metodo_pago: 'Efectivo' o 'Transferencia'.
+    Devuelve (True, mensaje) o (False, mensaje).
+    """
+    import queries
+
+    venta = queries.obtener_venta_para_facturar(uid, venta_id)
+    if not venta:
+        return False, "Venta no encontrada."
+    if venta.factura_estado != "emitida" or not venta.factura_alegra_id:
+        return True, "Esta venta no tiene factura electrónica, el abono no se sincroniza con Alegra."
+
+    email, token = obtener_credenciales(uid)
+    if not email or not token:
+        return False, "Este negocio no tiene configurada su cuenta de Alegra."
+
+    contacto_id = obtener_o_crear_contacto(uid, venta.cliente_id, email, token)
+    if not contacto_id:
+        return False, "No se pudo obtener el cliente en Alegra."
+
+    metodo_alegra = "transfer" if metodo_pago == "Transferencia" else "cash"
+    return registrar_pago_factura(email, token, venta.factura_alegra_id, contacto_id, monto, metodo_alegra)

@@ -12,6 +12,7 @@ from queries import (
 )
 from utils import aplicar_estilos, verificar_auth
 from tz_utils import hoy_bogota
+from alegra_utils import registrar_abono_credito
 
 st.set_page_config(page_title="Clientes y Créditos", layout="wide")
 aplicar_estilos()
@@ -72,11 +73,14 @@ with tab_creditos:
         st.markdown("**Todos los créditos activos:**")
         df_mostrar = df_creditos[[
             'cliente', 'total', 'saldo_pendiente',
-            'fecha_limite', 'tipo_cuota', 'estado', 'vencido'
+            'fecha_limite', 'tipo_cuota', 'estado', 'vencido', 'factura_estado'
         ]].copy()
+        df_mostrar['factura_estado'] = df_mostrar['factura_estado'].fillna('Sin facturar').replace({
+            'emitida': 'Facturada', 'error': 'Error factura', 'anulada': 'Anulada (N.C.)'
+        })
         df_mostrar.columns = [
             'Cliente', 'Total Original', 'Saldo Pendiente',
-            'Fecha Límite', 'Tipo Cuota', 'Estado', 'Vencido'
+            'Fecha Límite', 'Tipo Cuota', 'Estado', 'Vencido', 'Facturación'
         ]
         st.dataframe(
             df_mostrar.style.format({
@@ -111,11 +115,12 @@ with tab_creditos:
                 # Mostrar deudas del cliente
                 st.markdown(f"**Deudas activas de {cliente_abono}:**")
                 for _, cred in creditos_activos.iterrows():
+                    factura_txt = " 🧾" if cred.get('factura_estado') == 'emitida' else ""
                     st.write(
                         f"• Crédito #{cred['id']} — "
                         f"Total: {formato_cop(cred['total'])} — "
                         f"Saldo: {formato_cop(cred['saldo_pendiente'])} — "
-                        f"Vence: {cred['fecha_limite']}"
+                        f"Vence: {cred['fecha_limite']}{factura_txt}"
                     )
 
                 # Seleccionar crédito a abonar
@@ -128,11 +133,15 @@ with tab_creditos:
                     options=list(dict_creditos.keys())
                 )
                 credito_id_abono = dict_creditos[credito_sel]
-                saldo_actual = creditos_activos[
-                    creditos_activos['id'] == credito_id_abono
-                ]['saldo_pendiente'].values[0]
+                fila_credito = creditos_activos[creditos_activos['id'] == credito_id_abono].iloc[0]
+                saldo_actual = fila_credito['saldo_pendiente']
+                venta_id_credito = int(fila_credito['venta_id'])
+                tiene_factura = fila_credito.get('factura_estado') == 'emitida'
 
-                col_ab1, col_ab2 = st.columns(2)
+                if tiene_factura:
+                    st.caption("🧾 Esta venta tiene factura electrónica emitida — el abono se sincronizará con Alegra.")
+
+                col_ab1, col_ab2, col_ab3 = st.columns(3)
                 with col_ab1:
                     min_abono = min(1000.0, float(saldo_actual))
                     monto_abono = st.number_input(
@@ -143,6 +152,8 @@ with tab_creditos:
                         step=min_abono
                     )
                 with col_ab2:
+                    metodo_abono = st.radio("Método", ["Efectivo", "Transferencia"], horizontal=True)
+                with col_ab3:
                     notas_abono = st.text_input("Notas (opcional)")
 
                 nuevo_saldo = float(saldo_actual) - float(monto_abono)
@@ -178,6 +189,13 @@ with tab_creditos:
                             st.success(f"Abono registrado. ¡Crédito #{credito_id_abono} pagado completamente!")
                         else:
                             st.success(f"Abono de {formato_cop(monto_abono)} registrado. Saldo pendiente: {formato_cop(nuevo_saldo)}")
+
+                        if tiene_factura:
+                            with st.spinner("Sincronizando abono con Alegra..."):
+                                ok_al, msg_al = registrar_abono_credito(user_id, venta_id_credito, monto_abono, metodo_abono)
+                            if not ok_al:
+                                st.warning(f"El abono quedó registrado en MyInv, pero: {msg_al}")
+
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error al registrar abono: {e}")
