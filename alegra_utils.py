@@ -1,8 +1,7 @@
 """
 Módulo para emitir facturas electrónicas a través de la API de Alegra.
-Fase de desarrollo: usa una sola cuenta (la del sandbox) desde st.secrets.
-Cuando se conecte por negocio (multi-tenant), las funciones deberán recibir
-email/token en vez de leerlos siempre de st.secrets.
+Cada negocio (usuario_id) tiene su propia cuenta de Alegra, guardada en
+Usuarios.alegra_email / Usuarios.alegra_token — no hay credenciales globales.
 """
 
 import base64
@@ -13,10 +12,8 @@ from tz_utils import hoy_bogota
 BASE_URL = "https://api.alegra.com/api/v1"
 
 
-def _headers():
-    """Arma el header Authorization Basic a partir de las credenciales en secrets."""
-    email = st.secrets["alegra"]["email"]
-    token = st.secrets["alegra"]["token"]
+def _headers(email, token):
+    """Arma el header Authorization Basic a partir de las credenciales dadas."""
     credenciales = base64.b64encode(f"{email}:{token}".encode()).decode()
     return {
         "Authorization": f"Basic {credenciales}",
@@ -25,18 +22,20 @@ def _headers():
     }
 
 
-def probar_conexion():
-    """Verifica que las credenciales configuradas funcionen contra la API de Alegra."""
+def probar_conexion(email, token):
+    """Verifica que un par email/token funcione contra la API de Alegra."""
     try:
-        resp = requests.get(f"{BASE_URL}/contacts", headers=_headers(), params={"limit": 1}, timeout=15)
+        resp = requests.get(f"{BASE_URL}/contacts", headers=_headers(email, token), params={"limit": 1}, timeout=15)
         if resp.status_code == 200:
             return True, "Conexión exitosa con Alegra."
+        if resp.status_code == 401:
+            return False, "Credenciales rechazadas por Alegra (email o token incorrectos)."
         return False, f"Alegra respondió {resp.status_code}: {resp.text}"
     except requests.RequestException as e:
         return False, f"Error de conexión: {e}"
 
 
-def crear_contacto(nombre, identificacion, tipo_identificacion="CC", email=None,
+def crear_contacto(email, token, nombre, identificacion, tipo_identificacion="CC", email_cliente=None,
                     kind_of_person="PERSON_ENTITY", regimen="SIMPLIFIED_REGIME"):
     """
     Crea un contacto/cliente en Alegra y devuelve su id, o None si falla.
@@ -56,11 +55,11 @@ def crear_contacto(nombre, identificacion, tipo_identificacion="CC", email=None,
         "regime": regimen,
         "identificationObject": {"type": tipo_identificacion, "number": identificacion},
     }
-    if email:
-        payload["email"] = email
+    if email_cliente:
+        payload["email"] = email_cliente
 
     try:
-        resp = requests.post(f"{BASE_URL}/contacts", headers=_headers(), json=payload, timeout=15)
+        resp = requests.post(f"{BASE_URL}/contacts", headers=_headers(email, token), json=payload, timeout=15)
         if resp.status_code in (200, 201):
             return resp.json().get("id")
         st.error(f"Error al crear contacto en Alegra ({resp.status_code}): {resp.text}")
@@ -70,14 +69,14 @@ def crear_contacto(nombre, identificacion, tipo_identificacion="CC", email=None,
         return None
 
 
-def crear_item(nombre, precio, referencia=None):
+def crear_item(email, token, nombre, precio, referencia=None):
     """Crea un ítem/producto en el catálogo de Alegra y devuelve su id, o None si falla."""
     payload = {"name": nombre, "price": precio}
     if referencia:
         payload["reference"] = referencia
 
     try:
-        resp = requests.post(f"{BASE_URL}/items", headers=_headers(), json=payload, timeout=15)
+        resp = requests.post(f"{BASE_URL}/items", headers=_headers(email, token), json=payload, timeout=15)
         if resp.status_code in (200, 201):
             return resp.json().get("id")
         st.error(f"Error al crear ítem en Alegra ({resp.status_code}): {resp.text}")
@@ -87,54 +86,7 @@ def crear_item(nombre, precio, referencia=None):
         return None
 
 
-def obtener_o_crear_contacto(uid, cliente_id):
-    """
-    Devuelve el alegra_contact_id de un cliente de MyInv, creándolo en Alegra
-    la primera vez (y guardándolo) si todavía no existe.
-    """
-    import queries
-
-    cliente = queries.obtener_datos_facturacion_cliente(uid, cliente_id)
-    if not cliente:
-        st.error("Cliente no encontrado.")
-        return None
-
-    if cliente.alegra_contact_id:
-        return cliente.alegra_contact_id
-
-    alegra_id = crear_contacto(
-        nombre=cliente.nombre,
-        identificacion=cliente.documento,
-        tipo_identificacion=cliente.tipo_documento or "CC",
-        email=cliente.email,
-    )
-    if alegra_id:
-        queries.guardar_alegra_contact_id(cliente_id, alegra_id)
-    return alegra_id
-
-
-def obtener_o_crear_item(uid, producto_id):
-    """
-    Devuelve el alegra_item_id de un producto de MyInv, creándolo en el catálogo
-    de Alegra la primera vez (y guardándolo) si todavía no existe.
-    """
-    import queries
-
-    producto = queries.obtener_datos_facturacion_producto(uid, producto_id)
-    if not producto:
-        st.error("Producto no encontrado.")
-        return None
-
-    if producto.alegra_item_id:
-        return producto.alegra_item_id
-
-    alegra_id = crear_item(nombre=producto.nombre, precio=float(producto.precio_venta))
-    if alegra_id:
-        queries.guardar_alegra_item_id(producto_id, alegra_id)
-    return alegra_id
-
-
-def crear_factura_venta(cliente_id, items):
+def crear_factura_venta(email, token, cliente_id, items):
     """
     Crea una factura de venta en Alegra.
     items: lista de dicts [{"id": <id_item_alegra>, "price": float, "quantity": float}, ...]
@@ -148,7 +100,7 @@ def crear_factura_venta(cliente_id, items):
     }
 
     try:
-        resp = requests.post(f"{BASE_URL}/invoices", headers=_headers(), json=payload, timeout=30)
+        resp = requests.post(f"{BASE_URL}/invoices", headers=_headers(email, token), json=payload, timeout=30)
         if resp.status_code in (200, 201):
             return resp.json()
         st.error(f"Error al crear factura en Alegra ({resp.status_code}): {resp.text}")
@@ -158,14 +110,77 @@ def crear_factura_venta(cliente_id, items):
         return None
 
 
+def obtener_credenciales(uid):
+    """Devuelve (email, token) de Alegra configurados por este negocio, o (None, None) si no ha configurado nada."""
+    import queries
+
+    negocio = queries.obtener_credenciales_alegra(uid)
+    if not negocio or not negocio.alegra_email or not negocio.alegra_token:
+        return None, None
+    return negocio.alegra_email, negocio.alegra_token
+
+
+def obtener_o_crear_contacto(uid, cliente_id, email, token):
+    """
+    Devuelve el alegra_contact_id de un cliente de MyInv, creándolo en Alegra
+    (con la cuenta del negocio 'uid') la primera vez si todavía no existe.
+    """
+    import queries
+
+    cliente = queries.obtener_datos_facturacion_cliente(uid, cliente_id)
+    if not cliente:
+        st.error("Cliente no encontrado.")
+        return None
+
+    if cliente.alegra_contact_id:
+        return cliente.alegra_contact_id
+
+    alegra_id = crear_contacto(
+        email, token,
+        nombre=cliente.nombre,
+        identificacion=cliente.documento,
+        tipo_identificacion=cliente.tipo_documento or "CC",
+        email_cliente=cliente.email,
+    )
+    if alegra_id:
+        queries.guardar_alegra_contact_id(cliente_id, alegra_id)
+    return alegra_id
+
+
+def obtener_o_crear_item(uid, producto_id, email, token):
+    """
+    Devuelve el alegra_item_id de un producto de MyInv, creándolo en el catálogo
+    de Alegra (con la cuenta del negocio 'uid') la primera vez si todavía no existe.
+    """
+    import queries
+
+    producto = queries.obtener_datos_facturacion_producto(uid, producto_id)
+    if not producto:
+        st.error("Producto no encontrado.")
+        return None
+
+    if producto.alegra_item_id:
+        return producto.alegra_item_id
+
+    alegra_id = crear_item(email, token, nombre=producto.nombre, precio=float(producto.precio_venta))
+    if alegra_id:
+        queries.guardar_alegra_item_id(producto_id, alegra_id)
+    return alegra_id
+
+
 def facturar_venta(uid, venta_id):
     """
-    Emite la factura electrónica de una venta ya registrada en MyInv:
-    crea (o reutiliza) el cliente y los productos en Alegra, arma la factura
-    con los renglones de la venta, la crea, y guarda el resultado en Ventas.
+    Emite la factura electrónica de una venta ya registrada en MyInv, usando
+    la cuenta de Alegra propia del negocio 'uid': crea (o reutiliza) el
+    cliente y los productos en Alegra, arma la factura con los renglones de
+    la venta, la crea, y guarda el resultado en Ventas.
     Devuelve (True, mensaje) o (False, mensaje).
     """
     import queries
+
+    email, token = obtener_credenciales(uid)
+    if not email or not token:
+        return False, "Este negocio no tiene configurada su cuenta de Alegra. Ve a Configuración → Facturación Electrónica."
 
     venta = queries.obtener_venta_para_facturar(uid, venta_id)
     if not venta:
@@ -175,7 +190,7 @@ def facturar_venta(uid, venta_id):
     if not venta.cliente_id:
         return False, "Esta venta no tiene un cliente asociado. Selecciona un cliente registrado (con documento) para poder facturar electrónicamente."
 
-    contacto_id = obtener_o_crear_contacto(uid, venta.cliente_id)
+    contacto_id = obtener_o_crear_contacto(uid, venta.cliente_id, email, token)
     if not contacto_id:
         return False, "No se pudo crear/obtener el cliente en Alegra."
 
@@ -184,7 +199,7 @@ def facturar_venta(uid, venta_id):
     for r in renglones:
         if not r.producto_id:
             return False, f"El renglón '{r.nombre_producto}' no está ligado a un producto del inventario, no se puede facturar."
-        item_id = obtener_o_crear_item(uid, r.producto_id)
+        item_id = obtener_o_crear_item(uid, r.producto_id, email, token)
         if not item_id:
             return False, f"No se pudo crear/obtener el producto '{r.nombre_producto}' en Alegra."
         items_payload.append({
@@ -193,7 +208,7 @@ def facturar_venta(uid, venta_id):
             "quantity": float(r.cantidad),
         })
 
-    factura = crear_factura_venta(contacto_id, items_payload)
+    factura = crear_factura_venta(email, token, contacto_id, items_payload)
     if not factura:
         queries.guardar_resultado_factura(venta_id, estado="error")
         return False, "Alegra rechazó la factura. Revisa el error mostrado arriba."

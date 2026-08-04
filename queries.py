@@ -408,6 +408,34 @@ def obtener_ganancia_acumulada(uid):
 # ==========================================
 # FACTURACIÓN ELECTRÓNICA
 # ==========================================
+def obtener_credenciales_alegra(uid):
+    """Credenciales de Alegra configuradas por este negocio (o None si no ha configurado nada)."""
+    engine = obtener_conexion()
+    with engine.connect() as conn:
+        return conn.execute(text("""
+            SELECT alegra_email, alegra_token
+            FROM Usuarios WHERE id = :uid
+        """), {"uid": uid}).fetchone()
+
+
+def guardar_credenciales_alegra(uid, email, token):
+    """Guarda (o actualiza) las credenciales de Alegra de este negocio."""
+    engine = obtener_conexion()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE Usuarios SET alegra_email = :email, alegra_token = :token WHERE id = :uid
+        """), {"email": email, "token": token, "uid": uid})
+
+
+def eliminar_credenciales_alegra(uid):
+    """Desconecta la cuenta de Alegra de este negocio."""
+    engine = obtener_conexion()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE Usuarios SET alegra_email = NULL, alegra_token = NULL WHERE id = :uid
+        """), {"uid": uid})
+
+
 @st.cache_data(ttl=30)
 def obtener_facturas_periodo(uid, fecha_inicio, fecha_fin):
     """Ventas del período con su estado de facturación electrónica, para el reporte."""

@@ -76,7 +76,9 @@ def init_db():
                     nit TEXT,
                     telefono TEXT,
                     direccion TEXT,
-                    fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    alegra_email TEXT,
+                    alegra_token TEXT
                 )
             '''))
             conn.execute(text('''
@@ -269,7 +271,9 @@ def init_db():
                     nit TEXT,
                     telefono TEXT,
                     direccion TEXT,
-                    fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    alegra_email TEXT,
+                    alegra_token TEXT
                 )
             '''))
             conn.execute(text('''
@@ -513,6 +517,10 @@ def init_db():
                     conn.execute(text("ALTER TABLE Ventas ADD COLUMN factura_pdf_url TEXT"))
                 if 'factura_estado' not in cols_v:
                     conn.execute(text("ALTER TABLE Ventas ADD COLUMN factura_estado TEXT"))
+                if 'alegra_email' not in cols:
+                    conn.execute(text("ALTER TABLE Usuarios ADD COLUMN alegra_email TEXT"))
+                if 'alegra_token' not in cols:
+                    conn.execute(text("ALTER TABLE Usuarios ADD COLUMN alegra_token TEXT"))
             else:
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS token_sesion VARCHAR(255)"))
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS logo_path TEXT"))
@@ -532,6 +540,8 @@ def init_db():
                 conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS factura_cufe TEXT"))
                 conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS factura_pdf_url TEXT"))
                 conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS factura_estado TEXT"))
+                conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS alegra_email TEXT"))
+                conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS alegra_token TEXT"))
         except Exception:
             pass
 

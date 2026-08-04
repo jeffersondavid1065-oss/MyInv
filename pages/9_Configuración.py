@@ -3,6 +3,8 @@ import os
 from sqlalchemy import text
 from db import obtener_conexion
 from utils import aplicar_estilos, verificar_auth
+from queries import obtener_credenciales_alegra, guardar_credenciales_alegra, eliminar_credenciales_alegra
+import alegra_utils
 
 st.set_page_config(page_title="Configuración", layout="wide")
 aplicar_estilos()
@@ -32,7 +34,7 @@ tel_actual      = datos[4] if datos else ""
 dir_actual      = datos[5] if datos else ""
 logo_actual     = datos[6] if datos else None
 
-tab_datos, tab_logo = st.tabs(["Datos del Negocio", "Logotipo"])
+tab_datos, tab_logo, tab_alegra = st.tabs(["Datos del Negocio", "Logotipo", "Facturación Electrónica"])
 
 # ==========================================
 # TAB 1: DATOS DEL NEGOCIO
@@ -162,6 +164,62 @@ with tab_logo:
                     st.error(f"Error: {e}")
         else:
             st.info("Sin logotipo.\nSe mostrará un placeholder en el PDF.")
+
+# ==========================================
+# TAB 3: FACTURACIÓN ELECTRÓNICA
+# ==========================================
+with tab_alegra:
+    st.subheader("Facturación Electrónica (Alegra)")
+    st.caption(
+        "Conecta tu propia cuenta de Alegra para poder emitir facturas electrónicas "
+        "desde tus ventas. Cada negocio usa su propia cuenta — la factura sale a "
+        "nombre de tu NIT, no del nuestro."
+    )
+
+    creds = obtener_credenciales_alegra(user_id)
+    conectado = bool(creds and creds.alegra_email and creds.alegra_token)
+
+    if conectado:
+        st.success(f"Cuenta conectada: **{creds.alegra_email}**")
+
+        col_a1, col_a2 = st.columns(2)
+        with col_a1:
+            if st.button("Probar conexión", use_container_width=True):
+                with st.spinner("Probando..."):
+                    ok, msg = alegra_utils.probar_conexion(creds.alegra_email, creds.alegra_token)
+                if ok:
+                    st.success(msg)
+                else:
+                    st.error(msg)
+        with col_a2:
+            if st.button("Desconectar cuenta", use_container_width=True):
+                eliminar_credenciales_alegra(user_id)
+                st.success("Cuenta de Alegra desconectada.")
+                st.rerun()
+
+        st.markdown("---")
+        st.markdown("**Cambiar de cuenta:**")
+
+    with st.form("form_alegra"):
+        st.caption(
+            "Consigue estos datos en tu cuenta de Alegra: "
+            "Configuración → \"API - Integraciones con otros sistemas\"."
+        )
+        email_alegra_input = st.text_input("Email de tu cuenta Alegra", placeholder="tucorreo@ejemplo.com")
+        token_alegra_input = st.text_input("Token de Alegra", type="password")
+
+        if st.form_submit_button("Guardar y probar conexión", type="primary"):
+            if not email_alegra_input or not token_alegra_input:
+                st.warning("Completa ambos campos.")
+            else:
+                with st.spinner("Validando credenciales con Alegra..."):
+                    ok, msg = alegra_utils.probar_conexion(email_alegra_input, token_alegra_input)
+                if ok:
+                    guardar_credenciales_alegra(user_id, email_alegra_input, token_alegra_input)
+                    st.success("Credenciales válidas y guardadas. Ya puedes facturar electrónicamente.")
+                    st.rerun()
+                else:
+                    st.error(f"No se guardó: {msg}")
 
 st.markdown("---")
 st.caption("Después de configurar tu logo y datos, descarga una factura de prueba desde el **Punto de Venta** para verificar cómo queda.")
