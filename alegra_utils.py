@@ -86,12 +86,16 @@ def crear_item(email, token, nombre, precio, referencia=None):
         return None
 
 
-def crear_factura_venta(email, token, cliente_id, items, due_date=None, periodicity=None):
+def crear_factura_venta(email, token, cliente_id, items, due_date=None, periodicity=None,
+                         payment_form=None, payment_method=None):
     """
     Crea una factura de venta en Alegra.
     items: lista de dicts [{"id": <id_item_alegra>, "price": float, "quantity": float}, ...]
     due_date: fecha límite de pago (str yyyy-mm-dd). Si es None, se usa hoy (pago de contado).
     periodicity: requerido por Alegra cuando la venta es a crédito ('MANUAL', 'MONTHLY', 'BIWEEKLY', etc.).
+    payment_form: 'CASH' o 'CREDIT' - obligatorio para facturación electrónica 2.1 en Colombia.
+    payment_method: medio de pago (ej. 'CASH', 'DEBIT_TRANSFER_BANK') - obligatorio cuando
+    payment_form es 'CASH' con facturación electrónica 2.1 activa.
     Devuelve el JSON de la factura creada (incluye pdf/estado DIAN) o None si falla.
     """
     payload = {
@@ -103,6 +107,10 @@ def crear_factura_venta(email, token, cliente_id, items, due_date=None, periodic
     }
     if periodicity:
         payload["periodicity"] = periodicity
+    if payment_form:
+        payload["paymentForm"] = payment_form
+    if payment_method:
+        payload["paymentMethod"] = payment_method
 
     try:
         resp = requests.post(f"{BASE_URL}/invoices", headers=_headers(email, token), json=payload, timeout=30)
@@ -320,6 +328,22 @@ PERIODICIDAD_ALEGRA = {
     "Mensual": "MONTHLY",
 }
 
+# Forma/medio de pago de MyInv -> catálogo de Alegra (obligatorio en Colombia
+# para facturación electrónica 2.1). paymentMethod solo aplica cuando
+# paymentForm es 'CASH'; en 'CREDIT' Alegra no lo exige.
+PAYMENT_METHOD_ALEGRA = {
+    "Efectivo": "CASH",
+    "Transferencia": "DEBIT_TRANSFER_BANK",
+    "Mixto": "CASH",
+}
+
+
+def _forma_y_medio_pago(tipo_pago):
+    """Traduce el tipo_pago de una venta de MyInv a (paymentForm, paymentMethod) de Alegra."""
+    if tipo_pago == "Credito":
+        return "CREDIT", None
+    return "CASH", PAYMENT_METHOD_ALEGRA.get(tipo_pago, "CASH")
+
 
 def facturar_venta(uid, venta_id):
     """
@@ -367,7 +391,11 @@ def facturar_venta(uid, venta_id):
             due_date = credito.fecha_limite.isoformat() if hasattr(credito.fecha_limite, "isoformat") else str(credito.fecha_limite)
             periodicity = PERIODICIDAD_ALEGRA.get(credito.tipo_cuota, "MANUAL")
 
-    factura = crear_factura_venta(email, token, contacto_id, items_payload, due_date=due_date, periodicity=periodicity)
+    payment_form, payment_method = _forma_y_medio_pago(venta.tipo_pago)
+    factura = crear_factura_venta(
+        email, token, contacto_id, items_payload, due_date=due_date, periodicity=periodicity,
+        payment_form=payment_form, payment_method=payment_method,
+    )
     if not factura:
         queries.guardar_resultado_factura(venta_id, estado="error")
         return False, "Alegra rechazó la factura. Revisa el error mostrado arriba."
