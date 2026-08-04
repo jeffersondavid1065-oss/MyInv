@@ -5,24 +5,26 @@ import os
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOCAL_DB_PATH = os.path.join(BASE_DIR, "myalmacen.db")
 
-# Schema propio de MyInv dentro de Postgres/Supabase, para no chocar con
-# tablas de otras apps (ej. MyTaller) que viven en el schema 'public'
-# del mismo proyecto.
-PG_SCHEMA = "myinv"
+# Schema de Postgres que usa MyInv. Por defecto 'public' (comportamiento
+# normal). Solo se debe fijar a algo distinto (ej. 'myinv') en secrets.toml
+# cuando el proyecto de Supabase se comparte con otra app que ya usa 'public'
+# (ej. MyTaller), para no chocar con sus tablas.
 
 
 @st.cache_resource
 def obtener_conexion():
     try:
         db_url = st.secrets["postgres"]["url"]
+        pg_schema = st.secrets["postgres"].get("schema", "public")
 
-        # Conexión de arranque (sin search_path fijo) solo para asegurar
-        # que el schema de MyInv exista antes de apuntar el pool ahí.
-        engine_setup = create_engine(db_url)
-        with engine_setup.connect() as conn:
-            conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {PG_SCHEMA}"))
-            conn.commit()
-        engine_setup.dispose()
+        if pg_schema != "public":
+            # Conexión de arranque (sin search_path fijo) solo para asegurar
+            # que el schema propio exista antes de apuntar el pool ahí.
+            engine_setup = create_engine(db_url)
+            with engine_setup.connect() as conn:
+                conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {pg_schema}"))
+                conn.commit()
+            engine_setup.dispose()
 
         engine = create_engine(
             db_url,
@@ -32,14 +34,15 @@ def obtener_conexion():
             pool_recycle=300,
         )
 
-        # El pooler de Supabase ignora el parámetro 'options' del connect_args,
-        # así que el search_path se fija a mano en cada conexión física nueva.
-        @event.listens_for(engine, "connect")
-        def _fijar_search_path(dbapi_connection, connection_record):
-            cursor = dbapi_connection.cursor()
-            cursor.execute(f"SET search_path TO {PG_SCHEMA}")
-            cursor.close()
-            dbapi_connection.commit()
+        if pg_schema != "public":
+            # El pooler de Supabase ignora el parámetro 'options' del connect_args,
+            # así que el search_path se fija a mano en cada conexión física nueva.
+            @event.listens_for(engine, "connect")
+            def _fijar_search_path(dbapi_connection, connection_record):
+                cursor = dbapi_connection.cursor()
+                cursor.execute(f"SET search_path TO {pg_schema}")
+                cursor.close()
+                dbapi_connection.commit()
 
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
