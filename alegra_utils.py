@@ -86,18 +86,22 @@ def crear_item(email, token, nombre, precio, referencia=None):
         return None
 
 
-def crear_factura_venta(email, token, cliente_id, items):
+def crear_factura_venta(email, token, cliente_id, items, due_date=None, periodicity=None):
     """
     Crea una factura de venta en Alegra.
     items: lista de dicts [{"id": <id_item_alegra>, "price": float, "quantity": float}, ...]
+    due_date: fecha límite de pago (str yyyy-mm-dd). Si es None, se usa hoy (pago de contado).
+    periodicity: requerido por Alegra cuando la venta es a crédito ('MANUAL', 'MONTHLY', 'BIWEEKLY', etc.).
     Devuelve el JSON de la factura creada (incluye pdf/estado DIAN) o None si falla.
     """
     payload = {
         "date": hoy_bogota().isoformat(),
-        "dueDate": hoy_bogota().isoformat(),
+        "dueDate": due_date or hoy_bogota().isoformat(),
         "client": {"id": cliente_id},
         "items": items,
     }
+    if periodicity:
+        payload["periodicity"] = periodicity
 
     try:
         resp = requests.post(f"{BASE_URL}/invoices", headers=_headers(email, token), json=payload, timeout=30)
@@ -107,6 +111,29 @@ def crear_factura_venta(email, token, cliente_id, items):
         return None
     except requests.RequestException as e:
         st.error(f"Error de conexión al crear factura: {e}")
+        return None
+
+
+def crear_nota_credito(email, token, factura_alegra_id, cliente_id, items, total):
+    """
+    Crea una nota crédito en Alegra que anula (total o parcialmente) una factura ya emitida.
+    Devuelve el JSON de la nota crédito creada, o None si falla.
+    """
+    payload = {
+        "date": hoy_bogota().isoformat(),
+        "client": {"id": cliente_id},
+        "items": items,
+        "invoices": [{"id": factura_alegra_id, "amount": float(total)}],
+    }
+
+    try:
+        resp = requests.post(f"{BASE_URL}/credit-notes", headers=_headers(email, token), json=payload, timeout=30)
+        if resp.status_code in (200, 201):
+            return resp.json()
+        st.error(f"Error al crear nota crédito en Alegra ({resp.status_code}): {resp.text}")
+        return None
+    except requests.RequestException as e:
+        st.error(f"Error de conexión al crear nota crédito: {e}")
         return None
 
 
@@ -168,6 +195,14 @@ def obtener_o_crear_item(uid, producto_id, email, token):
     return alegra_id
 
 
+PERIODICIDAD_ALEGRA = {
+    "Libre": "MANUAL",
+    "Semanal": "MANUAL",
+    "Quincenal": "BIWEEKLY",
+    "Mensual": "MONTHLY",
+}
+
+
 def facturar_venta(uid, venta_id):
     """
     Emite la factura electrónica de una venta ya registrada en MyInv, usando
@@ -208,7 +243,15 @@ def facturar_venta(uid, venta_id):
             "quantity": float(r.cantidad),
         })
 
-    factura = crear_factura_venta(email, token, contacto_id, items_payload)
+    due_date = None
+    periodicity = None
+    if venta.tipo_pago == "Credito":
+        credito = queries.obtener_credito_de_venta(venta_id)
+        if credito and credito.fecha_limite:
+            due_date = credito.fecha_limite.isoformat() if hasattr(credito.fecha_limite, "isoformat") else str(credito.fecha_limite)
+            periodicity = PERIODICIDAD_ALEGRA.get(credito.tipo_cuota, "MANUAL")
+
+    factura = crear_factura_venta(email, token, contacto_id, items_payload, due_date=due_date, periodicity=periodicity)
     if not factura:
         queries.guardar_resultado_factura(venta_id, estado="error")
         return False, "Alegra rechazó la factura. Revisa el error mostrado arriba."
@@ -221,3 +264,52 @@ def facturar_venta(uid, venta_id):
         estado="emitida",
     )
     return True, f"Factura emitida (Alegra #{factura.get('id')})."
+
+
+def anular_factura_venta(uid, venta_id):
+    """
+    Emite la nota crédito en Alegra que anula la factura electrónica de una
+    venta (cuando esa venta se anula/devuelve en MyInv). No hace nada (y no
+    es un error) si la venta nunca tuvo factura electrónica emitida.
+    Devuelve (True, mensaje) o (False, mensaje).
+    """
+    import queries
+
+    venta = queries.obtener_venta_para_facturar(uid, venta_id)
+    if not venta:
+        return False, "Venta no encontrada."
+    if venta.factura_estado != "emitida" or not venta.factura_alegra_id:
+        return True, "Esta venta no tenía factura electrónica emitida, no se requiere nota crédito."
+    if venta.nota_credito_alegra_id:
+        return False, "Esta venta ya tiene una nota crédito emitida."
+
+    email, token = obtener_credenciales(uid)
+    if not email or not token:
+        return False, "Este negocio no tiene configurada su cuenta de Alegra."
+
+    contacto_id = obtener_o_crear_contacto(uid, venta.cliente_id, email, token)
+    if not contacto_id:
+        return False, "No se pudo obtener el cliente en Alegra."
+
+    renglones = queries.obtener_items_venta(venta_id)
+    items_payload = []
+    for r in renglones:
+        if not r.producto_id:
+            continue
+        item_id = obtener_o_crear_item(uid, r.producto_id, email, token)
+        if item_id:
+            items_payload.append({
+                "id": item_id,
+                "price": float(r.precio_unitario),
+                "quantity": float(r.cantidad),
+            })
+
+    if not items_payload:
+        return False, "No hay ítems válidos para la nota crédito."
+
+    nota = crear_nota_credito(email, token, venta.factura_alegra_id, contacto_id, items_payload, venta.total)
+    if not nota:
+        return False, "Alegra rechazó la nota crédito. Revisa el error mostrado arriba."
+
+    queries.guardar_nota_credito(venta_id, nota.get("id"))
+    return True, f"Nota crédito emitida (Alegra #{nota.get('id')})."

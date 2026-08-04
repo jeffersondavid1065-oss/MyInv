@@ -438,18 +438,19 @@ def eliminar_credenciales_alegra(uid):
 
 @st.cache_data(ttl=30)
 def obtener_facturas_periodo(uid, fecha_inicio, fecha_fin):
-    """Ventas del período con su estado de facturación electrónica, para el reporte."""
+    """Ventas del período con su estado de facturación electrónica, para el reporte.
+    Incluye ventas anuladas (a diferencia del reporte de ventas normal) porque
+    interesa ver si a una venta anulada ya se le emitió la nota crédito o no."""
     engine = obtener_conexion()
     with engine.connect() as conn:
         return pd.read_sql_query(text("""
             SELECT v.id, DATE(v.fecha) as fecha, COALESCE(cl.nombre, 'Sin cliente') as cliente,
-                   v.total, v.factura_estado, v.factura_alegra_id,
-                   v.factura_cufe, v.factura_pdf_url
+                   v.total, v.estado as estado_venta, v.factura_estado, v.factura_alegra_id,
+                   v.factura_cufe, v.factura_pdf_url, v.nota_credito_alegra_id
             FROM Ventas v
             LEFT JOIN Clientes cl ON v.cliente_id = cl.id
             WHERE v.usuario_id = :uid
             AND DATE(v.fecha) >= :f_ini AND DATE(v.fecha) <= :f_fin
-            AND v.estado != 'Anulada'
             ORDER BY v.fecha DESC
         """), con=conn, params={
             "uid": uid,
@@ -463,10 +464,33 @@ def obtener_venta_para_facturar(uid, venta_id):
     engine = obtener_conexion()
     with engine.connect() as conn:
         return conn.execute(text("""
-            SELECT id, cliente_id, total, factura_alegra_id, factura_estado
+            SELECT id, cliente_id, total, tipo_pago, factura_alegra_id,
+                   factura_estado, nota_credito_alegra_id
             FROM Ventas
             WHERE id = :vid AND usuario_id = :uid
         """), {"vid": venta_id, "uid": uid}).fetchone()
+
+
+def obtener_credito_de_venta(venta_id):
+    """Términos de crédito (fecha límite, periodicidad) ligados a una venta a crédito."""
+    engine = obtener_conexion()
+    with engine.connect() as conn:
+        return conn.execute(text("""
+            SELECT fecha_limite, tipo_cuota
+            FROM Creditos
+            WHERE venta_id = :vid
+        """), {"vid": venta_id}).fetchone()
+
+
+def guardar_nota_credito(venta_id, nota_credito_alegra_id):
+    """Guarda el id de la nota crédito emitida en Alegra para una venta anulada."""
+    engine = obtener_conexion()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE Ventas SET nota_credito_alegra_id = :ncid, factura_estado = 'anulada'
+            WHERE id = :vid
+        """), {"ncid": nota_credito_alegra_id, "vid": venta_id})
+    invalidar_cache_ventas()
 
 
 def obtener_items_venta(venta_id):

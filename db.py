@@ -151,6 +151,7 @@ def init_db():
                     factura_cufe TEXT,
                     factura_pdf_url TEXT,
                     factura_estado TEXT,
+                    nota_credito_alegra_id TEXT,
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE,
                     FOREIGN KEY (cliente_id) REFERENCES Clientes(id),
                     FOREIGN KEY (cajero_id) REFERENCES Cajeros(id)
@@ -357,6 +358,7 @@ def init_db():
                     factura_cufe TEXT,
                     factura_pdf_url TEXT,
                     factura_estado TEXT,
+                    nota_credito_alegra_id TEXT,
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE,
                     FOREIGN KEY (cliente_id) REFERENCES Clientes(id),
                     FOREIGN KEY (cajero_id) REFERENCES Cajeros(id)
@@ -521,6 +523,8 @@ def init_db():
                     conn.execute(text("ALTER TABLE Usuarios ADD COLUMN alegra_email TEXT"))
                 if 'alegra_token' not in cols:
                     conn.execute(text("ALTER TABLE Usuarios ADD COLUMN alegra_token TEXT"))
+                if 'nota_credito_alegra_id' not in cols_v:
+                    conn.execute(text("ALTER TABLE Ventas ADD COLUMN nota_credito_alegra_id TEXT"))
             else:
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS token_sesion VARCHAR(255)"))
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS logo_path TEXT"))
@@ -542,6 +546,7 @@ def init_db():
                 conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS factura_estado TEXT"))
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS alegra_email TEXT"))
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS alegra_token TEXT"))
+                conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS nota_credito_alegra_id TEXT"))
         except Exception:
             pass
 

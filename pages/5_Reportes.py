@@ -451,21 +451,23 @@ with tab_facturas:
         if not df_facturas.empty:
             emitidas = (df_facturas['factura_estado'] == 'emitida').sum()
             con_error = (df_facturas['factura_estado'] == 'error').sum()
+            anuladas_nc = (df_facturas['factura_estado'] == 'anulada').sum()
             sin_facturar = df_facturas['factura_estado'].isna().sum()
 
-            col_e1, col_e2, col_e3, col_e4 = st.columns(4)
+            col_e1, col_e2, col_e3, col_e4, col_e5 = st.columns(5)
             col_e1.metric("Ventas del período", len(df_facturas))
             col_e2.metric("Facturadas", int(emitidas))
             col_e3.metric("Con error", int(con_error),
                           delta="Revisar" if con_error > 0 else None,
                           delta_color="inverse")
-            col_e4.metric("Sin facturar", int(sin_facturar))
+            col_e4.metric("Anuladas (N.C.)", int(anuladas_nc))
+            col_e5.metric("Sin facturar", int(sin_facturar))
 
             st.markdown("---")
 
             filtro_estado = st.selectbox(
                 "Filtrar por estado",
-                ["Todas", "Facturadas", "Con error", "Sin facturar"],
+                ["Todas", "Facturadas", "Con error", "Anuladas (N.C.)", "Sin facturar"],
                 key="filtro_estado_factura"
             )
             df_mostrar_fe = df_facturas.copy()
@@ -473,19 +475,22 @@ with tab_facturas:
                 df_mostrar_fe = df_mostrar_fe[df_mostrar_fe['factura_estado'] == 'emitida']
             elif filtro_estado == "Con error":
                 df_mostrar_fe = df_mostrar_fe[df_mostrar_fe['factura_estado'] == 'error']
+            elif filtro_estado == "Anuladas (N.C.)":
+                df_mostrar_fe = df_mostrar_fe[df_mostrar_fe['factura_estado'] == 'anulada']
             elif filtro_estado == "Sin facturar":
                 df_mostrar_fe = df_mostrar_fe[df_mostrar_fe['factura_estado'].isna()]
 
             df_mostrar_fe = df_mostrar_fe.copy()
             df_mostrar_fe['estado_texto'] = df_mostrar_fe['factura_estado'].fillna('Sin facturar').replace({
-                'emitida': 'Emitida', 'error': 'Error'
+                'emitida': 'Emitida', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
             })
 
             st.dataframe(
-                df_mostrar_fe[['id', 'fecha', 'cliente', 'total', 'estado_texto', 'factura_alegra_id', 'factura_cufe']].rename(columns={
+                df_mostrar_fe[['id', 'fecha', 'cliente', 'total', 'estado_texto', 'factura_alegra_id', 'factura_cufe', 'nota_credito_alegra_id']].rename(columns={
                     'id': 'Venta #', 'fecha': 'Fecha', 'cliente': 'Cliente',
                     'total': 'Total ($)', 'estado_texto': 'Estado',
-                    'factura_alegra_id': 'ID Alegra', 'factura_cufe': 'CUFE'
+                    'factura_alegra_id': 'ID Alegra', 'factura_cufe': 'CUFE',
+                    'nota_credito_alegra_id': 'ID Nota Crédito'
                 }),
                 use_container_width=True, hide_index=True,
                 column_config={

@@ -13,7 +13,7 @@ from queries import (
 )
 from utils import aplicar_estilos, verificar_auth
 from tz_utils import hoy_bogota, ahora_bogota_naive
-from alegra_utils import facturar_venta
+from alegra_utils import facturar_venta, anular_factura_venta
 
 st.set_page_config(page_title="Punto de Venta", layout="wide")
 aplicar_estilos()
@@ -896,6 +896,15 @@ with tab_devolucion:
                             invalidar_cache_ventas()
                             invalidar_cache_productos()
                             st.success(f"Venta #{vid_dev} anulada. Stock restaurado.")
+
+                            with st.spinner("Verificando si necesita nota crédito electrónica..."):
+                                ok_nc, msg_nc = anular_factura_venta(user_id, vid_dev)
+                            if ok_nc:
+                                if "nota crédito" in msg_nc.lower():
+                                    st.success(msg_nc)
+                            else:
+                                st.warning(f"La venta se anuló en MyInv, pero: {msg_nc}")
+
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error al anular: {e}")
