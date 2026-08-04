@@ -99,6 +99,7 @@ def crear_factura_venta(email, token, cliente_id, items, due_date=None, periodic
         "dueDate": due_date or hoy_bogota().isoformat(),
         "client": {"id": cliente_id},
         "items": items,
+        "status": "open",
     }
     if periodicity:
         payload["periodicity"] = periodicity
@@ -112,6 +113,22 @@ def crear_factura_venta(email, token, cliente_id, items, due_date=None, periodic
     except requests.RequestException as e:
         st.error(f"Error de conexión al crear factura: {e}")
         return None
+
+
+def enviar_factura_email(email, token, factura_id, destinatario):
+    """Envía una factura ya emitida (estado 'open') al correo del cliente. Devuelve (True, msg) o (False, msg)."""
+    try:
+        resp = requests.post(
+            f"{BASE_URL}/invoices/{factura_id}/email",
+            headers=_headers(email, token),
+            json={"emails": [destinatario]},
+            timeout=20,
+        )
+        if resp.status_code == 200:
+            return True, "Factura enviada por correo."
+        return False, f"No se pudo enviar por correo ({resp.status_code}): {resp.text}"
+    except requests.RequestException as e:
+        return False, f"Error de conexión al enviar correo: {e}"
 
 
 def crear_nota_credito(email, token, factura_alegra_id, cliente_id, items, total):
@@ -314,7 +331,14 @@ def facturar_venta(uid, venta_id):
         pdf_url=factura.get("pdf") if isinstance(factura.get("pdf"), str) else None,
         estado="emitida",
     )
-    return True, f"Factura emitida (Alegra #{factura.get('id')})."
+
+    mensaje = f"Factura emitida (Alegra #{factura.get('id')})."
+    cliente = queries.obtener_datos_facturacion_cliente(uid, venta.cliente_id)
+    if cliente and cliente.email:
+        ok_mail, msg_mail = enviar_factura_email(email, token, factura.get("id"), cliente.email)
+        mensaje += " Enviada por correo." if ok_mail else f" (No se pudo enviar por correo: {msg_mail})"
+
+    return True, mensaje
 
 
 def anular_factura_venta(uid, venta_id):
