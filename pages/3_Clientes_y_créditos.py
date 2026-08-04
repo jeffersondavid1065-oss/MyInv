@@ -9,6 +9,8 @@ from queries import (
     obtener_creditos_pendientes,
     invalidar_cache_clientes,
     invalidar_cache_creditos,
+    obtener_historial_ventas_cliente,
+    obtener_historial_abonos_cliente,
 )
 from utils import aplicar_estilos, verificar_auth
 from tz_utils import hoy_bogota
@@ -27,9 +29,10 @@ st.title("Clientes y Créditos")
 st.markdown(f"Gestión de cartera para: **{nombre_negocio}**")
 st.markdown("---")
 
-tab_creditos, tab_clientes, tab_nuevo = st.tabs([
+tab_creditos, tab_clientes, tab_estado_cuenta, tab_nuevo = st.tabs([
     "Créditos y Abonos",
     "Directorio de Clientes",
+    "Estado de Cuenta",
     "Registrar Cliente"
 ])
 
@@ -71,16 +74,20 @@ with tab_creditos:
 
         # Tabla completa de créditos
         st.markdown("**Todos los créditos activos:**")
-        df_mostrar = df_creditos[[
-            'cliente', 'total', 'saldo_pendiente',
-            'fecha_limite', 'tipo_cuota', 'estado', 'vencido', 'factura_estado'
-        ]].copy()
+        df_mostrar = df_creditos.copy()
+        df_mostrar['numero_factura_texto'] = (
+            df_mostrar['factura_prefijo'].fillna('').astype(str) + df_mostrar['factura_numero'].fillna('').astype(str)
+        )
         df_mostrar['factura_estado'] = df_mostrar['factura_estado'].fillna('Sin facturar').replace({
             'emitida': 'Facturada', 'error': 'Error factura', 'anulada': 'Anulada (N.C.)'
         })
+        df_mostrar = df_mostrar[[
+            'cliente', 'total', 'saldo_pendiente', 'fecha_limite', 'tipo_cuota',
+            'estado', 'vencido', 'factura_estado', 'numero_factura_texto'
+        ]]
         df_mostrar.columns = [
             'Cliente', 'Total Original', 'Saldo Pendiente',
-            'Fecha Límite', 'Tipo Cuota', 'Estado', 'Vencido', 'Facturación'
+            'Fecha Límite', 'Tipo Cuota', 'Estado', 'Vencido', 'Facturación', 'N° Factura'
         ]
         st.dataframe(
             df_mostrar.style.format({
@@ -90,6 +97,16 @@ with tab_creditos:
             use_container_width=True,
             hide_index=True
         )
+
+        dict_pdfs_cartera = {
+            f"{r['cliente']} — Crédito #{r['id']} — {formato_cop(r['saldo_pendiente'])}": r['factura_pdf_url']
+            for _, r in df_creditos[df_creditos['factura_pdf_url'].notna()].iterrows()
+        }
+        if dict_pdfs_cartera:
+            pdf_cartera_sel = st.selectbox(
+                "Ver PDF de la factura de un crédito", options=list(dict_pdfs_cartera.keys()), key="pdf_cartera_sel"
+            )
+            st.link_button("Abrir PDF", dict_pdfs_cartera[pdf_cartera_sel], use_container_width=True)
 
         st.markdown("---")
 
@@ -269,7 +286,90 @@ with tab_clientes:
         st.info("No tienes clientes registrados todavía.")
 
 # ==========================================
-# TAB 3: REGISTRAR CLIENTE NUEVO
+# TAB 3: ESTADO DE CUENTA
+# ==========================================
+with tab_estado_cuenta:
+    st.subheader("Estado de Cuenta por Cliente")
+
+    clientes_ec = obtener_clientes(user_id)
+    if not clientes_ec:
+        st.info("No tienes clientes registrados todavía.")
+    else:
+        dict_clientes_ec = {c[1]: c[0] for c in clientes_ec}
+        cliente_ec_sel = st.selectbox(
+            "Selecciona el cliente", options=list(dict_clientes_ec.keys()), key="cliente_estado_cuenta_sel"
+        )
+        cliente_id_ec = dict_clientes_ec[cliente_ec_sel]
+
+        df_compras = obtener_historial_ventas_cliente(user_id, cliente_id_ec)
+        df_abonos_ec = obtener_historial_abonos_cliente(user_id, cliente_id_ec)
+
+        df_compras_activas = df_compras[df_compras['estado'] != 'Anulada']
+        total_comprado = df_compras_activas['total'].sum()
+        total_pagado = df_abonos_ec['monto'].sum() if not df_abonos_ec.empty else 0
+        with engine.connect() as conn:
+            saldo_pendiente_cliente = conn.execute(text("""
+                SELECT COALESCE(SUM(saldo_pendiente), 0) FROM Creditos
+                WHERE usuario_id = :uid AND cliente_id = :cid AND estado = 'Activo'
+            """), {"uid": user_id, "cid": cliente_id_ec}).scalar()
+
+        col_ec1, col_ec2, col_ec3, col_ec4 = st.columns(4)
+        col_ec1.metric("Total comprado", formato_cop(total_comprado))
+        col_ec2.metric("Total pagado (abonos)", formato_cop(total_pagado))
+        col_ec3.metric("Saldo pendiente", formato_cop(saldo_pendiente_cliente))
+        col_ec4.metric("N° de compras", len(df_compras_activas))
+
+        st.markdown("---")
+        st.markdown("**Historial de compras:**")
+        if not df_compras.empty:
+            df_compras_mostrar = df_compras.copy()
+            df_compras_mostrar['numero_factura_texto'] = (
+                df_compras_mostrar['factura_prefijo'].fillna('').astype(str)
+                + df_compras_mostrar['factura_numero'].fillna('').astype(str)
+            )
+            df_compras_mostrar['fe_texto'] = df_compras_mostrar['factura_estado'].fillna('Sin facturar').replace({
+                'emitida': 'Emitida', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
+            })
+            st.dataframe(
+                df_compras_mostrar[[
+                    'id', 'fecha', 'total', 'tipo_pago', 'estado', 'fe_texto', 'numero_factura_texto'
+                ]].rename(columns={
+                    'id': 'Venta #', 'fecha': 'Fecha', 'total': 'Total',
+                    'tipo_pago': 'Pago', 'estado': 'Estado',
+                    'fe_texto': 'Factura Electrónica', 'numero_factura_texto': 'N° Factura'
+                }),
+                use_container_width=True, hide_index=True,
+                column_config={"Total": st.column_config.NumberColumn(format="$%,d")}
+            )
+
+            dict_pdfs_ec = {}
+            for _, r in df_compras[df_compras['factura_pdf_url'].notna()].iterrows():
+                dict_pdfs_ec[f"Venta #{r['id']} — {formato_cop(r['total'])} — Factura"] = r['factura_pdf_url']
+            for _, r in df_compras[df_compras['nota_credito_pdf_url'].notna()].iterrows():
+                dict_pdfs_ec[f"Venta #{r['id']} — {formato_cop(r['total'])} — Nota Crédito"] = r['nota_credito_pdf_url']
+            if dict_pdfs_ec:
+                pdf_ec_sel = st.selectbox(
+                    "Ver PDF de un documento", options=list(dict_pdfs_ec.keys()), key="pdf_estado_cuenta_sel"
+                )
+                st.link_button("Abrir PDF", dict_pdfs_ec[pdf_ec_sel], use_container_width=True)
+        else:
+            st.caption("Este cliente todavía no tiene compras registradas.")
+
+        st.markdown("---")
+        st.markdown("**Historial de pagos (abonos):**")
+        if not df_abonos_ec.empty:
+            st.dataframe(
+                df_abonos_ec[['fecha', 'monto', 'venta_id', 'notas']].rename(columns={
+                    'fecha': 'Fecha', 'monto': 'Monto', 'venta_id': 'Venta #', 'notas': 'Notas'
+                }),
+                use_container_width=True, hide_index=True,
+                column_config={"Monto": st.column_config.NumberColumn(format="$%,d")}
+            )
+        else:
+            st.caption("Este cliente todavía no ha hecho abonos.")
+
+# ==========================================
+# TAB 4: REGISTRAR CLIENTE NUEVO
 # ==========================================
 with tab_nuevo:
     st.subheader("Registrar Nuevo Cliente")

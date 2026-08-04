@@ -213,11 +213,41 @@ def obtener_creditos_cliente(uid, cliente_id):
         return pd.read_sql_query(text("""
             SELECT c.id, v.id as venta_id, c.total, c.saldo_pendiente,
                    c.fecha_inicio, c.fecha_limite, c.tipo_cuota,
-                   c.valor_cuota, c.estado, v.factura_estado, v.factura_pdf_url
+                   c.valor_cuota, c.estado, v.factura_estado, v.factura_pdf_url,
+                   v.factura_prefijo, v.factura_numero
             FROM Creditos c
             JOIN Ventas v ON c.venta_id = v.id
             WHERE c.usuario_id = :uid AND c.cliente_id = :cid
             ORDER BY c.fecha_inicio DESC
+        """), con=conn, params={"uid": uid, "cid": cliente_id})
+
+
+def obtener_historial_ventas_cliente(uid, cliente_id):
+    """Historial completo de compras de un cliente (todas sus ventas, con su
+    estado de facturación electrónica), para el estado de cuenta."""
+    engine = obtener_conexion()
+    with engine.connect() as conn:
+        return pd.read_sql_query(text("""
+            SELECT v.id, v.fecha, v.total, v.tipo_pago, v.estado,
+                   v.factura_estado, v.factura_prefijo, v.factura_numero,
+                   v.factura_pdf_url, v.nota_credito_alegra_id, v.nota_credito_pdf_url
+            FROM Ventas v
+            WHERE v.usuario_id = :uid AND v.cliente_id = :cid
+            ORDER BY v.fecha DESC
+        """), con=conn, params={"uid": uid, "cid": cliente_id})
+
+
+def obtener_historial_abonos_cliente(uid, cliente_id):
+    """Historial completo de abonos (pagos) de un cliente, sobre todos sus créditos,
+    para el estado de cuenta."""
+    engine = obtener_conexion()
+    with engine.connect() as conn:
+        return pd.read_sql_query(text("""
+            SELECT a.fecha, a.monto, a.notas, a.credito_id, cr.venta_id
+            FROM Abonos a
+            JOIN Creditos cr ON a.credito_id = cr.id
+            WHERE a.usuario_id = :uid AND cr.cliente_id = :cid
+            ORDER BY a.fecha DESC
         """), con=conn, params={"uid": uid, "cid": cliente_id})
 
 
@@ -227,11 +257,11 @@ def obtener_creditos_pendientes(uid):
     engine = obtener_conexion()
     with engine.connect() as conn:
         return pd.read_sql_query(text("""
-            SELECT cr.id, cl.nombre as cliente, cl.telefono,
+            SELECT cr.id, cr.venta_id, cl.nombre as cliente, cl.telefono,
                    cr.total, cr.saldo_pendiente,
                    cr.fecha_limite, cr.tipo_cuota, cr.estado,
                    CASE WHEN cr.fecha_limite < :hoy THEN TRUE ELSE FALSE END as vencido,
-                   v.factura_estado
+                   v.factura_estado, v.factura_prefijo, v.factura_numero, v.factura_pdf_url
             FROM Creditos cr
             JOIN Clientes cl ON cr.cliente_id = cl.id
             JOIN Ventas v ON cr.venta_id = v.id
