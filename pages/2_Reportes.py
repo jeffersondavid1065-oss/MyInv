@@ -534,37 +534,25 @@ with tab_facturas:
 
             st.dataframe(
                 df_mostrar_fe[['id', 'fecha', 'cliente', 'cliente_documento', 'total', 'estado_texto',
-                               'numero_factura_texto', 'factura_cufe', 'nota_credito_alegra_id']].rename(columns={
+                               'numero_factura_texto', 'factura_cufe',
+                               'factura_pdf_url', 'factura_xml_url',
+                               'nota_credito_pdf_url', 'nota_credito_xml_url']].rename(columns={
                     'id': 'Venta #', 'fecha': 'Fecha', 'cliente': 'Cliente',
                     'cliente_documento': 'NIT/Documento',
                     'total': 'Total ($)', 'estado_texto': 'Estado',
                     'numero_factura_texto': 'N° Factura', 'factura_cufe': 'CUFE',
-                    'nota_credito_alegra_id': 'ID Nota Crédito'
+                    'factura_pdf_url': 'Factura PDF', 'factura_xml_url': 'Factura XML',
+                    'nota_credito_pdf_url': 'N.C. PDF', 'nota_credito_xml_url': 'N.C. XML',
                 }),
                 use_container_width=True, hide_index=True,
                 column_config={
                     "Total ($)": st.column_config.NumberColumn(format="$%,d"),
+                    "Factura PDF": st.column_config.LinkColumn(display_text="Abrir"),
+                    "Factura XML": st.column_config.LinkColumn(display_text="Abrir"),
+                    "N.C. PDF": st.column_config.LinkColumn(display_text="Abrir"),
+                    "N.C. XML": st.column_config.LinkColumn(display_text="Abrir"),
                 }
             )
-
-            dict_pdfs = {}
-            for _, r in df_mostrar_fe.iterrows():
-                base = f"Venta #{r['id']} — {r['cliente']} — {formato_cop(r['total'])}"
-                if pd.notna(r['factura_pdf_url']):
-                    dict_pdfs[f"{base} — Factura (PDF)"] = r['factura_pdf_url']
-                if pd.notna(r.get('factura_xml_url')):
-                    dict_pdfs[f"{base} — Factura (XML)"] = r['factura_xml_url']
-                if pd.notna(r['nota_credito_pdf_url']):
-                    dict_pdfs[f"{base} — Nota Crédito (PDF)"] = r['nota_credito_pdf_url']
-                if pd.notna(r.get('nota_credito_xml_url')):
-                    dict_pdfs[f"{base} — Nota Crédito (XML)"] = r['nota_credito_xml_url']
-
-            if dict_pdfs:
-                st.markdown("---")
-                st.markdown("**Descargar factura o nota crédito (PDF o XML):**")
-                st.caption("El XML es el documento legal timbrado ante la DIAN; el PDF es solo su representación gráfica.")
-                pdf_sel = st.selectbox("Selecciona el documento", options=list(dict_pdfs.keys()), key="pdf_factura_sel")
-                st.link_button("Abrir / Descargar", dict_pdfs[pdf_sel], use_container_width=True)
 
             pendientes_pdf = df_facturas[
                 (df_facturas['factura_alegra_id'].notna()

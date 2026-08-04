@@ -769,33 +769,23 @@ with tab_historial:
             'emitida': 'Emitida', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
         })
         st.dataframe(
-            df_hoy[['id', 'fecha', 'cliente', 'total', 'tipo_pago', 'estado', 'fe_texto', 'numero_factura_texto']].rename(columns={
+            df_hoy[['id', 'fecha', 'cliente', 'total', 'tipo_pago', 'estado', 'fe_texto', 'numero_factura_texto',
+                    'factura_pdf_url', 'factura_xml_url', 'nota_credito_pdf_url', 'nota_credito_xml_url']].rename(columns={
                 'id': 'N°', 'fecha': 'Hora', 'cliente': 'Cliente',
                 'total': 'Total', 'tipo_pago': 'Pago', 'estado': 'Estado',
-                'fe_texto': 'Factura Electrónica', 'numero_factura_texto': 'N° Factura'
+                'fe_texto': 'Factura Electrónica', 'numero_factura_texto': 'N° Factura',
+                'factura_pdf_url': 'Factura PDF', 'factura_xml_url': 'Factura XML',
+                'nota_credito_pdf_url': 'N.C. PDF', 'nota_credito_xml_url': 'N.C. XML',
             }),
             use_container_width=True, hide_index=True,
             column_config={
                 "Total": st.column_config.NumberColumn("Total", format="$%,d"),
+                "Factura PDF": st.column_config.LinkColumn(display_text="Abrir"),
+                "Factura XML": st.column_config.LinkColumn(display_text="Abrir"),
+                "N.C. PDF": st.column_config.LinkColumn(display_text="Abrir"),
+                "N.C. XML": st.column_config.LinkColumn(display_text="Abrir"),
             }
         )
-
-        dict_pdfs_hoy = {}
-        for _, r in df_hoy.iterrows():
-            base = f"Venta #{r['id']} — {r['cliente']} — {formato_cop(r['total'])}"
-            if pd.notna(r['factura_pdf_url']):
-                dict_pdfs_hoy[f"{base} — Factura (PDF)"] = r['factura_pdf_url']
-            if pd.notna(r.get('factura_xml_url')):
-                dict_pdfs_hoy[f"{base} — Factura (XML)"] = r['factura_xml_url']
-            if pd.notna(r['nota_credito_pdf_url']):
-                dict_pdfs_hoy[f"{base} — Nota Crédito (PDF)"] = r['nota_credito_pdf_url']
-            if pd.notna(r.get('nota_credito_xml_url')):
-                dict_pdfs_hoy[f"{base} — Nota Crédito (XML)"] = r['nota_credito_xml_url']
-        if dict_pdfs_hoy:
-            st.markdown("---")
-            st.markdown("**Descargar factura o nota crédito (PDF o XML):**")
-            pdf_hoy_sel = st.selectbox("Selecciona el documento", options=list(dict_pdfs_hoy.keys()), key="pdf_hoy_sel")
-            st.link_button("Abrir / Descargar", dict_pdfs_hoy[pdf_hoy_sel], use_container_width=True)
 
         st.markdown("---")
         st.markdown("**Reimprimir ticket:**")

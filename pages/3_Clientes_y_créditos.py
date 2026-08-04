@@ -83,33 +83,25 @@ with tab_creditos:
         })
         df_mostrar = df_mostrar[[
             'cliente', 'total', 'saldo_pendiente', 'fecha_limite', 'tipo_cuota',
-            'estado', 'vencido', 'factura_estado', 'numero_factura_texto'
-        ]]
-        df_mostrar.columns = [
-            'Cliente', 'Total Original', 'Saldo Pendiente',
-            'Fecha Límite', 'Tipo Cuota', 'Estado', 'Vencido', 'Facturación', 'N° Factura'
-        ]
+            'estado', 'vencido', 'factura_estado', 'numero_factura_texto',
+            'factura_pdf_url', 'factura_xml_url'
+        ]].rename(columns={
+            'cliente': 'Cliente', 'total': 'Total Original', 'saldo_pendiente': 'Saldo Pendiente',
+            'fecha_limite': 'Fecha Límite', 'tipo_cuota': 'Tipo Cuota', 'estado': 'Estado',
+            'vencido': 'Vencido', 'factura_estado': 'Facturación', 'numero_factura_texto': 'N° Factura',
+            'factura_pdf_url': 'Factura PDF', 'factura_xml_url': 'Factura XML',
+        })
         st.dataframe(
-            df_mostrar.style.format({
-                'Total Original': lambda x: formato_cop(x),
-                'Saldo Pendiente': lambda x: formato_cop(x),
-            }),
+            df_mostrar,
             use_container_width=True,
-            hide_index=True
+            hide_index=True,
+            column_config={
+                "Total Original": st.column_config.NumberColumn(format="$%,d"),
+                "Saldo Pendiente": st.column_config.NumberColumn(format="$%,d"),
+                "Factura PDF": st.column_config.LinkColumn(display_text="Abrir"),
+                "Factura XML": st.column_config.LinkColumn(display_text="Abrir"),
+            }
         )
-
-        dict_pdfs_cartera = {}
-        for _, r in df_creditos.iterrows():
-            base = f"{r['cliente']} — Crédito #{r['id']} — {formato_cop(r['saldo_pendiente'])}"
-            if pd.notna(r['factura_pdf_url']):
-                dict_pdfs_cartera[f"{base} — PDF"] = r['factura_pdf_url']
-            if pd.notna(r.get('factura_xml_url')):
-                dict_pdfs_cartera[f"{base} — XML"] = r['factura_xml_url']
-        if dict_pdfs_cartera:
-            pdf_cartera_sel = st.selectbox(
-                "Ver factura de un crédito (PDF o XML)", options=list(dict_pdfs_cartera.keys()), key="pdf_cartera_sel"
-            )
-            st.link_button("Abrir / Descargar", dict_pdfs_cartera[pdf_cartera_sel], use_container_width=True)
 
         st.markdown("---")
 
@@ -335,32 +327,24 @@ with tab_estado_cuenta:
             })
             st.dataframe(
                 df_compras_mostrar[[
-                    'id', 'fecha', 'total', 'tipo_pago', 'estado', 'fe_texto', 'numero_factura_texto'
+                    'id', 'fecha', 'total', 'tipo_pago', 'estado', 'fe_texto', 'numero_factura_texto',
+                    'factura_pdf_url', 'factura_xml_url', 'nota_credito_pdf_url', 'nota_credito_xml_url'
                 ]].rename(columns={
                     'id': 'Venta #', 'fecha': 'Fecha', 'total': 'Total',
                     'tipo_pago': 'Pago', 'estado': 'Estado',
-                    'fe_texto': 'Factura Electrónica', 'numero_factura_texto': 'N° Factura'
+                    'fe_texto': 'Factura Electrónica', 'numero_factura_texto': 'N° Factura',
+                    'factura_pdf_url': 'Factura PDF', 'factura_xml_url': 'Factura XML',
+                    'nota_credito_pdf_url': 'N.C. PDF', 'nota_credito_xml_url': 'N.C. XML',
                 }),
                 use_container_width=True, hide_index=True,
-                column_config={"Total": st.column_config.NumberColumn(format="$%,d")}
+                column_config={
+                    "Total": st.column_config.NumberColumn(format="$%,d"),
+                    "Factura PDF": st.column_config.LinkColumn(display_text="Abrir"),
+                    "Factura XML": st.column_config.LinkColumn(display_text="Abrir"),
+                    "N.C. PDF": st.column_config.LinkColumn(display_text="Abrir"),
+                    "N.C. XML": st.column_config.LinkColumn(display_text="Abrir"),
+                }
             )
-
-            dict_pdfs_ec = {}
-            for _, r in df_compras.iterrows():
-                base = f"Venta #{r['id']} — {formato_cop(r['total'])}"
-                if pd.notna(r['factura_pdf_url']):
-                    dict_pdfs_ec[f"{base} — Factura (PDF)"] = r['factura_pdf_url']
-                if pd.notna(r.get('factura_xml_url')):
-                    dict_pdfs_ec[f"{base} — Factura (XML)"] = r['factura_xml_url']
-                if pd.notna(r['nota_credito_pdf_url']):
-                    dict_pdfs_ec[f"{base} — Nota Crédito (PDF)"] = r['nota_credito_pdf_url']
-                if pd.notna(r.get('nota_credito_xml_url')):
-                    dict_pdfs_ec[f"{base} — Nota Crédito (XML)"] = r['nota_credito_xml_url']
-            if dict_pdfs_ec:
-                pdf_ec_sel = st.selectbox(
-                    "Ver documento (PDF o XML)", options=list(dict_pdfs_ec.keys()), key="pdf_estado_cuenta_sel"
-                )
-                st.link_button("Abrir / Descargar", dict_pdfs_ec[pdf_ec_sel], use_container_width=True)
         else:
             st.caption("Este cliente todavía no tiene compras registradas.")
 
