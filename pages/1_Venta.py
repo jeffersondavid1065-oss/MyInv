@@ -931,9 +931,16 @@ with tab_devolucion:
                     )
                 elif venta_dev[7]:
                     st.warning(
-                        "Esta venta tenía factura electrónica emitida pero no se confirmó la nota crédito. "
-                        "Revisa Reportes → Facturación Electrónica para reintentar o verificar en Alegra."
+                        "Esta venta tenía factura electrónica emitida pero no se confirmó la nota crédito."
                     )
+                    if st.button("Reintentar nota crédito", use_container_width=True):
+                        with st.spinner("Emitiendo nota crédito ante Alegra..."):
+                            ok_nc_r, msg_nc_r = anular_factura_venta(user_id, vid_dev)
+                        if ok_nc_r:
+                            st.success(msg_nc_r)
+                            st.rerun()
+                        else:
+                            st.error(msg_nc_r)
             else:
                 with st.container(border=True):
                     c1, c2, c3 = st.columns(3)

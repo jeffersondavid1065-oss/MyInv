@@ -196,7 +196,14 @@ def crear_nota_credito(email, token, factura_alegra_id, cliente_id, items, total
         "date": hoy_bogota().isoformat(),
         "client": {"id": cliente_id},
         "items": items,
-        "invoices": [{"id": factura_alegra_id, "amount": float(total)}],
+        # 'invoiceCreditAllocations' es el campo específico de Colombia para
+        # ligar la nota crédito a la factura electrónica que anula (necesario
+        # para que quede asociada ante la DIAN, no solo como nota suelta).
+        "invoiceCreditAllocations": [{"id": factura_alegra_id, "amount": float(total)}],
+        # 'type' es el concepto/motivo de la nota crédito que exige la DIAN.
+        # Como esta función siempre se usa para anular una factura electrónica
+        # ya emitida (ver anular_factura_venta), el motivo es fijo.
+        "type": "VOID_ELECTRONIC_INVOICE",
     }
 
     try:
