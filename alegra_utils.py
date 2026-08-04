@@ -400,12 +400,15 @@ def facturar_venta(uid, venta_id):
         queries.guardar_resultado_factura(venta_id, estado="error")
         return False, "Alegra rechazó la factura. Revisa el error mostrado arriba."
 
+    number_template = factura.get("numberTemplate") if isinstance(factura.get("numberTemplate"), dict) else {}
     queries.guardar_resultado_factura(
         venta_id,
         alegra_id=factura.get("id"),
         cufe=factura.get("stamp", {}).get("cufe") if isinstance(factura.get("stamp"), dict) else None,
         pdf_url=factura.get("pdf") if isinstance(factura.get("pdf"), str) else None,
         estado="emitida",
+        prefijo=number_template.get("prefix"),
+        numero=str(number_template["number"]) if number_template.get("number") is not None else None,
     )
 
     mensaje = f"Factura emitida (Alegra #{factura.get('id')})."

@@ -152,6 +152,8 @@ def init_db():
                     factura_cufe TEXT,
                     factura_pdf_url TEXT,
                     factura_estado TEXT,
+                    factura_prefijo TEXT,
+                    factura_numero TEXT,
                     nota_credito_alegra_id TEXT,
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE,
                     FOREIGN KEY (cliente_id) REFERENCES Clientes(id),
@@ -361,6 +363,8 @@ def init_db():
                     factura_cufe TEXT,
                     factura_pdf_url TEXT,
                     factura_estado TEXT,
+                    factura_prefijo TEXT,
+                    factura_numero TEXT,
                     nota_credito_alegra_id TEXT,
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE,
                     FOREIGN KEY (cliente_id) REFERENCES Clientes(id),
@@ -523,6 +527,10 @@ def init_db():
                     conn.execute(text("ALTER TABLE Ventas ADD COLUMN factura_pdf_url TEXT"))
                 if 'factura_estado' not in cols_v:
                     conn.execute(text("ALTER TABLE Ventas ADD COLUMN factura_estado TEXT"))
+                if 'factura_prefijo' not in cols_v:
+                    conn.execute(text("ALTER TABLE Ventas ADD COLUMN factura_prefijo TEXT"))
+                if 'factura_numero' not in cols_v:
+                    conn.execute(text("ALTER TABLE Ventas ADD COLUMN factura_numero TEXT"))
                 if 'alegra_email' not in cols:
                     conn.execute(text("ALTER TABLE Usuarios ADD COLUMN alegra_email TEXT"))
                 if 'alegra_token' not in cols:
@@ -552,6 +560,8 @@ def init_db():
                 conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS factura_cufe TEXT"))
                 conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS factura_pdf_url TEXT"))
                 conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS factura_estado TEXT"))
+                conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS factura_prefijo TEXT"))
+                conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS factura_numero TEXT"))
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS alegra_email TEXT"))
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS alegra_token TEXT"))
                 conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS nota_credito_alegra_id TEXT"))

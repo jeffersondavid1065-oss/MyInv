@@ -469,11 +469,28 @@ with tab_facturas:
 
             st.markdown("---")
 
-            filtro_estado = st.selectbox(
-                "Filtrar por estado",
-                ["Todas", "Facturadas", "Con error", "Anuladas (N.C.)", "Sin facturar"],
-                key="filtro_estado_factura"
-            )
+            col_s1, col_s2, col_s3 = st.columns(3)
+            with col_s1:
+                busq_id = st.text_input("Buscar por ID de venta", key="busq_factura_id")
+            with col_s2:
+                busq_num_factura = st.text_input(
+                    "Buscar por N° de factura (prefijo o número)", key="busq_factura_numero"
+                )
+            with col_s3:
+                filtro_estado = st.selectbox(
+                    "Filtrar por estado",
+                    ["Todas", "Facturadas", "Con error", "Anuladas (N.C.)", "Sin facturar"],
+                    key="filtro_estado_factura"
+                )
+
+            col_s4, col_s5, col_s6 = st.columns(3)
+            with col_s4:
+                busq_nit = st.text_input("Buscar por NIT/documento del cliente", key="busq_factura_nit")
+            with col_s5:
+                busq_nombre = st.text_input("Buscar por nombre del cliente", key="busq_factura_nombre")
+            with col_s6:
+                busq_fecha = st.date_input("Buscar por fecha exacta", value=None, key="busq_factura_fecha")
+
             df_mostrar_fe = df_facturas.copy()
             if filtro_estado == "Facturadas":
                 df_mostrar_fe = df_mostrar_fe[df_mostrar_fe['factura_estado'] == 'emitida']
@@ -485,15 +502,43 @@ with tab_facturas:
                 df_mostrar_fe = df_mostrar_fe[df_mostrar_fe['factura_estado'].isna()]
 
             df_mostrar_fe = df_mostrar_fe.copy()
+            df_mostrar_fe['numero_factura_texto'] = (
+                df_mostrar_fe['factura_prefijo'].fillna('').astype(str)
+                + df_mostrar_fe['factura_numero'].fillna('').astype(str)
+            )
+
+            if busq_id.strip():
+                df_mostrar_fe = df_mostrar_fe[
+                    df_mostrar_fe['id'].astype(str).str.contains(busq_id.strip(), case=False, na=False)
+                ]
+            if busq_num_factura.strip():
+                df_mostrar_fe = df_mostrar_fe[
+                    df_mostrar_fe['numero_factura_texto'].str.contains(busq_num_factura.strip(), case=False, na=False)
+                ]
+            if busq_nit.strip():
+                df_mostrar_fe = df_mostrar_fe[
+                    df_mostrar_fe['cliente_documento'].fillna('').astype(str).str.contains(busq_nit.strip(), case=False, na=False)
+                ]
+            if busq_nombre.strip():
+                df_mostrar_fe = df_mostrar_fe[
+                    df_mostrar_fe['cliente'].str.contains(busq_nombre.strip(), case=False, na=False)
+                ]
+            if busq_fecha:
+                df_mostrar_fe = df_mostrar_fe[
+                    pd.to_datetime(df_mostrar_fe['fecha']).dt.date == busq_fecha
+                ]
+
             df_mostrar_fe['estado_texto'] = df_mostrar_fe['factura_estado'].fillna('Sin facturar').replace({
                 'emitida': 'Emitida', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
             })
 
             st.dataframe(
-                df_mostrar_fe[['id', 'fecha', 'cliente', 'total', 'estado_texto', 'factura_alegra_id', 'factura_cufe', 'nota_credito_alegra_id']].rename(columns={
+                df_mostrar_fe[['id', 'fecha', 'cliente', 'cliente_documento', 'total', 'estado_texto',
+                               'numero_factura_texto', 'factura_cufe', 'nota_credito_alegra_id']].rename(columns={
                     'id': 'Venta #', 'fecha': 'Fecha', 'cliente': 'Cliente',
+                    'cliente_documento': 'NIT/Documento',
                     'total': 'Total ($)', 'estado_texto': 'Estado',
-                    'factura_alegra_id': 'ID Alegra', 'factura_cufe': 'CUFE',
+                    'numero_factura_texto': 'N° Factura', 'factura_cufe': 'CUFE',
                     'nota_credito_alegra_id': 'ID Nota Crédito'
                 }),
                 use_container_width=True, hide_index=True,

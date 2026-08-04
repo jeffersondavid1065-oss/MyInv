@@ -458,7 +458,9 @@ def obtener_facturas_periodo(uid, fecha_inicio, fecha_fin):
     with engine.connect() as conn:
         return pd.read_sql_query(text("""
             SELECT v.id, DATE(v.fecha) as fecha, COALESCE(cl.nombre, 'Sin cliente') as cliente,
+                   cl.documento as cliente_documento,
                    v.total, v.estado as estado_venta, v.factura_estado, v.factura_alegra_id,
+                   v.factura_prefijo, v.factura_numero,
                    v.factura_cufe, v.factura_pdf_url, v.nota_credito_alegra_id
             FROM Ventas v
             LEFT JOIN Clientes cl ON v.cliente_id = cl.id
@@ -518,18 +520,20 @@ def obtener_items_venta(venta_id):
         """), {"vid": venta_id}).fetchall()
 
 
-def guardar_resultado_factura(venta_id, alegra_id=None, cufe=None, pdf_url=None, estado="emitida"):
+def guardar_resultado_factura(venta_id, alegra_id=None, cufe=None, pdf_url=None, estado="emitida",
+                               prefijo=None, numero=None):
     """Guarda el resultado de emitir (o intentar emitir) la factura electrónica de una venta."""
     engine = obtener_conexion()
     with engine.begin() as conn:
         conn.execute(text("""
             UPDATE Ventas
             SET factura_alegra_id = :alegra_id, factura_cufe = :cufe,
-                factura_pdf_url = :pdf_url, factura_estado = :estado
+                factura_pdf_url = :pdf_url, factura_estado = :estado,
+                factura_prefijo = :prefijo, factura_numero = :numero
             WHERE id = :vid
         """), {
             "alegra_id": alegra_id, "cufe": cufe, "pdf_url": pdf_url,
-            "estado": estado, "vid": venta_id
+            "estado": estado, "prefijo": prefijo, "numero": numero, "vid": venta_id
         })
     invalidar_cache_ventas()
 
