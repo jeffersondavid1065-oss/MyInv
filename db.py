@@ -155,6 +155,7 @@ def init_db():
                     factura_prefijo TEXT,
                     factura_numero TEXT,
                     nota_credito_alegra_id TEXT,
+                    nota_credito_pdf_url TEXT,
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE,
                     FOREIGN KEY (cliente_id) REFERENCES Clientes(id),
                     FOREIGN KEY (cajero_id) REFERENCES Cajeros(id)
@@ -366,6 +367,7 @@ def init_db():
                     factura_prefijo TEXT,
                     factura_numero TEXT,
                     nota_credito_alegra_id TEXT,
+                    nota_credito_pdf_url TEXT,
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE,
                     FOREIGN KEY (cliente_id) REFERENCES Clientes(id),
                     FOREIGN KEY (cajero_id) REFERENCES Cajeros(id)
@@ -537,6 +539,8 @@ def init_db():
                     conn.execute(text("ALTER TABLE Usuarios ADD COLUMN alegra_token TEXT"))
                 if 'nota_credito_alegra_id' not in cols_v:
                     conn.execute(text("ALTER TABLE Ventas ADD COLUMN nota_credito_alegra_id TEXT"))
+                if 'nota_credito_pdf_url' not in cols_v:
+                    conn.execute(text("ALTER TABLE Ventas ADD COLUMN nota_credito_pdf_url TEXT"))
                 if 'iva_porcentaje' not in cols_p:
                     conn.execute(text("ALTER TABLE Productos ADD COLUMN iva_porcentaje REAL DEFAULT 0"))
                 if 'iva_porcentaje' not in cols_dv:
@@ -565,6 +569,7 @@ def init_db():
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS alegra_email TEXT"))
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS alegra_token TEXT"))
                 conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS nota_credito_alegra_id TEXT"))
+                conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS nota_credito_pdf_url TEXT"))
                 conn.execute(text("ALTER TABLE Productos ADD COLUMN IF NOT EXISTS iva_porcentaje NUMERIC(5,2) DEFAULT 0"))
                 conn.execute(text("ALTER TABLE Detalles_Venta ADD COLUMN IF NOT EXISTS iva_porcentaje NUMERIC(5,2) DEFAULT 0"))
         except Exception:

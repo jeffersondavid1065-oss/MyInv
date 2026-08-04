@@ -462,7 +462,7 @@ def obtener_facturas_periodo(uid, fecha_inicio, fecha_fin):
                    cl.documento as cliente_documento,
                    v.total, v.tipo_pago, v.estado as estado_venta, v.factura_estado, v.factura_alegra_id,
                    v.factura_prefijo, v.factura_numero,
-                   v.factura_cufe, v.factura_pdf_url, v.nota_credito_alegra_id
+                   v.factura_cufe, v.factura_pdf_url, v.nota_credito_alegra_id, v.nota_credito_pdf_url
             FROM Ventas v
             LEFT JOIN Clientes cl ON v.cliente_id = cl.id
             WHERE v.usuario_id = :uid
@@ -498,14 +498,15 @@ def obtener_credito_de_venta(venta_id):
         """), {"vid": venta_id}).fetchone()
 
 
-def guardar_nota_credito(venta_id, nota_credito_alegra_id):
-    """Guarda el id de la nota crédito emitida en Alegra para una venta anulada."""
+def guardar_nota_credito(venta_id, nota_credito_alegra_id, pdf_url=None):
+    """Guarda el id (y PDF) de la nota crédito emitida en Alegra para una venta anulada."""
     engine = obtener_conexion()
     with engine.begin() as conn:
         conn.execute(text("""
-            UPDATE Ventas SET nota_credito_alegra_id = :ncid, factura_estado = 'anulada'
+            UPDATE Ventas SET nota_credito_alegra_id = :ncid, nota_credito_pdf_url = :pdf_url,
+                   factura_estado = 'anulada'
             WHERE id = :vid
-        """), {"ncid": nota_credito_alegra_id, "vid": venta_id})
+        """), {"ncid": nota_credito_alegra_id, "pdf_url": pdf_url, "vid": venta_id})
     invalidar_cache_ventas()
 
 

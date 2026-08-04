@@ -547,15 +547,18 @@ with tab_facturas:
                 }
             )
 
-            facturas_con_pdf = df_mostrar_fe[df_mostrar_fe['factura_pdf_url'].notna()]
-            if not facturas_con_pdf.empty:
+            dict_pdfs = {}
+            for _, r in df_mostrar_fe[df_mostrar_fe['factura_pdf_url'].notna()].iterrows():
+                etiqueta = f"Venta #{r['id']} — {r['cliente']} — {formato_cop(r['total'])} — Factura"
+                dict_pdfs[etiqueta] = r['factura_pdf_url']
+            for _, r in df_mostrar_fe[df_mostrar_fe['nota_credito_pdf_url'].notna()].iterrows():
+                etiqueta = f"Venta #{r['id']} — {r['cliente']} — {formato_cop(r['total'])} — Nota Crédito"
+                dict_pdfs[etiqueta] = r['nota_credito_pdf_url']
+
+            if dict_pdfs:
                 st.markdown("---")
-                st.markdown("**Ver PDF de una factura:**")
-                dict_pdfs = {
-                    f"Venta #{r['id']} — {r['cliente']} — {formato_cop(r['total'])}": r['factura_pdf_url']
-                    for _, r in facturas_con_pdf.iterrows()
-                }
-                pdf_sel = st.selectbox("Selecciona la factura", options=list(dict_pdfs.keys()), key="pdf_factura_sel")
+                st.markdown("**Descargar factura o nota crédito:**")
+                pdf_sel = st.selectbox("Selecciona el documento", options=list(dict_pdfs.keys()), key="pdf_factura_sel")
                 st.link_button("Abrir PDF", dict_pdfs[pdf_sel], use_container_width=True)
 
             facturas_con_error = df_facturas[df_facturas['factura_estado'] == 'error']

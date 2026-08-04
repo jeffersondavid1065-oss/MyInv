@@ -907,7 +907,7 @@ with tab_devolucion:
                        DATE(v.fecha) as fecha,
                        COALESCE(cl.nombre, 'Venta directa') as cliente,
                        v.factura_estado, v.factura_alegra_id, v.factura_prefijo,
-                       v.factura_numero, v.nota_credito_alegra_id
+                       v.factura_numero, v.nota_credito_alegra_id, v.nota_credito_pdf_url
                 FROM Ventas v
                 LEFT JOIN Clientes cl ON v.cliente_id = cl.id
                 WHERE v.id = :vid AND v.usuario_id = :uid
@@ -929,6 +929,8 @@ with tab_devolucion:
                         f"Factura electrónica {numero_factura_dev} anulada mediante "
                         f"nota crédito (Alegra #{venta_dev[10]})."
                     )
+                    if venta_dev[11]:
+                        st.link_button("Abrir PDF de la Nota Crédito", venta_dev[11], use_container_width=True)
                 elif venta_dev[7]:
                     st.warning(
                         "Esta venta tenía factura electrónica emitida pero no se confirmó la nota crédito."

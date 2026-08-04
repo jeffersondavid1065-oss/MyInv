@@ -470,7 +470,10 @@ def anular_factura_venta(uid, venta_id):
     if not nota:
         return False, "Alegra rechazó la nota crédito. Revisa el error mostrado arriba."
 
-    queries.guardar_nota_credito(venta_id, nota.get("id"))
+    queries.guardar_nota_credito(
+        venta_id, nota.get("id"),
+        pdf_url=nota.get("pdf") if isinstance(nota.get("pdf"), str) else None,
+    )
     return True, f"Nota crédito emitida (Alegra #{nota.get('id')})."
 
 
