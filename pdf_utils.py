@@ -25,6 +25,7 @@ def generar_ticket_venta(
     subtotal=0,
     descuento=0,
     total=0,
+    total_iva=0,
 ):
     """
     Genera un ticket de venta profesional en PDF.
@@ -253,6 +254,14 @@ def generar_ticket_venta(
     pdf.cell(35, 7, "Total a pagar")
     pdf.cell(33, 7, f"${total:,.0f}".replace(",", "."), align="R")
     y_totales += 8
+
+    if total_iva and total_iva > 1:
+        pdf.set_xy(130, y_totales)
+        pdf.set_font("Helvetica", "", 8)
+        pdf.set_text_color(*GRIS_MEDIO)
+        pdf.cell(35, 5, "IVA incluido")
+        pdf.cell(33, 5, f"${total_iva:,.0f}".replace(",", "."), align="R")
+        y_totales += 6
 
     if cambio > 0:
         pdf.set_xy(130, y_totales)

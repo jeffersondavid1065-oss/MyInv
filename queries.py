@@ -84,7 +84,8 @@ def obtener_productos_activos(uid):
         return pd.read_sql_query(
             text("""
                 SELECT id, nombre, codigo_barras, codigo_ref, categoria,
-                       stock_actual, stock_minimo, precio_venta, costo_compra
+                       stock_actual, stock_minimo, precio_venta, costo_compra,
+                       iva_porcentaje
                 FROM Productos
                 WHERE usuario_id = :uid AND activo = TRUE AND stock_actual > 0
                 ORDER BY nombre ASC
@@ -102,7 +103,7 @@ def obtener_todos_productos(uid):
             text("""
                 SELECT id, nombre, descripcion, codigo_barras, codigo_ref,
                        categoria, unidad_medida, stock_actual, stock_minimo,
-                       costo_compra, precio_venta, activo
+                       costo_compra, precio_venta, activo, iva_porcentaje
                 FROM Productos
                 WHERE usuario_id = :uid
                 ORDER BY nombre ASC
@@ -117,7 +118,8 @@ def buscar_producto_por_codigo(uid, codigo):
     engine = obtener_conexion()
     with engine.connect() as conn:
         resultado = conn.execute(text("""
-            SELECT id, nombre, codigo_barras, stock_actual, precio_venta, costo_compra
+            SELECT id, nombre, codigo_barras, stock_actual, precio_venta, costo_compra,
+                   iva_porcentaje
             FROM Productos
             WHERE usuario_id = :uid
             AND activo = TRUE
@@ -494,11 +496,12 @@ def guardar_nota_credito(venta_id, nota_credito_alegra_id):
 
 
 def obtener_items_venta(venta_id):
-    """Renglones de una venta (producto, cantidad, precio) para armar la factura."""
+    """Renglones de una venta (producto, cantidad, precio, descuento, IVA) para armar la factura."""
     engine = obtener_conexion()
     with engine.connect() as conn:
         return conn.execute(text("""
-            SELECT producto_id, nombre_producto, cantidad, precio_unitario
+            SELECT producto_id, nombre_producto, cantidad, precio_unitario,
+                   descuento, iva_porcentaje
             FROM Detalles_Venta
             WHERE venta_id = :vid
         """), {"vid": venta_id}).fetchall()

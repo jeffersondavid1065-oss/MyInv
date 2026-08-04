@@ -137,6 +137,59 @@ def crear_nota_credito(email, token, factura_alegra_id, cliente_id, items, total
         return None
 
 
+@st.cache_data(ttl=3600)
+def obtener_impuesto_por_porcentaje(email, token, porcentaje):
+    """
+    Busca en el catálogo de impuestos de la cuenta de Alegra el id del IVA
+    que coincida con ese porcentaje (ej. 19 -> id del 'IVA 19%'). Las cuentas
+    colombianas de Alegra ya traen el catálogo estándar de IVA por defecto.
+    Devuelve None si no encuentra uno que coincida.
+    """
+    try:
+        resp = requests.get(f"{BASE_URL}/taxes", headers=_headers(email, token), params={"limit": 30}, timeout=15)
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        impuestos = data.get("results", []) if isinstance(data, dict) else data
+        for imp in impuestos:
+            if imp.get("type") == "IVA" and abs(float(imp.get("percentage", -1)) - float(porcentaje)) < 0.01:
+                return imp.get("id")
+        return None
+    except (requests.RequestException, ValueError, TypeError):
+        return None
+
+
+def _construir_item_payload(item_id, precio_unitario, cantidad, descuento_linea, iva_porcentaje, email, token):
+    """
+    Arma el renglón de factura para Alegra a partir de los datos guardados en
+    MyInv (donde el precio ya incluye IVA): calcula el precio base sin IVA,
+    el descuento como porcentaje, y referencia el impuesto correspondiente.
+    """
+    iva_porcentaje = float(iva_porcentaje or 0)
+    precio_unitario = float(precio_unitario or 0)
+    cantidad = float(cantidad or 0)
+    precio_base = precio_unitario / (1 + iva_porcentaje / 100) if iva_porcentaje else precio_unitario
+
+    payload = {
+        "id": item_id,
+        "price": round(precio_base, 2),
+        "quantity": cantidad,
+    }
+
+    if cantidad and precio_unitario and descuento_linea:
+        descuento_unitario = float(descuento_linea) / cantidad
+        descuento_pct = (descuento_unitario / precio_unitario) * 100
+        if descuento_pct > 0:
+            payload["discount"] = round(descuento_pct, 2)
+
+    if iva_porcentaje > 0:
+        tax_id = obtener_impuesto_por_porcentaje(email, token, iva_porcentaje)
+        if tax_id:
+            payload["tax"] = [{"id": tax_id}]
+
+    return payload
+
+
 def obtener_credenciales(uid):
     """Devuelve (email, token) de Alegra configurados por este negocio, o (None, None) si no ha configurado nada."""
     import queries
@@ -237,11 +290,9 @@ def facturar_venta(uid, venta_id):
         item_id = obtener_o_crear_item(uid, r.producto_id, email, token)
         if not item_id:
             return False, f"No se pudo crear/obtener el producto '{r.nombre_producto}' en Alegra."
-        items_payload.append({
-            "id": item_id,
-            "price": float(r.precio_unitario),
-            "quantity": float(r.cantidad),
-        })
+        items_payload.append(_construir_item_payload(
+            item_id, r.precio_unitario, r.cantidad, r.descuento, r.iva_porcentaje, email, token
+        ))
 
     due_date = None
     periodicity = None
@@ -298,11 +349,9 @@ def anular_factura_venta(uid, venta_id):
             continue
         item_id = obtener_o_crear_item(uid, r.producto_id, email, token)
         if item_id:
-            items_payload.append({
-                "id": item_id,
-                "price": float(r.precio_unitario),
-                "quantity": float(r.cantidad),
-            })
+            items_payload.append(_construir_item_payload(
+                item_id, r.precio_unitario, r.cantidad, r.descuento, r.iva_porcentaje, email, token
+            ))
 
     if not items_payload:
         return False, "No hay ítems válidos para la nota crédito."

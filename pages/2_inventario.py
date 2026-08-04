@@ -25,6 +25,8 @@ UNIDADES = ["Unidad", "kg", "g", "lb", "m", "cm", "vara", "pie",
 UNIDADES_DECIMALES = {"kg", "g", "lb", "m", "cm", "vara", "pie",
                       "L", "mL", "galón", "m²", "m³"}
 
+OPCIONES_IVA = [0, 5, 19]
+
 def formato_cop(numero):
     return f"${float(numero):,.0f}".replace(",", ".")
 
@@ -110,6 +112,11 @@ with tab_stock:
             else:
                 df_show['unidad_medida'] = df_show['unidad_medida'].fillna("Unidad")
 
+            if 'iva_porcentaje' not in df_show.columns:
+                df_show['iva_porcentaje'] = 0
+            else:
+                df_show['iva_porcentaje'] = df_show['iva_porcentaje'].fillna(0)
+
             # Calcular ganancia
             df_show['ganancia'] = df_show['precio_venta'] - df_show['costo_compra']
             df_show['pct_ganancia'] = df_show.apply(
@@ -120,7 +127,7 @@ with tab_stock:
             cols_mostrar = ['id', 'nombre', 'codigo_barras', 'codigo_ref',
                             'categoria', 'unidad_medida', 'stock_actual',
                             'stock_minimo', 'costo_compra', 'precio_venta',
-                            'ganancia', 'pct_ganancia']
+                            'iva_porcentaje', 'ganancia', 'pct_ganancia']
             cols_disponibles = [c for c in cols_mostrar if c in df_show.columns]
 
             df_edit = st.data_editor(
@@ -146,6 +153,10 @@ with tab_stock:
                     ),
                     "costo_compra": st.column_config.NumberColumn("Costo ($)", format="$%,d"),
                     "precio_venta": st.column_config.NumberColumn("Precio Venta ($)", format="$%,d"),
+                    "iva_porcentaje": st.column_config.SelectboxColumn(
+                        "IVA", options=OPCIONES_IVA,
+                        help="0 = sin IVA/excluido. El precio de venta ya lo incluye."
+                    ),
                     "ganancia": st.column_config.NumberColumn("Ganancia ($)", format="$%,d"),
                     "pct_ganancia": st.column_config.NumberColumn("% Ganancia", format="%.1f%%"),
                 },
@@ -163,7 +174,8 @@ with tab_stock:
                                     codigo_ref = :ref, categoria = :cat,
                                     unidad_medida = :um,
                                     stock_actual = :st_act, stock_minimo = :st_min,
-                                    costo_compra = :costo, precio_venta = :pvp
+                                    costo_compra = :costo, precio_venta = :pvp,
+                                    iva_porcentaje = :iva
                                 WHERE id = :id AND usuario_id = :uid
                             """), {
                                 "nom": row['nombre'],
@@ -175,6 +187,7 @@ with tab_stock:
                                 "st_min": float(row['stock_minimo']),
                                 "costo": float(row['costo_compra']),
                                 "pvp": float(row['precio_venta']),
+                                "iva": float(row.get('iva_porcentaje', 0) or 0),
                                 # ganancia y pct_ganancia son calculadas, NO se guardan
                                 "id": int(row['id']),
                                 "uid": user_id
@@ -202,6 +215,11 @@ with tab_nuevo:
                                     placeholder="Escanea con el lector o escribe manualmente")
         cod_ref = st.text_input("Referencia interna (opcional)")
         categoria_p = st.text_input("Categoría", value="General")
+        iva_p = st.selectbox(
+            "IVA", options=OPCIONES_IVA, index=0,
+            format_func=lambda v: "Sin IVA / Excluido" if v == 0 else f"{v}%",
+            help="Opcional. El precio de venta que definas abajo ya debe incluir el IVA."
+        )
 
         unidad_p = st.selectbox("Unidad de Medida", options=UNIDADES,
                                  help="Cómo se mide/vende este producto")
@@ -273,14 +291,15 @@ with tab_nuevo:
                         INSERT INTO Productos
                         (usuario_id, nombre, descripcion, codigo_barras, codigo_ref,
                          categoria, unidad_medida, stock_actual, stock_minimo,
-                         costo_compra, precio_venta)
-                        VALUES (:uid, :nom, :desc, :cod, :ref, :cat, :um, :stk, :stk_min, :costo, :pvp)
+                         costo_compra, precio_venta, iva_porcentaje)
+                        VALUES (:uid, :nom, :desc, :cod, :ref, :cat, :um, :stk, :stk_min, :costo, :pvp, :iva)
                     """), {
                         "uid": user_id, "nom": nom_p, "desc": desc_p or None,
                         "cod": cod_barras or None, "ref": cod_ref or None,
                         "cat": categoria_p, "um": unidad_p,
                         "stk": float(stock_inicial), "stk_min": float(stock_min),
-                        "costo": float(costo_p), "pvp": float(precio_p)
+                        "costo": float(costo_p), "pvp": float(precio_p),
+                        "iva": float(iva_p)
                     })
                 invalidar_cache_productos()
                 st.success(f"'{nom_p}' registrado — {formato_cant(stock_inicial, unidad_p)} en stock a {formato_cop(precio_p)}/{unidad_p}.")

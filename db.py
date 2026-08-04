@@ -98,6 +98,7 @@ def init_db():
                     activo BOOLEAN DEFAULT 1,
                     fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     alegra_item_id TEXT,
+                    iva_porcentaje REAL DEFAULT 0,
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE
                 )
             '''))
@@ -169,6 +170,7 @@ def init_db():
                     costo_unitario REAL DEFAULT 0,
                     descuento REAL DEFAULT 0,
                     subtotal REAL NOT NULL DEFAULT 0,
+                    iva_porcentaje REAL DEFAULT 0,
                     FOREIGN KEY (venta_id) REFERENCES Ventas(id) ON DELETE CASCADE,
                     FOREIGN KEY (producto_id) REFERENCES Productos(id)
                 )
@@ -305,6 +307,7 @@ def init_db():
                     activo BOOLEAN DEFAULT TRUE,
                     fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     alegra_item_id TEXT,
+                    iva_porcentaje NUMERIC(5,2) DEFAULT 0,
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE
                 )
             '''))
@@ -376,6 +379,7 @@ def init_db():
                     costo_unitario NUMERIC(12,2) DEFAULT 0,
                     descuento NUMERIC(12,2) DEFAULT 0,
                     subtotal NUMERIC(12,2) NOT NULL DEFAULT 0,
+                    iva_porcentaje NUMERIC(5,2) DEFAULT 0,
                     FOREIGN KEY (venta_id) REFERENCES Ventas(id) ON DELETE CASCADE,
                     FOREIGN KEY (producto_id) REFERENCES Productos(id)
                 )
@@ -525,6 +529,10 @@ def init_db():
                     conn.execute(text("ALTER TABLE Usuarios ADD COLUMN alegra_token TEXT"))
                 if 'nota_credito_alegra_id' not in cols_v:
                     conn.execute(text("ALTER TABLE Ventas ADD COLUMN nota_credito_alegra_id TEXT"))
+                if 'iva_porcentaje' not in cols_p:
+                    conn.execute(text("ALTER TABLE Productos ADD COLUMN iva_porcentaje REAL DEFAULT 0"))
+                if 'iva_porcentaje' not in cols_dv:
+                    conn.execute(text("ALTER TABLE Detalles_Venta ADD COLUMN iva_porcentaje REAL DEFAULT 0"))
             else:
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS token_sesion VARCHAR(255)"))
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS logo_path TEXT"))
@@ -547,6 +555,8 @@ def init_db():
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS alegra_email TEXT"))
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS alegra_token TEXT"))
                 conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS nota_credito_alegra_id TEXT"))
+                conn.execute(text("ALTER TABLE Productos ADD COLUMN IF NOT EXISTS iva_porcentaje NUMERIC(5,2) DEFAULT 0"))
+                conn.execute(text("ALTER TABLE Detalles_Venta ADD COLUMN IF NOT EXISTS iva_porcentaje NUMERIC(5,2) DEFAULT 0"))
         except Exception:
             pass
 
