@@ -31,7 +31,7 @@ with tab_cierre:
     with engine.connect() as conn:
         cierre_existente = conn.execute(text("""
             SELECT id, total_efectivo, total_transferencias,
-                   efectivo_contado, diferencia, notas, fecha_cierre
+                   efectivo_contado, diferencia, notas, fecha_cierre, total_descuentos
             FROM Cierres_Caja
             WHERE usuario_id = :uid AND fecha = :fecha
         """), {"uid": user_id, "fecha": fecha_cierre.strftime('%Y-%m-%d')}).fetchone()
@@ -39,10 +39,11 @@ with tab_cierre:
     if cierre_existente:
         st.warning(f"Ya existe un cierre para el {fecha_cierre.strftime('%d/%m/%Y')}.")
         with st.container(border=True):
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             col1.metric("Efectivo Sistema", formato_cop(cierre_existente[1]))
             col2.metric("Transferencias", formato_cop(cierre_existente[2]))
             col3.metric("Efectivo Contado", formato_cop(cierre_existente[3]))
+            col4.metric("Descuentos", formato_cop(cierre_existente[7] or 0))
             diff = cierre_existente[4]
             color = "🔴" if diff < 0 else "🟢" if diff == 0 else "🟡"
             st.metric(f"{color} Diferencia", formato_cop(diff))
@@ -59,6 +60,7 @@ with tab_cierre:
                     COALESCE(SUM(CASE WHEN tipo_pago IN ('Efectivo','Mixto') AND estado != 'Anulada' THEN monto_efectivo ELSE 0 END), 0) as total_efectivo,
                     COALESCE(SUM(CASE WHEN tipo_pago IN ('Transferencia','Mixto') AND estado != 'Anulada' THEN monto_transferencia ELSE 0 END), 0) as total_transferencias,
                     COALESCE(SUM(CASE WHEN tipo_pago = 'Credito' AND estado = 'Credito' THEN total ELSE 0 END), 0) as total_creditos,
+                    COALESCE(SUM(CASE WHEN estado != 'Anulada' THEN descuento ELSE 0 END), 0) as total_descuentos,
                     COUNT(CASE WHEN estado = 'Anulada' THEN 1 END) as ventas_anuladas
                 FROM Ventas
                 WHERE usuario_id = :uid AND DATE(fecha) = :fecha
@@ -69,16 +71,18 @@ with tab_cierre:
         total_efectivo = float(resumen[2])
         total_transferencias = float(resumen[3])
         total_creditos = float(resumen[4])
-        ventas_anuladas = int(resumen[5])
+        total_descuentos = float(resumen[5])
+        ventas_anuladas = int(resumen[6])
 
         st.subheader(f"Resumen del {fecha_cierre.strftime('%d/%m/%Y')}")
 
-        col_r1, col_r2, col_r3, col_r4, col_r5 = st.columns(5)
+        col_r1, col_r2, col_r3, col_r4, col_r5, col_r6 = st.columns(6)
         col_r1.metric("Ventas Realizadas", total_ventas - ventas_anuladas)
         col_r2.metric("Total General", formato_cop(total_general))
         col_r3.metric("Efectivo Sistema", formato_cop(total_efectivo))
         col_r4.metric("Transferencias", formato_cop(total_transferencias))
         col_r5.metric("Créditos", formato_cop(total_creditos))
+        col_r6.metric("Descuentos", formato_cop(total_descuentos))
 
         if ventas_anuladas > 0:
             st.warning(f"{ventas_anuladas} venta(s) anulada(s) hoy.")
@@ -122,7 +126,7 @@ with tab_cierre:
                 df_ventas = pd.read_sql_query(text("""
                     SELECT v.id, DATE(v.fecha) as fecha,
                            COALESCE(cl.nombre, 'Directa') as cliente,
-                           v.total, v.tipo_pago, v.estado
+                           v.subtotal, v.descuento, v.total, v.tipo_pago, v.estado
                     FROM Ventas v
                     LEFT JOIN Clientes cl ON v.cliente_id = cl.id
                     WHERE v.usuario_id = :uid AND DATE(v.fecha) = :fecha
@@ -131,9 +135,12 @@ with tab_cierre:
             if not df_ventas.empty:
                 st.dataframe(df_ventas.rename(columns={
                     'id': 'N°', 'fecha': 'Fecha', 'cliente': 'Cliente',
+                    'subtotal': 'Subtotal', 'descuento': 'Descuento',
                     'total': 'Total', 'tipo_pago': 'Pago', 'estado': 'Estado'
                 }), hide_index=True, use_container_width=True,
                 column_config={
+                    "Subtotal": st.column_config.NumberColumn("Subtotal", format="$%,d"),
+                    "Descuento": st.column_config.NumberColumn("Descuento", format="$%,d"),
                     "Total": st.column_config.NumberColumn("Total", format="$%,d"),
                 })
             else:
@@ -178,9 +185,9 @@ with tab_cierre:
                         conn.execute(text("""
                             INSERT INTO Cierres_Caja
                             (usuario_id, fecha, total_ventas, total_efectivo,
-                             total_transferencias, total_creditos,
+                             total_transferencias, total_creditos, total_descuentos,
                              efectivo_contado, diferencia, notas, cerrado_por, fecha_cierre)
-                            VALUES (:uid, :fecha, :tv, :tef, :ttr, :tcr,
+                            VALUES (:uid, :fecha, :tv, :tef, :ttr, :tcr, :tdesc,
                                     :ec, :dif, :notas, :por, :fecha_cierre)
                         """), {
                             "uid": user_id,
@@ -189,6 +196,7 @@ with tab_cierre:
                             "tef": total_efectivo,
                             "ttr": total_transferencias,
                             "tcr": total_creditos,
+                            "tdesc": total_descuentos,
                             "ec": efectivo_contado,
                             "dif": diferencia,
                             "notas": notas_cierre or None,
@@ -221,7 +229,7 @@ with tab_historial:
         with engine.connect() as conn:
             df_hist = pd.read_sql_query(text("""
                 SELECT fecha, total_ventas,
-                       total_efectivo, total_transferencias, total_creditos,
+                       total_efectivo, total_transferencias, total_creditos, total_descuentos,
                        efectivo_contado, diferencia, cerrado_por, notas
                 FROM Cierres_Caja
                 WHERE usuario_id = :uid
@@ -235,10 +243,11 @@ with tab_historial:
 
         if not df_hist.empty:
             # Métricas del período
-            col_m1, col_m2, col_m3 = st.columns(3)
+            col_m1, col_m2, col_m3, col_m4 = st.columns(4)
             col_m1.metric("Días con cierre", len(df_hist))
             col_m2.metric("Total período", formato_cop(df_hist['total_efectivo'].sum() + df_hist['total_transferencias'].sum()))
-            col_m3.metric("Diferencias acumuladas", formato_cop(df_hist['diferencia'].sum()))
+            col_m3.metric("Descuentos período", formato_cop(df_hist['total_descuentos'].sum()))
+            col_m4.metric("Diferencias acumuladas", formato_cop(df_hist['diferencia'].sum()))
 
             st.markdown("---")
             st.dataframe(
@@ -247,6 +256,7 @@ with tab_historial:
                     'total_efectivo': 'Efectivo Sistema',
                     'total_transferencias': 'Transferencias',
                     'total_creditos': 'Créditos',
+                    'total_descuentos': 'Descuentos',
                     'efectivo_contado': 'Efectivo Contado',
                     'diferencia': 'Diferencia',
                     'cerrado_por': 'Cerrado por',
@@ -257,6 +267,7 @@ with tab_historial:
                     "Efectivo Sistema": st.column_config.NumberColumn("Efectivo Sistema", format="$%,d"),
                     "Transferencias": st.column_config.NumberColumn("Transferencias", format="$%,d"),
                     "Créditos": st.column_config.NumberColumn("Créditos", format="$%,d"),
+                    "Descuentos": st.column_config.NumberColumn("Descuentos", format="$%,d"),
                     "Efectivo Contado": st.column_config.NumberColumn("Efectivo Contado", format="$%,d"),
                     "Diferencia": st.column_config.NumberColumn("Diferencia", format="$%,d"),
                 }

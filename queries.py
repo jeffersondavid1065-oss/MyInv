@@ -127,6 +127,27 @@ def buscar_producto_por_codigo(uid, codigo):
     return resultado
 
 
+def obtener_datos_facturacion_producto(uid, producto_id):
+    """Datos del producto necesarios para facturar electrónicamente (sin cache, siempre al día)."""
+    engine = obtener_conexion()
+    with engine.connect() as conn:
+        return conn.execute(text("""
+            SELECT id, nombre, precio_venta, alegra_item_id
+            FROM Productos
+            WHERE usuario_id = :uid AND id = :producto_id
+        """), {"uid": uid, "producto_id": producto_id}).fetchone()
+
+
+def guardar_alegra_item_id(producto_id, alegra_item_id):
+    """Guarda el id de ítem en Alegra la primera vez que se crea, para reutilizarlo después."""
+    engine = obtener_conexion()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE Productos SET alegra_item_id = :alegra_id WHERE id = :producto_id
+        """), {"alegra_id": alegra_item_id, "producto_id": producto_id})
+    invalidar_cache_productos()
+
+
 @st.cache_data(ttl=60)
 def obtener_metricas_inventario(uid):
     """Métricas agregadas del inventario en una sola query."""
@@ -159,6 +180,27 @@ def obtener_clientes(uid):
             WHERE usuario_id = :uid AND activo = TRUE
             ORDER BY nombre ASC
         """), {"uid": uid}).fetchall()
+
+
+def obtener_datos_facturacion_cliente(uid, cliente_id):
+    """Datos del cliente necesarios para facturar electrónicamente (sin cache, siempre al día)."""
+    engine = obtener_conexion()
+    with engine.connect() as conn:
+        return conn.execute(text("""
+            SELECT id, nombre, documento, tipo_documento, email, alegra_contact_id
+            FROM Clientes
+            WHERE usuario_id = :uid AND id = :cliente_id
+        """), {"uid": uid, "cliente_id": cliente_id}).fetchone()
+
+
+def guardar_alegra_contact_id(cliente_id, alegra_contact_id):
+    """Guarda el id de contacto en Alegra la primera vez que se crea, para reutilizarlo después."""
+    engine = obtener_conexion()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE Clientes SET alegra_contact_id = :alegra_id WHERE id = :cliente_id
+        """), {"alegra_id": alegra_contact_id, "cliente_id": cliente_id})
+    invalidar_cache_clientes()
 
 
 @st.cache_data(ttl=30)
@@ -220,7 +262,7 @@ def obtener_ventas_periodo(uid, fecha_inicio, fecha_fin):
     with engine.connect() as conn:
         return pd.read_sql_query(text("""
             SELECT v.id, DATE(v.fecha) as fecha, cl.nombre as cliente,
-                   v.total, v.tipo_pago, v.estado,
+                   v.subtotal, v.descuento, v.total, v.tipo_pago, v.estado,
                    v.monto_efectivo, v.monto_transferencia, v.cambio
             FROM Ventas v
             LEFT JOIN Clientes cl ON v.cliente_id = cl.id
@@ -364,6 +406,69 @@ def obtener_ganancia_acumulada(uid):
 
 
 # ==========================================
+# FACTURACIÓN ELECTRÓNICA
+# ==========================================
+@st.cache_data(ttl=30)
+def obtener_facturas_periodo(uid, fecha_inicio, fecha_fin):
+    """Ventas del período con su estado de facturación electrónica, para el reporte."""
+    engine = obtener_conexion()
+    with engine.connect() as conn:
+        return pd.read_sql_query(text("""
+            SELECT v.id, DATE(v.fecha) as fecha, COALESCE(cl.nombre, 'Sin cliente') as cliente,
+                   v.total, v.factura_estado, v.factura_alegra_id,
+                   v.factura_cufe, v.factura_pdf_url
+            FROM Ventas v
+            LEFT JOIN Clientes cl ON v.cliente_id = cl.id
+            WHERE v.usuario_id = :uid
+            AND DATE(v.fecha) >= :f_ini AND DATE(v.fecha) <= :f_fin
+            AND v.estado != 'Anulada'
+            ORDER BY v.fecha DESC
+        """), con=conn, params={
+            "uid": uid,
+            "f_ini": fecha_inicio.strftime('%Y-%m-%d'),
+            "f_fin": fecha_fin.strftime('%Y-%m-%d')
+        })
+
+
+def obtener_venta_para_facturar(uid, venta_id):
+    """Datos base de una venta necesarios para emitirla como factura electrónica."""
+    engine = obtener_conexion()
+    with engine.connect() as conn:
+        return conn.execute(text("""
+            SELECT id, cliente_id, total, factura_alegra_id, factura_estado
+            FROM Ventas
+            WHERE id = :vid AND usuario_id = :uid
+        """), {"vid": venta_id, "uid": uid}).fetchone()
+
+
+def obtener_items_venta(venta_id):
+    """Renglones de una venta (producto, cantidad, precio) para armar la factura."""
+    engine = obtener_conexion()
+    with engine.connect() as conn:
+        return conn.execute(text("""
+            SELECT producto_id, nombre_producto, cantidad, precio_unitario
+            FROM Detalles_Venta
+            WHERE venta_id = :vid
+        """), {"vid": venta_id}).fetchall()
+
+
+def guardar_resultado_factura(venta_id, alegra_id=None, cufe=None, pdf_url=None, estado="emitida"):
+    """Guarda el resultado de emitir (o intentar emitir) la factura electrónica de una venta."""
+    engine = obtener_conexion()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE Ventas
+            SET factura_alegra_id = :alegra_id, factura_cufe = :cufe,
+                factura_pdf_url = :pdf_url, factura_estado = :estado
+            WHERE id = :vid
+        """), {
+            "alegra_id": alegra_id, "cufe": cufe, "pdf_url": pdf_url,
+            "estado": estado, "vid": venta_id
+        })
+    invalidar_cache_ventas()
+
+
+# ==========================================
 # FUNCIONES DE INVALIDACIÓN DE CACHE
 # ==========================================
 def invalidar_cache_productos():
@@ -386,6 +491,7 @@ def invalidar_cache_ventas():
     obtener_ganancia_dia.clear()
     obtener_ganancia_por_producto_dia.clear()
     obtener_ganancia_acumulada.clear()
+    obtener_facturas_periodo.clear()
 
 
 def invalidar_cache_clientes():

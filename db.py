@@ -1,15 +1,29 @@
 import streamlit as st
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, event
 import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOCAL_DB_PATH = os.path.join(BASE_DIR, "myalmacen.db")
+
+# Schema propio de MyInv dentro de Postgres/Supabase, para no chocar con
+# tablas de otras apps (ej. MyTaller) que viven en el schema 'public'
+# del mismo proyecto.
+PG_SCHEMA = "myinv"
 
 
 @st.cache_resource
 def obtener_conexion():
     try:
         db_url = st.secrets["postgres"]["url"]
+
+        # Conexión de arranque (sin search_path fijo) solo para asegurar
+        # que el schema de MyInv exista antes de apuntar el pool ahí.
+        engine_setup = create_engine(db_url)
+        with engine_setup.connect() as conn:
+            conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {PG_SCHEMA}"))
+            conn.commit()
+        engine_setup.dispose()
+
         engine = create_engine(
             db_url,
             pool_size=10,
@@ -17,6 +31,16 @@ def obtener_conexion():
             pool_pre_ping=True,
             pool_recycle=300,
         )
+
+        # El pooler de Supabase ignora el parámetro 'options' del connect_args,
+        # así que el search_path se fija a mano en cada conexión física nueva.
+        @event.listens_for(engine, "connect")
+        def _fijar_search_path(dbapi_connection, connection_record):
+            cursor = dbapi_connection.cursor()
+            cursor.execute(f"SET search_path TO {PG_SCHEMA}")
+            cursor.close()
+            dbapi_connection.commit()
+
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
     except Exception as e:
@@ -68,6 +92,7 @@ def init_db():
                     precio_venta REAL NOT NULL DEFAULT 0,
                     activo BOOLEAN DEFAULT 1,
                     fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    alegra_item_id TEXT,
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE
                 )
             '''))
@@ -80,9 +105,11 @@ def init_db():
                     email TEXT,
                     direccion TEXT,
                     documento TEXT,
+                    tipo_documento TEXT DEFAULT 'CC',
                     cupo_credito REAL DEFAULT 0,
                     activo BOOLEAN DEFAULT 1,
                     fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    alegra_contact_id TEXT,
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE
                 )
             '''))
@@ -115,6 +142,10 @@ def init_db():
                     cambio REAL DEFAULT 0,
                     estado TEXT CHECK(estado IN ('Pagada','Credito','Anulada')) DEFAULT 'Pagada',
                     notas TEXT,
+                    factura_alegra_id TEXT,
+                    factura_cufe TEXT,
+                    factura_pdf_url TEXT,
+                    factura_estado TEXT,
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE,
                     FOREIGN KEY (cliente_id) REFERENCES Clientes(id),
                     FOREIGN KEY (cajero_id) REFERENCES Cajeros(id)
@@ -130,6 +161,7 @@ def init_db():
                     cantidad INTEGER NOT NULL DEFAULT 1,
                     precio_unitario REAL NOT NULL DEFAULT 0,
                     costo_unitario REAL DEFAULT 0,
+                    descuento REAL DEFAULT 0,
                     subtotal REAL NOT NULL DEFAULT 0,
                     FOREIGN KEY (venta_id) REFERENCES Ventas(id) ON DELETE CASCADE,
                     FOREIGN KEY (producto_id) REFERENCES Productos(id)
@@ -199,6 +231,7 @@ def init_db():
                     total_efectivo REAL DEFAULT 0,
                     total_transferencias REAL DEFAULT 0,
                     total_creditos REAL DEFAULT 0,
+                    total_descuentos REAL DEFAULT 0,
                     efectivo_contado REAL DEFAULT 0,
                     diferencia REAL DEFAULT 0,
                     notas TEXT,
@@ -263,6 +296,7 @@ def init_db():
                     precio_venta NUMERIC(12,2) NOT NULL DEFAULT 0,
                     activo BOOLEAN DEFAULT TRUE,
                     fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    alegra_item_id TEXT,
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE
                 )
             '''))
@@ -275,9 +309,11 @@ def init_db():
                     email TEXT,
                     direccion TEXT,
                     documento TEXT,
+                    tipo_documento TEXT DEFAULT 'CC',
                     cupo_credito NUMERIC(12,2) DEFAULT 0,
                     activo BOOLEAN DEFAULT TRUE,
                     fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    alegra_contact_id TEXT,
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE
                 )
             '''))
@@ -310,6 +346,10 @@ def init_db():
                     cambio NUMERIC(12,2) DEFAULT 0,
                     estado VARCHAR(20) CHECK(estado IN ('Pagada','Credito','Anulada')) DEFAULT 'Pagada',
                     notas TEXT,
+                    factura_alegra_id TEXT,
+                    factura_cufe TEXT,
+                    factura_pdf_url TEXT,
+                    factura_estado TEXT,
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE,
                     FOREIGN KEY (cliente_id) REFERENCES Clientes(id),
                     FOREIGN KEY (cajero_id) REFERENCES Cajeros(id)
@@ -325,6 +365,7 @@ def init_db():
                     cantidad INTEGER NOT NULL DEFAULT 1,
                     precio_unitario NUMERIC(12,2) NOT NULL DEFAULT 0,
                     costo_unitario NUMERIC(12,2) DEFAULT 0,
+                    descuento NUMERIC(12,2) DEFAULT 0,
                     subtotal NUMERIC(12,2) NOT NULL DEFAULT 0,
                     FOREIGN KEY (venta_id) REFERENCES Ventas(id) ON DELETE CASCADE,
                     FOREIGN KEY (producto_id) REFERENCES Productos(id)
@@ -394,6 +435,7 @@ def init_db():
                     total_efectivo NUMERIC(12,2) DEFAULT 0,
                     total_transferencias NUMERIC(12,2) DEFAULT 0,
                     total_creditos NUMERIC(12,2) DEFAULT 0,
+                    total_descuentos NUMERIC(12,2) DEFAULT 0,
                     efectivo_contado NUMERIC(12,2) DEFAULT 0,
                     diferencia NUMERIC(12,2) DEFAULT 0,
                     notas TEXT,
@@ -447,6 +489,27 @@ def init_db():
                 cols_v = [r[1] for r in conn.execute(text("PRAGMA table_info(Ventas)")).fetchall()]
                 if 'cajero_id' not in cols_v:
                     conn.execute(text("ALTER TABLE Ventas ADD COLUMN cajero_id INTEGER"))
+                cols_dv = [r[1] for r in conn.execute(text("PRAGMA table_info(Detalles_Venta)")).fetchall()]
+                if 'descuento' not in cols_dv:
+                    conn.execute(text("ALTER TABLE Detalles_Venta ADD COLUMN descuento REAL DEFAULT 0"))
+                cols_cc = [r[1] for r in conn.execute(text("PRAGMA table_info(Cierres_Caja)")).fetchall()]
+                if 'total_descuentos' not in cols_cc:
+                    conn.execute(text("ALTER TABLE Cierres_Caja ADD COLUMN total_descuentos REAL DEFAULT 0"))
+                if 'alegra_item_id' not in cols_p:
+                    conn.execute(text("ALTER TABLE Productos ADD COLUMN alegra_item_id TEXT"))
+                cols_cli = [r[1] for r in conn.execute(text("PRAGMA table_info(Clientes)")).fetchall()]
+                if 'tipo_documento' not in cols_cli:
+                    conn.execute(text("ALTER TABLE Clientes ADD COLUMN tipo_documento TEXT DEFAULT 'CC'"))
+                if 'alegra_contact_id' not in cols_cli:
+                    conn.execute(text("ALTER TABLE Clientes ADD COLUMN alegra_contact_id TEXT"))
+                if 'factura_alegra_id' not in cols_v:
+                    conn.execute(text("ALTER TABLE Ventas ADD COLUMN factura_alegra_id TEXT"))
+                if 'factura_cufe' not in cols_v:
+                    conn.execute(text("ALTER TABLE Ventas ADD COLUMN factura_cufe TEXT"))
+                if 'factura_pdf_url' not in cols_v:
+                    conn.execute(text("ALTER TABLE Ventas ADD COLUMN factura_pdf_url TEXT"))
+                if 'factura_estado' not in cols_v:
+                    conn.execute(text("ALTER TABLE Ventas ADD COLUMN factura_estado TEXT"))
             else:
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS token_sesion VARCHAR(255)"))
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS logo_path TEXT"))
@@ -457,6 +520,15 @@ def init_db():
                 conn.execute(text("ALTER TABLE Productos ADD COLUMN IF NOT EXISTS unidad_medida VARCHAR(20) DEFAULT 'Unidad'"))
                 conn.execute(text("ALTER TABLE Productos ALTER COLUMN stock_actual TYPE NUMERIC(12,3)"))
                 conn.execute(text("ALTER TABLE Productos ALTER COLUMN stock_minimo TYPE NUMERIC(12,3)"))
+                conn.execute(text("ALTER TABLE Detalles_Venta ADD COLUMN IF NOT EXISTS descuento NUMERIC(12,2) DEFAULT 0"))
+                conn.execute(text("ALTER TABLE Cierres_Caja ADD COLUMN IF NOT EXISTS total_descuentos NUMERIC(12,2) DEFAULT 0"))
+                conn.execute(text("ALTER TABLE Productos ADD COLUMN IF NOT EXISTS alegra_item_id TEXT"))
+                conn.execute(text("ALTER TABLE Clientes ADD COLUMN IF NOT EXISTS tipo_documento TEXT DEFAULT 'CC'"))
+                conn.execute(text("ALTER TABLE Clientes ADD COLUMN IF NOT EXISTS alegra_contact_id TEXT"))
+                conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS factura_alegra_id TEXT"))
+                conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS factura_cufe TEXT"))
+                conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS factura_pdf_url TEXT"))
+                conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS factura_estado TEXT"))
         except Exception:
             pass
 

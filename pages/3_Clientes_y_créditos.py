@@ -264,6 +264,11 @@ with tab_nuevo:
             email_c = st.text_input("Email (opcional)")
         with col_c2:
             doc_c = st.text_input("CC / NIT")
+            tipo_doc_c = st.selectbox(
+                "Tipo de documento",
+                options=["CC", "NIT", "CE", "PAS", "TI"],
+                help="Necesario para poder facturar electrónicamente a este cliente"
+            )
             dir_c = st.text_input("Dirección")
             cupo_c = st.number_input(
                 "Cupo de crédito ($)",
@@ -278,13 +283,14 @@ with tab_nuevo:
                     with engine.begin() as conn:
                         conn.execute(text("""
                             INSERT INTO Clientes
-                            (usuario_id, nombre, telefono, email, documento, direccion, cupo_credito)
-                            VALUES (:uid, :nom, :tel, :email, :doc, :dir, :cupo)
+                            (usuario_id, nombre, telefono, email, documento, tipo_documento, direccion, cupo_credito)
+                            VALUES (:uid, :nom, :tel, :email, :doc, :tipo_doc, :dir, :cupo)
                         """), {
                             "uid": user_id, "nom": nombre_c,
                             "tel": telefono_c or None,
                             "email": email_c or None,
                             "doc": doc_c or None,
+                            "tipo_doc": tipo_doc_c,
                             "dir": dir_c or None,
                             "cupo": float(cupo_c)
                         })

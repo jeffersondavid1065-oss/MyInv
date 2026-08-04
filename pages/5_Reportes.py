@@ -10,6 +10,7 @@ from queries import (
     obtener_ventas_periodo,
     obtener_top_productos,
     obtener_metricas_mes,
+    obtener_facturas_periodo,
 )
 from utils import aplicar_estilos, verificar_auth
 from tz_utils import hoy_bogota, ahora_bogota
@@ -38,13 +39,15 @@ def generar_excel_ventas(df_ventas, fecha_ini, fecha_fin, ingresos, costos, marg
         top=Side(style='thin'), bottom=Side(style='thin')
     )
 
+    descuentos = float(df_ventas['descuento'].sum()) if not df_ventas.empty else 0
+
     # Título
-    ws.merge_cells("A1:G1")
+    ws.merge_cells("A1:H1")
     ws["A1"] = f"REPORTE DE VENTAS — {nombre_negocio}"
     ws["A1"].font = Font(bold=True, size=14, color="1F4E78")
     ws["A1"].alignment = Alignment(horizontal="center")
 
-    ws.merge_cells("A2:G2")
+    ws.merge_cells("A2:H2")
     ws["A2"] = f"{fecha_ini.strftime('%d/%m/%Y')} — {fecha_fin.strftime('%d/%m/%Y')}"
     ws["A2"].font = Font(italic=True, size=10, color="666666")
     ws["A2"].alignment = Alignment(horizontal="center")
@@ -52,16 +55,17 @@ def generar_excel_ventas(df_ventas, fecha_ini, fecha_fin, ingresos, costos, marg
     ws.append([])
 
     # Resumen financiero
-    ws.append(["RESUMEN FINANCIERO", "", "", "", "", "", ""])
+    ws.append(["RESUMEN FINANCIERO", "", "", "", "", "", "", ""])
     ws["A4"].font = Font(bold=True, size=11, color="1F4E78")
 
     ws.append(["Ingresos Totales", f"${ingresos:,.0f}".replace(",", ".")])
     ws.append(["Costo de Ventas", f"${costos:,.0f}".replace(",", ".")])
+    ws.append(["Descuentos Totales", f"${descuentos:,.0f}".replace(",", ".")])
     ws.append(["Margen Bruto", f"${margen:,.0f}".replace(",", ".")])
     ws.append([])
 
     # Headers de tabla
-    headers = ["ID Venta", "Fecha", "Cliente", "Total ($)", "Tipo Pago", "Estado", "Cambio ($)"]
+    headers = ["ID Venta", "Fecha", "Cliente", "Descuento ($)", "Total ($)", "Tipo Pago", "Estado", "Cambio ($)"]
     ws.append(headers)
     header_row = ws.max_row
     for col_num in range(1, len(headers) + 1):
@@ -78,15 +82,16 @@ def generar_excel_ventas(df_ventas, fecha_ini, fecha_fin, ingresos, costos, marg
                 row.get('id', ''),
                 str(row.get('fecha', '')),
                 row.get('cliente', 'Venta directa'),
+                float(row.get('descuento', 0)),
                 float(row.get('total', 0)),
                 row.get('tipo_pago', ''),
                 row.get('estado', ''),
                 float(row.get('cambio', 0)),
             ])
-            for col_num in range(1, 8):
+            for col_num in range(1, 9):
                 cell = ws.cell(row=ws.max_row, column=col_num)
                 cell.border = border
-                if col_num in [4, 7]:
+                if col_num in [4, 5, 8]:
                     cell.number_format = '#,##0.00'
                     cell.alignment = Alignment(horizontal="right")
 
@@ -95,18 +100,23 @@ def generar_excel_ventas(df_ventas, fecha_ini, fecha_fin, ingresos, costos, marg
     ws.cell(row=total_row, column=3).value = "TOTAL"
     ws.cell(row=total_row, column=3).font = Font(bold=True)
     ws.cell(row=total_row, column=3).fill = total_fill
-    ws.cell(row=total_row, column=4).value = ingresos
+    ws.cell(row=total_row, column=4).value = descuentos
     ws.cell(row=total_row, column=4).font = Font(bold=True)
     ws.cell(row=total_row, column=4).fill = total_fill
     ws.cell(row=total_row, column=4).number_format = '#,##0.00'
+    ws.cell(row=total_row, column=5).value = ingresos
+    ws.cell(row=total_row, column=5).font = Font(bold=True)
+    ws.cell(row=total_row, column=5).fill = total_fill
+    ws.cell(row=total_row, column=5).number_format = '#,##0.00'
 
     ws.column_dimensions["A"].width = 10
     ws.column_dimensions["B"].width = 14
     ws.column_dimensions["C"].width = 25
     ws.column_dimensions["D"].width = 16
     ws.column_dimensions["E"].width = 16
-    ws.column_dimensions["F"].width = 12
-    ws.column_dimensions["G"].width = 14
+    ws.column_dimensions["F"].width = 16
+    ws.column_dimensions["G"].width = 12
+    ws.column_dimensions["H"].width = 14
 
     buf = BytesIO()
     wb.save(buf)
@@ -118,11 +128,12 @@ st.title("Reportes")
 st.markdown(f"Análisis de ventas para: **{nombre_negocio}**")
 st.markdown("---")
 
-tab_dia, tab_periodo, tab_productos, tab_cartera = st.tabs([
+tab_dia, tab_periodo, tab_productos, tab_cartera, tab_facturas = st.tabs([
     "Ventas del Día",
     "Reporte por Período",
     "Productos Más Vendidos",
-    "Cartera y Créditos"
+    "Cartera y Créditos",
+    "Facturación Electrónica"
 ])
 
 # ==========================================
@@ -139,27 +150,32 @@ with tab_dia:
         total_hoy = df_hoy['total'].sum()
         efectivo_hoy = df_hoy['monto_efectivo'].sum()
         transfer_hoy = df_hoy['monto_transferencia'].sum()
+        descuentos_hoy = df_hoy['descuento'].sum()
         cant_ventas = len(df_hoy)
         ticket_prom = total_hoy / cant_ventas if cant_ventas > 0 else 0
 
-        col1, col2, col3, col4, col5 = st.columns(5)
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
         col1.metric("Ventas", cant_ventas)
         col2.metric("Total Ingresos", formato_cop(total_hoy))
         col3.metric("Caja Efectivo", formato_cop(efectivo_hoy))
         col4.metric("Transferencias", formato_cop(transfer_hoy))
         col5.metric("Ticket Promedio", formato_cop(ticket_prom))
+        col6.metric("Descuentos", formato_cop(descuentos_hoy))
 
         st.markdown("---")
 
         # Tabla detallada
         st.dataframe(
-            df_hoy[['id', 'fecha', 'cliente', 'total', 'tipo_pago', 'estado']].rename(columns={
+            df_hoy[['id', 'fecha', 'cliente', 'subtotal', 'descuento', 'total', 'tipo_pago', 'estado']].rename(columns={
                 'id': 'ID', 'fecha': 'Hora', 'cliente': 'Cliente',
+                'subtotal': 'Subtotal ($)', 'descuento': 'Descuento ($)',
                 'total': 'Total ($)', 'tipo_pago': 'Pago', 'estado': 'Estado'
             }),
             use_container_width=True,
             hide_index=True,
             column_config={
+                "Subtotal ($)": st.column_config.NumberColumn(format="$%,d"),
+                "Descuento ($)": st.column_config.NumberColumn(format="$%,d"),
                 "Total ($)": st.column_config.NumberColumn(format="$%,d"),
             }
         )
@@ -176,7 +192,7 @@ with tab_dia:
 
         with engine.connect() as conn:
             df_items_hoy = pd.read_sql_query(text("""
-                SELECT nombre_producto, cantidad, precio_unitario, subtotal
+                SELECT nombre_producto, cantidad, precio_unitario, descuento, subtotal
                 FROM Detalles_Venta WHERE venta_id = :vid
             """), con=conn, params={"vid": venta_id_hoy})
 
@@ -184,11 +200,12 @@ with tab_dia:
             st.dataframe(
                 df_items_hoy.rename(columns={
                     'nombre_producto': 'Producto', 'cantidad': 'Cant.',
-                    'precio_unitario': 'Precio Unit.', 'subtotal': 'Subtotal'
+                    'precio_unitario': 'Precio Unit.', 'descuento': 'Descuento', 'subtotal': 'Subtotal'
                 }),
                 use_container_width=True, hide_index=True,
                 column_config={
                     "Precio Unit.": st.column_config.NumberColumn(format="$%,d"),
+                    "Descuento": st.column_config.NumberColumn(format="$%,d"),
                     "Subtotal": st.column_config.NumberColumn(format="$%,d"),
                 }
             )
@@ -236,6 +253,7 @@ with tab_periodo:
     ingresos_rep = float(df_periodo['total'].sum()) if not df_periodo.empty else 0
     efectivo_rep = float(df_periodo['monto_efectivo'].sum()) if not df_periodo.empty else 0
     transfer_rep = float(df_periodo['monto_transferencia'].sum()) if not df_periodo.empty else 0
+    descuentos_rep = float(df_periodo['descuento'].sum()) if not df_periodo.empty else 0
 
     # Costos del período
     with engine.connect() as conn:
@@ -255,23 +273,27 @@ with tab_periodo:
 
     margen_rep = ingresos_rep - costos_rep
 
-    col_r1, col_r2, col_r3, col_r4 = st.columns(4)
+    col_r1, col_r2, col_r3, col_r4, col_r5 = st.columns(5)
     col_r1.metric("Ingresos", formato_cop(ingresos_rep))
     col_r2.metric("Efectivo", formato_cop(efectivo_rep))
     col_r3.metric("Transferencias", formato_cop(transfer_rep))
-    col_r4.metric("Margen Bruto", formato_cop(margen_rep),
+    col_r4.metric("Descuentos", formato_cop(descuentos_rep))
+    col_r5.metric("Margen Bruto", formato_cop(margen_rep),
                   delta_color="inverse" if margen_rep < 0 else "normal")
 
     st.markdown("---")
 
     if not df_periodo.empty:
         st.dataframe(
-            df_periodo[['id', 'fecha', 'cliente', 'total', 'tipo_pago', 'estado']].rename(columns={
+            df_periodo[['id', 'fecha', 'cliente', 'subtotal', 'descuento', 'total', 'tipo_pago', 'estado']].rename(columns={
                 'id': 'ID', 'fecha': 'Fecha', 'cliente': 'Cliente',
+                'subtotal': 'Subtotal ($)', 'descuento': 'Descuento ($)',
                 'total': 'Total ($)', 'tipo_pago': 'Pago', 'estado': 'Estado'
             }),
             use_container_width=True, hide_index=True,
             column_config={
+                "Subtotal ($)": st.column_config.NumberColumn(format="$%,d"),
+                "Descuento ($)": st.column_config.NumberColumn(format="$%,d"),
                 "Total ($)": st.column_config.NumberColumn(format="$%,d"),
             }
         )
@@ -409,3 +431,77 @@ with tab_cartera:
         )
     else:
         st.success("No hay créditos activos. ¡Cartera limpia!")
+
+# ==========================================
+# TAB 5: FACTURACIÓN ELECTRÓNICA
+# ==========================================
+with tab_facturas:
+    st.subheader("Historial de Facturación Electrónica")
+
+    col_ff1, col_ff2 = st.columns(2)
+    with col_ff1:
+        hoy_fe = hoy_bogota()
+        hace_30_fe = hoy_fe - timedelta(days=30)
+        fechas_fe = st.date_input("Período", [hace_30_fe, hoy_fe], key="fechas_facturas")
+
+    if len(fechas_fe) == 2:
+        f_ini_fe, f_fin_fe = fechas_fe
+        df_facturas = obtener_facturas_periodo(user_id, f_ini_fe, f_fin_fe)
+
+        if not df_facturas.empty:
+            emitidas = (df_facturas['factura_estado'] == 'emitida').sum()
+            con_error = (df_facturas['factura_estado'] == 'error').sum()
+            sin_facturar = df_facturas['factura_estado'].isna().sum()
+
+            col_e1, col_e2, col_e3, col_e4 = st.columns(4)
+            col_e1.metric("Ventas del período", len(df_facturas))
+            col_e2.metric("Facturadas", int(emitidas))
+            col_e3.metric("Con error", int(con_error),
+                          delta="Revisar" if con_error > 0 else None,
+                          delta_color="inverse")
+            col_e4.metric("Sin facturar", int(sin_facturar))
+
+            st.markdown("---")
+
+            filtro_estado = st.selectbox(
+                "Filtrar por estado",
+                ["Todas", "Facturadas", "Con error", "Sin facturar"],
+                key="filtro_estado_factura"
+            )
+            df_mostrar_fe = df_facturas.copy()
+            if filtro_estado == "Facturadas":
+                df_mostrar_fe = df_mostrar_fe[df_mostrar_fe['factura_estado'] == 'emitida']
+            elif filtro_estado == "Con error":
+                df_mostrar_fe = df_mostrar_fe[df_mostrar_fe['factura_estado'] == 'error']
+            elif filtro_estado == "Sin facturar":
+                df_mostrar_fe = df_mostrar_fe[df_mostrar_fe['factura_estado'].isna()]
+
+            df_mostrar_fe = df_mostrar_fe.copy()
+            df_mostrar_fe['estado_texto'] = df_mostrar_fe['factura_estado'].fillna('Sin facturar').replace({
+                'emitida': 'Emitida', 'error': 'Error'
+            })
+
+            st.dataframe(
+                df_mostrar_fe[['id', 'fecha', 'cliente', 'total', 'estado_texto', 'factura_alegra_id', 'factura_cufe']].rename(columns={
+                    'id': 'Venta #', 'fecha': 'Fecha', 'cliente': 'Cliente',
+                    'total': 'Total ($)', 'estado_texto': 'Estado',
+                    'factura_alegra_id': 'ID Alegra', 'factura_cufe': 'CUFE'
+                }),
+                use_container_width=True, hide_index=True,
+                column_config={
+                    "Total ($)": st.column_config.NumberColumn(format="$%,d"),
+                }
+            )
+
+            facturas_con_pdf = df_mostrar_fe[df_mostrar_fe['factura_pdf_url'].notna()]
+            if not facturas_con_pdf.empty:
+                st.markdown("---")
+                st.markdown("**Ver PDF de una factura:**")
+                dict_pdfs = {
+                    f"Venta #{r['id']} — {r['cliente']} — {formato_cop(r['total'])}": r['factura_pdf_url']
+                    for _, r in facturas_con_pdf.iterrows()
+                }
+                pdf_sel = st.selectbox("Selecciona la factura", options=list(dict_pdfs.keys()), key="pdf_factura_sel")
+                st.link_button("Abrir PDF", dict_pdfs[pdf_sel], use_container_width=True)
+        else:
+            st.info("No hay ventas en este período.")

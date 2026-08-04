@@ -13,6 +13,7 @@ from queries import (
 )
 from utils import aplicar_estilos, verificar_auth
 from tz_utils import hoy_bogota, ahora_bogota_naive
+from alegra_utils import facturar_venta
 
 st.set_page_config(page_title="Punto de Venta", layout="wide")
 aplicar_estilos()
@@ -357,6 +358,22 @@ with tab_pos:
             valor_cuota = 0
             fecha_limite = hoy_bogota()
 
+            if tipo_pago in ("Efectivo", "Transferencia", "Mixto"):
+                clientes_fact = obtener_clientes(user_id)
+                if clientes_fact:
+                    dict_clientes_fact = {"Sin cliente (venta directa)": None}
+                    for c in clientes_fact:
+                        cid_c, nombre_c, tel_c = c[0], c[1], c[2]
+                        etiqueta = f"{nombre_c} — {tel_c}" if tel_c else nombre_c
+                        dict_clientes_fact[etiqueta] = cid_c
+                    cliente_fact_sel = st.selectbox(
+                        "Cliente (opcional, para poder facturar electrónicamente)",
+                        options=list(dict_clientes_fact.keys()),
+                        key="venta_cliente_opcional_sel",
+                        help="Solo se puede emitir factura electrónica si la venta queda ligada a un cliente registrado con documento.",
+                    )
+                    cliente_id = dict_clientes_fact[cliente_fact_sel]
+
             if tipo_pago == "Efectivo":
                 monto_efectivo_input = st.number_input(
                     "Monto recibido ($)", min_value=0.0,
@@ -374,16 +391,46 @@ with tab_pos:
             elif tipo_pago == "Credito":
                 clientes = obtener_clientes(user_id)
                 if clientes:
-                    busq_cli = st.text_input("Buscar cliente", placeholder="Nombre o teléfono...")
-                    clientes_f = [c for c in clientes if busq_cli.lower() in c[1].lower()] if busq_cli else clientes
-                    dict_clientes = {c[1]: c[0] for c in clientes_f}
-                    if dict_clientes:
-                        cliente_sel = st.selectbox("Cliente", options=list(dict_clientes.keys()))
-                        cliente_id = dict_clientes[cliente_sel]
-                    tipo_cuota = st.selectbox("Tipo de cuota", ["Libre", "Semanal", "Quincenal", "Mensual"])
+                    # IMPORTANTE: las opciones del selectbox deben ser una lista
+                    # ESTABLE (no filtrada dinámicamente por texto de búsqueda).
+                    # Antes, el campo de búsqueda cambiaba la lista de "options"
+                    # en cada tecla, y como el selectbox no tenía un "key" fijo,
+                    # Streamlit lo trataba como un widget nuevo y volvía a
+                    # seleccionar el índice 0 (el primer cliente en orden
+                    # alfabético) sin importar lo que el cajero hubiera elegido.
+                    # Por eso todo crédito terminaba guardándose al mismo cliente.
+                    # Se usa el buscador nativo del selectbox (escribir para
+                    # filtrar) y se incluye el teléfono en la etiqueta para
+                    # poder buscar también por teléfono.
+                    dict_clientes = {}
+                    for c in clientes:
+                        cid_c, nombre_c, tel_c = c[0], c[1], c[2]
+                        etiqueta = f"{nombre_c} — {tel_c}" if tel_c else nombre_c
+                        dict_clientes[etiqueta] = cid_c
+
+                    cliente_sel = st.selectbox(
+                        "Cliente",
+                        options=list(dict_clientes.keys()),
+                        key="venta_credito_cliente_sel",
+                        help="Escribe el nombre o teléfono para buscar en la lista.",
+                    )
+                    cliente_id = dict_clientes[cliente_sel]
+                    cliente_nombre_sel = cliente_sel.split(" — ")[0]
+                    st.caption(f"🧾 Este crédito quedará registrado a nombre de: **{cliente_nombre_sel}**")
+
+                    tipo_cuota = st.selectbox(
+                        "Tipo de cuota", ["Libre", "Semanal", "Quincenal", "Mensual"],
+                        key="venta_credito_tipo_cuota"
+                    )
                     if tipo_cuota != "Libre":
-                        valor_cuota = st.number_input("Valor por cuota ($)", min_value=0.0, step=10000.0)
-                    fecha_limite = st.date_input("Fecha límite", value=hoy_bogota())
+                        valor_cuota = st.number_input(
+                            "Valor por cuota ($)", min_value=0.0, step=10000.0,
+                            key="venta_credito_valor_cuota"
+                        )
+                    fecha_limite = st.date_input(
+                        "Fecha límite", value=hoy_bogota(),
+                        key="venta_credito_fecha_limite"
+                    )
                 else:
                     st.warning("No tienes clientes registrados.")
                     tipo_pago = None
@@ -400,6 +447,20 @@ with tab_pos:
 
             if tipo_pago and st.button("Confirmar Venta", type="primary", use_container_width=True):
                 try:
+                    # Subtotal bruto (antes de cualquier descuento) y descuento total
+                    # (suma de descuentos por ítem + descuento global), para que el
+                    # descuento real quede reflejado en Ventas.descuento y no se
+                    # pierda "escondido" dentro del subtotal.
+                    subtotal_bruto = sum(
+                        item["precio_unitario"] * item["cantidad"]
+                        for item in st.session_state.carrito
+                    )
+                    descuento_items_total = sum(
+                        item.get("descuento_item", 0) * item["cantidad"]
+                        for item in st.session_state.carrito
+                    )
+                    descuento_total = descuento_items_total + desc_global
+
                     with engine.begin() as conn:
                         is_sqlite = "sqlite" in str(engine.url)
                         estado_venta = "Credito" if tipo_pago == "Credito" else "Pagada"
@@ -415,7 +476,7 @@ with tab_pos:
                                         :tipo, :efec, :trans, :cambio, :est, :cajero, :fecha)
                             """), {
                                 "uid": user_id, "cid": cliente_id,
-                                "sub": total_carrito, "desc": desc_global,
+                                "sub": subtotal_bruto, "desc": descuento_total,
                                 "total": total_final, "tipo": tipo_pago,
                                 "efec": monto_efectivo, "trans": monto_transferencia,
                                 "cambio": cambio, "est": estado_venta,
@@ -432,7 +493,7 @@ with tab_pos:
                                 RETURNING id
                             """), {
                                 "uid": user_id, "cid": cliente_id,
-                                "sub": total_carrito, "desc": desc_global,
+                                "sub": subtotal_bruto, "desc": descuento_total,
                                 "total": total_final, "tipo": tipo_pago,
                                 "efec": monto_efectivo, "trans": monto_transferencia,
                                 "cambio": cambio, "est": estado_venta,
@@ -441,17 +502,18 @@ with tab_pos:
                             venta_id = res.scalar()
 
                         for item in st.session_state.carrito:
-                            precio_neto = item["precio_unitario"] - item.get("descuento_item", 0)
+                            descuento_linea = item.get("descuento_item", 0) * item["cantidad"]
                             conn.execute(text("""
                                 INSERT INTO Detalles_Venta
                                 (venta_id, producto_id, nombre_producto, codigo_barras,
-                                 cantidad, precio_unitario, costo_unitario, subtotal)
-                                VALUES (:vid, :pid, :nom, :cod, :cant, :pvp, :costo, :sub)
+                                 cantidad, precio_unitario, costo_unitario, descuento, subtotal)
+                                VALUES (:vid, :pid, :nom, :cod, :cant, :pvp, :costo, :desc, :sub)
                             """), {
                                 "vid": venta_id, "pid": item["producto_id"],
                                 "nom": item["nombre"], "cod": item["codigo_barras"],
-                                "cant": item["cantidad"], "pvp": max(0, precio_neto),
+                                "cant": item["cantidad"], "pvp": item["precio_unitario"],
                                 "costo": item.get("costo_unitario", 0),
+                                "desc": descuento_linea,
                                 "sub": item["subtotal"]
                             })
                             resultado = conn.execute(text("""
@@ -504,7 +566,7 @@ with tab_pos:
 
                 with engine.connect() as conn:
                     detalles = pd.read_sql_query(text("""
-                        SELECT nombre_producto, cantidad, precio_unitario, subtotal
+                        SELECT nombre_producto, cantidad, precio_unitario, descuento, subtotal
                         FROM Detalles_Venta WHERE venta_id = :vid
                     """), con=conn, params={"vid": vid})
                     venta_info = conn.execute(text("""
@@ -517,8 +579,15 @@ with tab_pos:
                 if not detalles.empty:
                     st.dataframe(detalles.rename(columns={
                         "nombre_producto": "Producto", "cantidad": "Cant.",
-                        "precio_unitario": "Precio", "subtotal": "Subtotal"
-                    }), hide_index=True, use_container_width=True)
+                        "precio_unitario": "Precio", "descuento": "Descuento", "subtotal": "Subtotal"
+                    }), hide_index=True, use_container_width=True,
+                    column_config={
+                        "Precio": st.column_config.NumberColumn("Precio", format="$%,d"),
+                        "Descuento": st.column_config.NumberColumn("Descuento", format="$%,d"),
+                        "Subtotal": st.column_config.NumberColumn("Subtotal", format="$%,d"),
+                    })
+                if venta_info and float(venta_info[1] or 0) > 0:
+                    st.caption(f"Descuento total aplicado: {formato_cop(venta_info[1])}")
                 st.success(f"**Total: {formato_cop(st.session_state.ultima_venta_total)}**")
                 if st.session_state.ultima_venta_cambio > 0:
                     st.info(f"Cambio: {formato_cop(st.session_state.ultima_venta_cambio)}")
@@ -564,6 +633,30 @@ with tab_pos:
                         )
                 except Exception as e:
                     st.caption(f"PDF no disponible: {e}")
+
+                st.markdown("---")
+                venta_factura = conn_factura = None
+                with engine.connect() as conn_factura:
+                    venta_factura = conn_factura.execute(text("""
+                        SELECT cliente_id, factura_estado, factura_alegra_id, factura_pdf_url
+                        FROM Ventas WHERE id = :vid
+                    """), {"vid": vid}).fetchone()
+
+                if venta_factura and venta_factura[1] == "emitida":
+                    st.success(f"Factura electrónica emitida (Alegra #{venta_factura[2]}).")
+                    if venta_factura[3]:
+                        st.link_button("Ver PDF de la factura", venta_factura[3], use_container_width=True)
+                elif not venta_factura or not venta_factura[0]:
+                    st.caption("Esta venta no tiene cliente asociado — no se puede facturar electrónicamente.")
+                else:
+                    if st.button("Emitir factura electrónica", use_container_width=True):
+                        with st.spinner("Emitiendo factura ante Alegra..."):
+                            ok, msg = facturar_venta(user_id, vid)
+                        if ok:
+                            st.success(msg)
+                        else:
+                            st.warning(msg)
+                        st.rerun()
 
                 if st.button("Nueva Venta", use_container_width=True, type="primary"):
                     st.session_state.ultima_venta_id = None
@@ -619,7 +712,7 @@ with tab_historial:
 
         with engine.connect() as conn:
             detalles_reimp = pd.read_sql_query(text("""
-                SELECT nombre_producto, cantidad, precio_unitario, subtotal
+                SELECT nombre_producto, cantidad, precio_unitario, descuento, subtotal
                 FROM Detalles_Venta WHERE venta_id = :vid
             """), con=conn, params={"vid": venta_id_reimp})
             info_reimp = conn.execute(text("""
@@ -631,12 +724,15 @@ with tab_historial:
         if not detalles_reimp.empty:
             st.dataframe(detalles_reimp.rename(columns={
                 "nombre_producto": "Producto", "cantidad": "Cant.",
-                "precio_unitario": "Precio", "subtotal": "Subtotal"
+                "precio_unitario": "Precio", "descuento": "Descuento", "subtotal": "Subtotal"
             }), hide_index=True, use_container_width=True,
             column_config={
                 "Precio": st.column_config.NumberColumn("Precio", format="$%,d"),
+                "Descuento": st.column_config.NumberColumn("Descuento", format="$%,d"),
                 "Subtotal": st.column_config.NumberColumn("Subtotal", format="$%,d"),
             })
+        if info_reimp and float(info_reimp[1] or 0) > 0:
+            st.caption(f"Descuento total aplicado: {formato_cop(info_reimp[1])}")
 
         try:
             from pdf_utils import generar_ticket_venta
@@ -738,7 +834,7 @@ with tab_devolucion:
             if venta_dev:
                 detalles_dev = pd.read_sql_query(text("""
                     SELECT id, producto_id, nombre_producto, cantidad,
-                           precio_unitario, subtotal
+                           precio_unitario, descuento, subtotal
                     FROM Detalles_Venta WHERE venta_id = :vid
                 """), con=conn, params={"vid": vid_dev})
 
@@ -755,13 +851,14 @@ with tab_devolucion:
 
                 if not detalles_dev.empty:
                     st.dataframe(
-                        detalles_dev[['nombre_producto', 'cantidad', 'precio_unitario', 'subtotal']].rename(columns={
+                        detalles_dev[['nombre_producto', 'cantidad', 'precio_unitario', 'descuento', 'subtotal']].rename(columns={
                             'nombre_producto': 'Producto', 'cantidad': 'Cant.',
-                            'precio_unitario': 'Precio', 'subtotal': 'Subtotal'
+                            'precio_unitario': 'Precio', 'descuento': 'Descuento', 'subtotal': 'Subtotal'
                         }),
                         hide_index=True, use_container_width=True,
                         column_config={
                             "Precio": st.column_config.NumberColumn("Precio", format="$%,d"),
+                            "Descuento": st.column_config.NumberColumn("Descuento", format="$%,d"),
                             "Subtotal": st.column_config.NumberColumn("Subtotal", format="$%,d"),
                         }
                     )
