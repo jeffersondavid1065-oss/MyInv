@@ -582,7 +582,10 @@ def init_db():
                 conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS nota_credito_xml_url TEXT"))
                 conn.execute(text("ALTER TABLE Productos ADD COLUMN IF NOT EXISTS iva_porcentaje NUMERIC(5,2) DEFAULT 0"))
                 conn.execute(text("ALTER TABLE Detalles_Venta ADD COLUMN IF NOT EXISTS iva_porcentaje NUMERIC(5,2) DEFAULT 0"))
-        except Exception:
-            pass
+        except Exception as e:
+            # No se debe tumbar el arranque de la app por una migración que
+            # falle, pero silenciarla del todo (como antes) hace invisibles
+            # errores reales - queda al menos en los logs de Streamlit Cloud.
+            print(f"[init_db] Error en migraciones: {e}")
 
     return True

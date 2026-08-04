@@ -489,7 +489,7 @@ def obtener_facturas_periodo(uid, fecha_inicio, fecha_fin):
     nota crédito o no."""
     engine = obtener_conexion()
     with engine.connect() as conn:
-        return pd.read_sql_query(text("""
+        df = pd.read_sql_query(text("""
             SELECT v.id, v.fecha, COALESCE(cl.nombre, 'Sin cliente') as cliente,
                    cl.documento as cliente_documento,
                    v.total, v.tipo_pago, v.estado as estado_venta, v.factura_estado, v.factura_alegra_id,
@@ -506,6 +506,13 @@ def obtener_facturas_periodo(uid, fecha_inicio, fecha_fin):
             "f_ini": fecha_inicio.strftime('%Y-%m-%d'),
             "f_fin": fecha_fin.strftime('%Y-%m-%d')
         })
+    # Red de seguridad: si la migración de columnas nuevas (init_db) todavía no
+    # corrió en este proceso cuando se hizo esta consulta, no se debe romper la
+    # página con un KeyError - se completan como vacías y ya.
+    for col in ('factura_xml_url', 'nota_credito_xml_url'):
+        if col not in df.columns:
+            df[col] = None
+    return df
 
 
 def obtener_venta_para_facturar(uid, venta_id):
