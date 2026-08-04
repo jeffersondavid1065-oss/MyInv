@@ -10,6 +10,7 @@ from queries import (
     invalidar_cache_ventas,
     invalidar_cache_creditos,
     invalidar_cache_productos,
+    obtener_facturas_periodo,
 )
 from utils import aplicar_estilos, verificar_auth
 from tz_utils import hoy_bogota, ahora_bogota_naive
@@ -743,32 +744,32 @@ with tab_pos:
 with tab_historial:
     st.subheader(f"Ventas de Hoy — {hoy_bogota().strftime('%d/%m/%Y')}")
 
-    with engine.connect() as conn:
-        df_hoy = pd.read_sql_query(text("""
-            SELECT v.id, v.fecha, COALESCE(cl.nombre, 'Directa') as cliente,
-                   v.total, v.tipo_pago, v.estado
-            FROM Ventas v
-            LEFT JOIN Clientes cl ON v.cliente_id = cl.id
-            WHERE v.usuario_id = :uid
-            AND DATE(v.fecha) = :hoy
-            AND v.estado != 'Anulada'
-            ORDER BY v.fecha DESC
-        """), con=conn, params={"uid": user_id, "hoy": hoy_bogota().strftime('%Y-%m-%d')})
+    df_hoy = obtener_facturas_periodo(user_id, hoy_bogota(), hoy_bogota())
+    df_hoy = df_hoy.rename(columns={'estado_venta': 'estado'})
 
     if not df_hoy.empty:
-        total_dia = df_hoy['total'].sum()
-        cant_ventas = len(df_hoy)
+        df_hoy_activas = df_hoy[df_hoy['estado'] != 'Anulada']
+        total_dia = df_hoy_activas['total'].sum()
+        cant_ventas = len(df_hoy_activas)
 
         col_h1, col_h2, col_h3 = st.columns(3)
         col_h1.metric("Ventas del día", cant_ventas)
         col_h2.metric("Total del día", formato_cop(total_dia))
-        col_h3.metric("Ticket promedio", formato_cop(total_dia / cant_ventas))
+        col_h3.metric("Ticket promedio", formato_cop(total_dia / cant_ventas if cant_ventas else 0))
 
         st.markdown("---")
+        df_hoy = df_hoy.copy()
+        df_hoy['numero_factura_texto'] = (
+            df_hoy['factura_prefijo'].fillna('').astype(str) + df_hoy['factura_numero'].fillna('').astype(str)
+        )
+        df_hoy['fe_texto'] = df_hoy['factura_estado'].fillna('Sin facturar').replace({
+            'emitida': 'Emitida', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
+        })
         st.dataframe(
-            df_hoy.rename(columns={
+            df_hoy[['id', 'fecha', 'cliente', 'total', 'tipo_pago', 'estado', 'fe_texto', 'numero_factura_texto']].rename(columns={
                 'id': 'N°', 'fecha': 'Hora', 'cliente': 'Cliente',
-                'total': 'Total', 'tipo_pago': 'Pago', 'estado': 'Estado'
+                'total': 'Total', 'tipo_pago': 'Pago', 'estado': 'Estado',
+                'fe_texto': 'Factura Electrónica', 'numero_factura_texto': 'N° Factura'
             }),
             use_container_width=True, hide_index=True,
             column_config={
@@ -904,7 +905,9 @@ with tab_devolucion:
             venta_dev = conn.execute(text("""
                 SELECT v.id, v.total, v.estado, v.tipo_pago,
                        DATE(v.fecha) as fecha,
-                       COALESCE(cl.nombre, 'Venta directa') as cliente
+                       COALESCE(cl.nombre, 'Venta directa') as cliente,
+                       v.factura_estado, v.factura_alegra_id, v.factura_prefijo,
+                       v.factura_numero, v.nota_credito_alegra_id
                 FROM Ventas v
                 LEFT JOIN Clientes cl ON v.cliente_id = cl.id
                 WHERE v.id = :vid AND v.usuario_id = :uid
@@ -920,6 +923,17 @@ with tab_devolucion:
         if venta_dev:
             if venta_dev[2] == "Anulada":
                 st.warning(f"La venta #{vid_dev} ya fue anulada.")
+                if venta_dev[6] == "anulada" and venta_dev[10]:
+                    numero_factura_dev = f"{venta_dev[8] or ''}{venta_dev[9] or ''}"
+                    st.info(
+                        f"Factura electrónica {numero_factura_dev} anulada mediante "
+                        f"nota crédito (Alegra #{venta_dev[10]})."
+                    )
+                elif venta_dev[7]:
+                    st.warning(
+                        "Esta venta tenía factura electrónica emitida pero no se confirmó la nota crédito. "
+                        "Revisa Reportes → Facturación Electrónica para reintentar o verificar en Alegra."
+                    )
             else:
                 with st.container(border=True):
                     c1, c2, c3 = st.columns(3)

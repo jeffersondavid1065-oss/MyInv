@@ -451,15 +451,16 @@ def obtener_venta_id_de_credito(credito_id):
 
 @st.cache_data(ttl=30)
 def obtener_facturas_periodo(uid, fecha_inicio, fecha_fin):
-    """Ventas del período con su estado de facturación electrónica, para el reporte.
-    Incluye ventas anuladas (a diferencia del reporte de ventas normal) porque
-    interesa ver si a una venta anulada ya se le emitió la nota crédito o no."""
+    """Ventas del período con su estado de facturación electrónica, para el reporte
+    y para el historial de ventas. Incluye ventas anuladas (a diferencia del reporte
+    de ventas normal) porque interesa ver si a una venta anulada ya se le emitió la
+    nota crédito o no."""
     engine = obtener_conexion()
     with engine.connect() as conn:
         return pd.read_sql_query(text("""
-            SELECT v.id, DATE(v.fecha) as fecha, COALESCE(cl.nombre, 'Sin cliente') as cliente,
+            SELECT v.id, v.fecha, COALESCE(cl.nombre, 'Sin cliente') as cliente,
                    cl.documento as cliente_documento,
-                   v.total, v.estado as estado_venta, v.factura_estado, v.factura_alegra_id,
+                   v.total, v.tipo_pago, v.estado as estado_venta, v.factura_estado, v.factura_alegra_id,
                    v.factura_prefijo, v.factura_numero,
                    v.factura_cufe, v.factura_pdf_url, v.nota_credito_alegra_id
             FROM Ventas v
