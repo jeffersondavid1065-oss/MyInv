@@ -777,6 +777,17 @@ with tab_historial:
             }
         )
 
+        dict_pdfs_hoy = {}
+        for _, r in df_hoy[df_hoy['factura_pdf_url'].notna()].iterrows():
+            dict_pdfs_hoy[f"Venta #{r['id']} — {r['cliente']} — {formato_cop(r['total'])} — Factura"] = r['factura_pdf_url']
+        for _, r in df_hoy[df_hoy['nota_credito_pdf_url'].notna()].iterrows():
+            dict_pdfs_hoy[f"Venta #{r['id']} — {r['cliente']} — {formato_cop(r['total'])} — Nota Crédito"] = r['nota_credito_pdf_url']
+        if dict_pdfs_hoy:
+            st.markdown("---")
+            st.markdown("**Descargar factura o nota crédito:**")
+            pdf_hoy_sel = st.selectbox("Selecciona el documento", options=list(dict_pdfs_hoy.keys()), key="pdf_hoy_sel")
+            st.link_button("Abrir PDF", dict_pdfs_hoy[pdf_hoy_sel], use_container_width=True)
+
         st.markdown("---")
         st.markdown("**Reimprimir ticket:**")
         dict_ventas = {
