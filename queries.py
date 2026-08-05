@@ -495,7 +495,8 @@ def obtener_facturas_periodo(uid, fecha_inicio, fecha_fin):
                    v.total, v.tipo_pago, v.estado as estado_venta, v.factura_estado, v.factura_alegra_id,
                    v.factura_prefijo, v.factura_numero,
                    v.factura_cufe, v.factura_pdf_url, v.factura_xml_url,
-                   v.nota_credito_alegra_id, v.nota_credito_pdf_url, v.nota_credito_xml_url
+                   v.nota_credito_alegra_id, v.nota_credito_pdf_url, v.nota_credito_xml_url,
+                   v.nota_credito_prefijo, v.nota_credito_numero
             FROM Ventas v
             LEFT JOIN Clientes cl ON v.cliente_id = cl.id
             WHERE v.usuario_id = :uid
@@ -509,7 +510,37 @@ def obtener_facturas_periodo(uid, fecha_inicio, fecha_fin):
     # Red de seguridad: si la migración de columnas nuevas (init_db) todavía no
     # corrió en este proceso cuando se hizo esta consulta, no se debe romper la
     # página con un KeyError - se completan como vacías y ya.
-    for col in ('factura_xml_url', 'nota_credito_xml_url'):
+    for col in ('factura_xml_url', 'nota_credito_xml_url', 'nota_credito_prefijo', 'nota_credito_numero'):
+        if col not in df.columns:
+            df[col] = None
+    return df
+
+
+@st.cache_data(ttl=30)
+def obtener_historial_devoluciones(uid, fecha_inicio, fecha_fin):
+    """Ventas anuladas (devoluciones) del período, con la factura que originaron
+    y la nota crédito que las anuló (si Alegra la emitió), para la pestaña de
+    Devoluciones."""
+    engine = obtener_conexion()
+    with engine.connect() as conn:
+        df = pd.read_sql_query(text("""
+            SELECT v.id, v.fecha, COALESCE(cl.nombre, 'Venta directa') as cliente,
+                   v.total, v.notas,
+                   v.factura_alegra_id, v.factura_prefijo, v.factura_numero,
+                   v.factura_estado, v.nota_credito_alegra_id,
+                   v.nota_credito_prefijo, v.nota_credito_numero,
+                   v.nota_credito_pdf_url, v.nota_credito_xml_url
+            FROM Ventas v
+            LEFT JOIN Clientes cl ON v.cliente_id = cl.id
+            WHERE v.usuario_id = :uid AND v.estado = 'Anulada'
+            AND DATE(v.fecha) >= :f_ini AND DATE(v.fecha) <= :f_fin
+            ORDER BY v.fecha DESC
+        """), con=conn, params={
+            "uid": uid,
+            "f_ini": fecha_inicio.strftime('%Y-%m-%d'),
+            "f_fin": fecha_fin.strftime('%Y-%m-%d')
+        })
+    for col in ('nota_credito_pdf_url', 'nota_credito_xml_url', 'nota_credito_prefijo', 'nota_credito_numero'):
         if col not in df.columns:
             df[col] = None
     return df
@@ -523,7 +554,8 @@ def obtener_venta_para_facturar(uid, venta_id):
             SELECT id, cliente_id, total, tipo_pago, factura_alegra_id,
                    factura_estado, nota_credito_alegra_id,
                    factura_cufe, factura_pdf_url, factura_xml_url,
-                   nota_credito_pdf_url, nota_credito_xml_url
+                   nota_credito_pdf_url, nota_credito_xml_url,
+                   nota_credito_prefijo, nota_credito_numero
             FROM Ventas
             WHERE id = :vid AND usuario_id = :uid
         """), {"vid": venta_id, "uid": uid}).fetchone()
@@ -540,15 +572,20 @@ def obtener_credito_de_venta(venta_id):
         """), {"vid": venta_id}).fetchone()
 
 
-def guardar_nota_credito(venta_id, nota_credito_alegra_id, pdf_url=None, xml_url=None):
-    """Guarda el id (y PDF/XML) de la nota crédito emitida en Alegra para una venta anulada."""
+def guardar_nota_credito(venta_id, nota_credito_alegra_id, pdf_url=None, xml_url=None, prefijo=None, numero=None):
+    """Guarda el id, número (prefijo+consecutivo) y PDF/XML de la nota crédito
+    emitida en Alegra para una venta anulada."""
     engine = obtener_conexion()
     with engine.begin() as conn:
         conn.execute(text("""
             UPDATE Ventas SET nota_credito_alegra_id = :ncid, nota_credito_pdf_url = :pdf_url,
-                   nota_credito_xml_url = :xml_url, factura_estado = 'anulada'
+                   nota_credito_xml_url = :xml_url, nota_credito_prefijo = :prefijo,
+                   nota_credito_numero = :numero, factura_estado = 'anulada'
             WHERE id = :vid
-        """), {"ncid": nota_credito_alegra_id, "pdf_url": pdf_url, "xml_url": xml_url, "vid": venta_id})
+        """), {
+            "ncid": nota_credito_alegra_id, "pdf_url": pdf_url, "xml_url": xml_url,
+            "prefijo": prefijo, "numero": numero, "vid": venta_id
+        })
     invalidar_cache_ventas()
 
 
@@ -603,16 +640,22 @@ def actualizar_datos_factura(venta_id, cufe=None, pdf_url=None, xml_url=None, pr
     invalidar_cache_ventas()
 
 
-def actualizar_pdf_nota_credito(venta_id, pdf_url, xml_url=None):
-    """Completa el PDF/XML de una nota crédito ya emitida, cuando no llegaron en la respuesta de creación."""
+def actualizar_pdf_nota_credito(venta_id, pdf_url, xml_url=None, prefijo=None, numero=None):
+    """Completa PDF/XML/número de una nota crédito ya emitida, cuando no llegaron
+    en la respuesta de creación."""
     engine = obtener_conexion()
     with engine.begin() as conn:
         conn.execute(text("""
             UPDATE Ventas
             SET nota_credito_pdf_url = COALESCE(:pdf_url, nota_credito_pdf_url),
-                nota_credito_xml_url = COALESCE(:xml_url, nota_credito_xml_url)
+                nota_credito_xml_url = COALESCE(:xml_url, nota_credito_xml_url),
+                nota_credito_prefijo = COALESCE(:prefijo, nota_credito_prefijo),
+                nota_credito_numero = COALESCE(:numero, nota_credito_numero)
             WHERE id = :vid
-        """), {"pdf_url": pdf_url, "xml_url": xml_url, "vid": venta_id})
+        """), {
+            "pdf_url": pdf_url, "xml_url": xml_url,
+            "prefijo": prefijo, "numero": numero, "vid": venta_id
+        })
     invalidar_cache_ventas()
 
 
@@ -640,6 +683,7 @@ def invalidar_cache_ventas():
     obtener_ganancia_por_producto_dia.clear()
     obtener_ganancia_acumulada.clear()
     obtener_facturas_periodo.clear()
+    obtener_historial_devoluciones.clear()
 
 
 def invalidar_cache_clientes():

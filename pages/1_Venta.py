@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from sqlalchemy import text
 from db import obtener_conexion
 from queries import (
@@ -11,6 +11,7 @@ from queries import (
     invalidar_cache_creditos,
     invalidar_cache_productos,
     obtener_facturas_periodo,
+    obtener_historial_devoluciones,
 )
 from utils import aplicar_estilos, verificar_auth
 from tz_utils import hoy_bogota, ahora_bogota_naive
@@ -770,20 +771,17 @@ with tab_historial:
         })
         st.dataframe(
             df_hoy[['id', 'fecha', 'cliente', 'total', 'tipo_pago', 'estado', 'fe_texto', 'numero_factura_texto',
-                    'factura_pdf_url', 'factura_xml_url', 'nota_credito_pdf_url', 'nota_credito_xml_url']].rename(columns={
+                    'factura_pdf_url', 'factura_xml_url']].rename(columns={
                 'id': 'N°', 'fecha': 'Hora', 'cliente': 'Cliente',
                 'total': 'Total', 'tipo_pago': 'Pago', 'estado': 'Estado',
                 'fe_texto': 'Factura Electrónica', 'numero_factura_texto': 'N° Factura',
                 'factura_pdf_url': 'Factura PDF', 'factura_xml_url': 'Factura XML',
-                'nota_credito_pdf_url': 'N.C. PDF', 'nota_credito_xml_url': 'N.C. XML',
             }),
             use_container_width=True, hide_index=True,
             column_config={
                 "Total": st.column_config.NumberColumn("Total", format="$%,d"),
                 "Factura PDF": st.column_config.LinkColumn(display_text="Abrir"),
                 "Factura XML": st.column_config.LinkColumn(display_text="Abrir"),
-                "N.C. PDF": st.column_config.LinkColumn(display_text="Abrir"),
-                "N.C. XML": st.column_config.LinkColumn(display_text="Abrir"),
             }
         )
 
@@ -872,6 +870,80 @@ with tab_historial:
 # ==========================================
 with tab_devolucion:
     st.subheader("Devoluciones y Anulaciones")
+
+    # ==========================================
+    # HISTORIAL DE DEVOLUCIONES (NOTAS CRÉDITO)
+    # ==========================================
+    st.markdown("**Historial de devoluciones:**")
+    hoy_hist_dev = hoy_bogota()
+    hace_30_hist_dev = hoy_hist_dev - timedelta(days=30)
+    fechas_hist_dev = st.date_input("Período", [hace_30_hist_dev, hoy_hist_dev], key="fechas_historial_devoluciones")
+
+    if len(fechas_hist_dev) == 2:
+        f_ini_hd, f_fin_hd = fechas_hist_dev
+        df_devoluciones = obtener_historial_devoluciones(user_id, f_ini_hd, f_fin_hd)
+
+        if not df_devoluciones.empty:
+            df_devoluciones = df_devoluciones.copy()
+            df_devoluciones['numero_factura_texto'] = (
+                df_devoluciones['factura_prefijo'].fillna('').astype(str)
+                + df_devoluciones['factura_numero'].fillna('').astype(str)
+            )
+            df_devoluciones['numero_nc_texto'] = (
+                df_devoluciones['nota_credito_prefijo'].fillna('').astype(str)
+                + df_devoluciones['nota_credito_numero'].fillna('').astype(str)
+            )
+
+            def _estado_nc(row):
+                if row['nota_credito_alegra_id']:
+                    return 'Emitida'
+                if row['factura_alegra_id']:
+                    return 'Pendiente'
+                return 'No aplica (sin FE)'
+
+            df_devoluciones['nc_estado_texto'] = df_devoluciones.apply(_estado_nc, axis=1)
+
+            st.dataframe(
+                df_devoluciones[['id', 'fecha', 'cliente', 'total', 'numero_factura_texto',
+                                  'nc_estado_texto', 'numero_nc_texto', 'nota_credito_pdf_url',
+                                  'nota_credito_xml_url', 'notas']].rename(columns={
+                    'id': 'Venta #', 'fecha': 'Fecha', 'cliente': 'Cliente', 'total': 'Total',
+                    'numero_factura_texto': 'N° Factura', 'nc_estado_texto': 'Nota Crédito',
+                    'numero_nc_texto': 'N° Nota Crédito',
+                    'nota_credito_pdf_url': 'N.C. PDF', 'nota_credito_xml_url': 'N.C. XML',
+                    'notas': 'Motivo',
+                }),
+                use_container_width=True, hide_index=True,
+                column_config={
+                    "Total": st.column_config.NumberColumn(format="$%,d"),
+                    "N.C. PDF": st.column_config.LinkColumn(display_text="Abrir"),
+                    "N.C. XML": st.column_config.LinkColumn(display_text="Abrir"),
+                }
+            )
+
+            pendientes_nc = df_devoluciones[df_devoluciones['nc_estado_texto'] == 'Pendiente']
+            if not pendientes_nc.empty:
+                st.warning(f"{len(pendientes_nc)} devolución(es) con factura electrónica sin nota crédito confirmada.")
+                dict_reintento_nc = {
+                    f"Venta #{r['id']} — {r['cliente']} — {formato_cop(r['total'])}": r['id']
+                    for _, r in pendientes_nc.iterrows()
+                }
+                reintento_nc_sel = st.selectbox(
+                    "Reintentar nota crédito de una devolución", options=list(dict_reintento_nc.keys()),
+                    key="reintento_nc_historial_sel"
+                )
+                if st.button("Reintentar nota crédito", use_container_width=True, key="btn_reintento_nc_historial"):
+                    with st.spinner("Emitiendo nota crédito ante Alegra..."):
+                        ok_nc_h, msg_nc_h = anular_factura_venta(user_id, dict_reintento_nc[reintento_nc_sel])
+                    if ok_nc_h:
+                        st.success(msg_nc_h)
+                        st.rerun()
+                    else:
+                        st.error(msg_nc_h)
+        else:
+            st.caption("No hay devoluciones en este período.")
+
+    st.markdown("---")
     st.caption("Busca la venta por número para anularla. El stock se restaura automáticamente.")
 
     with engine.connect() as conn:

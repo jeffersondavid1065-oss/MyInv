@@ -523,6 +523,7 @@ def anular_factura_venta(uid, venta_id):
 
     pdf_url_nc = nota.get("pdf") if isinstance(nota.get("pdf"), str) else None
     xml_url_nc = nota.get("xml") if isinstance(nota.get("xml"), str) else None
+    number_template_nc = nota.get("numberTemplate") if isinstance(nota.get("numberTemplate"), dict) else {}
     if not pdf_url_nc or not xml_url_nc:
         nota_completa = obtener_nota_credito(email, token, nota.get("id"))
         if nota_completa:
@@ -530,9 +531,16 @@ def anular_factura_venta(uid, venta_id):
                 pdf_url_nc = nota_completa.get("pdf") if isinstance(nota_completa.get("pdf"), str) else None
             if not xml_url_nc:
                 xml_url_nc = nota_completa.get("xml") if isinstance(nota_completa.get("xml"), str) else None
+            if not number_template_nc and isinstance(nota_completa.get("numberTemplate"), dict):
+                number_template_nc = nota_completa["numberTemplate"]
 
-    queries.guardar_nota_credito(venta_id, nota.get("id"), pdf_url=pdf_url_nc, xml_url=xml_url_nc)
-    return True, f"Nota crédito emitida (Alegra #{nota.get('id')})."
+    queries.guardar_nota_credito(
+        venta_id, nota.get("id"), pdf_url=pdf_url_nc, xml_url=xml_url_nc,
+        prefijo=number_template_nc.get("prefix"),
+        numero=str(number_template_nc["number"]) if number_template_nc.get("number") is not None else None,
+    )
+    mensaje_numero = f"{number_template_nc.get('prefix') or ''}{number_template_nc.get('number') or nota.get('id')}"
+    return True, f"Nota crédito emitida ({mensaje_numero})."
 
 
 def actualizar_pdf_cufe_venta(uid, venta_id):
@@ -570,13 +578,20 @@ def actualizar_pdf_cufe_venta(uid, venta_id):
                 )
                 actualizo = True
 
-    if venta.nota_credito_alegra_id and (not venta.nota_credito_pdf_url or not venta.nota_credito_xml_url):
+    if venta.nota_credito_alegra_id and (
+        not venta.nota_credito_pdf_url or not venta.nota_credito_xml_url or not venta.nota_credito_numero
+    ):
         nota = obtener_nota_credito(email, token, venta.nota_credito_alegra_id)
         if nota:
             pdf_url_nc = nota.get("pdf") if isinstance(nota.get("pdf"), str) else None
             xml_url_nc = nota.get("xml") if isinstance(nota.get("xml"), str) else None
-            if pdf_url_nc or xml_url_nc:
-                queries.actualizar_pdf_nota_credito(venta_id, pdf_url_nc, xml_url=xml_url_nc)
+            number_template_nc = nota.get("numberTemplate") if isinstance(nota.get("numberTemplate"), dict) else {}
+            if pdf_url_nc or xml_url_nc or number_template_nc:
+                queries.actualizar_pdf_nota_credito(
+                    venta_id, pdf_url_nc, xml_url=xml_url_nc,
+                    prefijo=number_template_nc.get("prefix"),
+                    numero=str(number_template_nc["number"]) if number_template_nc.get("number") is not None else None,
+                )
                 actualizo = True
 
     return actualizo
