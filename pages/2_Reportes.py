@@ -14,7 +14,7 @@ from queries import (
 )
 from utils import aplicar_estilos, verificar_auth
 from tz_utils import hoy_bogota, ahora_bogota
-from alegra_utils import facturar_venta, actualizar_pdf_cufe_venta
+from alegra_utils import facturar_venta, actualizar_pdf_cufe_venta, obtener_factura, obtener_credenciales
 
 st.set_page_config(page_title="Reportes", layout="wide")
 aplicar_estilos()
@@ -578,6 +578,27 @@ with tab_facturas:
                     else:
                         st.info("Todavía no hay novedades en Alegra para estas facturas/notas crédito.")
                     st.rerun()
+
+            with st.expander("Diagnóstico: ver respuesta cruda de Alegra (temporal)"):
+                facturadas_debug = df_facturas[df_facturas['factura_alegra_id'].notna()]
+                if facturadas_debug.empty:
+                    st.caption("No hay facturas emitidas en este período para consultar.")
+                else:
+                    dict_debug = {
+                        f"Venta #{r['id']} — {r['cliente']}": r['factura_alegra_id']
+                        for _, r in facturadas_debug.iterrows()
+                    }
+                    debug_sel = st.selectbox(
+                        "Selecciona la factura a inspeccionar", options=list(dict_debug.keys()), key="debug_factura_sel"
+                    )
+                    if st.button("Consultar Alegra", key="btn_debug_factura"):
+                        email_dbg, token_dbg = obtener_credenciales(user_id)
+                        with st.spinner("Consultando..."):
+                            respuesta_dbg = obtener_factura(email_dbg, token_dbg, dict_debug[debug_sel])
+                        if respuesta_dbg:
+                            st.json(respuesta_dbg)
+                        else:
+                            st.error("Alegra no respondió o rechazó la consulta.")
 
             facturas_con_error = df_facturas[df_facturas['factura_estado'] == 'error']
             if not facturas_con_error.empty:
