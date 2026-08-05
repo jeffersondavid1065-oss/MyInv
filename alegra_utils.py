@@ -22,6 +22,19 @@ def _headers(email, token):
     }
 
 
+def _mensaje_error(resp):
+    """Extrae el mensaje legible de una respuesta de error de la API (el
+    proveedor devuelve JSON tipo {"message": "...", "code": N}); si no se
+    puede parsear, cae al texto crudo para no ocultar información."""
+    try:
+        data = resp.json()
+        if isinstance(data, dict) and data.get("message"):
+            return str(data["message"])
+    except ValueError:
+        pass
+    return resp.text
+
+
 def probar_conexion(email, token):
     """Verifica que un par email/token funcione contra la API de Alegra."""
     try:
@@ -30,7 +43,7 @@ def probar_conexion(email, token):
             return True, "Conexión exitosa."
         if resp.status_code == 401:
             return False, "Credenciales rechazadas (email o token incorrectos)."
-        return False, f"El proveedor respondió {resp.status_code}: {resp.text}"
+        return False, f"El proveedor respondió {resp.status_code}: {_mensaje_error(resp)}"
     except requests.RequestException as e:
         return False, f"Error de conexión: {e}"
 
@@ -62,7 +75,7 @@ def crear_contacto(email, token, nombre, identificacion, tipo_identificacion="CC
         resp = requests.post(f"{BASE_URL}/contacts", headers=_headers(email, token), json=payload, timeout=15)
         if resp.status_code in (200, 201):
             return resp.json().get("id")
-        st.error(f"Error al crear contacto ({resp.status_code}): {resp.text}")
+        st.error(f"Error al crear contacto ({resp.status_code}): {_mensaje_error(resp)}")
         return None
     except requests.RequestException as e:
         st.error(f"Error de conexión al crear contacto: {e}")
@@ -100,7 +113,7 @@ def crear_item(email, token, nombre, precio, referencia=None, unidad_medida=None
         resp = requests.post(f"{BASE_URL}/items", headers=_headers(email, token), json=payload, timeout=15)
         if resp.status_code in (200, 201):
             return resp.json().get("id")
-        st.error(f"Error al crear ítem ({resp.status_code}): {resp.text}")
+        st.error(f"Error al crear ítem ({resp.status_code}): {_mensaje_error(resp)}")
         return None
     except requests.RequestException as e:
         st.error(f"Error de conexión al crear ítem: {e}")
@@ -160,7 +173,7 @@ def crear_factura_venta(email, token, cliente_id, items, due_date=None, periodic
         resp = requests.post(f"{BASE_URL}/invoices", headers=_headers(email, token), json=payload, timeout=30)
         if resp.status_code in (200, 201):
             return resp.json()
-        st.error(f"Error al crear factura ({resp.status_code}): {resp.text}")
+        st.error(f"Error al crear factura ({resp.status_code}): {_mensaje_error(resp)}")
         return None
     except requests.RequestException as e:
         st.error(f"Error de conexión al crear factura: {e}")
@@ -183,7 +196,7 @@ def emitir_factura_dian(email, token, factura_id):
         return False, f"Error de conexión al timbrar: {e}"
 
     if resp.status_code not in (200, 201):
-        return False, f"El timbrado fue rechazado ({resp.status_code}): {resp.text}"
+        return False, f"El timbrado fue rechazado ({resp.status_code}): {_mensaje_error(resp)}"
 
     try:
         resultados = resp.json().get("data", [])
@@ -240,7 +253,7 @@ def enviar_factura_email(email, token, factura_id, destinatario):
         )
         if resp.status_code == 200:
             return True, "Factura enviada por correo."
-        return False, f"No se pudo enviar por correo ({resp.status_code}): {resp.text}"
+        return False, f"No se pudo enviar por correo ({resp.status_code}): {_mensaje_error(resp)}"
     except requests.RequestException as e:
         return False, f"Error de conexión al enviar correo: {e}"
 
@@ -288,7 +301,7 @@ def registrar_pago_factura(email, token, factura_id, contacto_id, monto, metodo_
         resp = requests.post(f"{BASE_URL}/payments", headers=_headers(email, token), json=payload, timeout=20)
         if resp.status_code in (200, 201):
             return True, "Pago registrado."
-        return False, f"El pago fue rechazado ({resp.status_code}): {resp.text}"
+        return False, f"El pago fue rechazado ({resp.status_code}): {_mensaje_error(resp)}"
     except requests.RequestException as e:
         return False, f"Error de conexión al registrar el pago: {e}"
 
@@ -319,7 +332,7 @@ def crear_nota_credito(email, token, factura_alegra_id, cliente_id, items, total
         resp = requests.post(f"{BASE_URL}/credit-notes", headers=_headers(email, token), json=payload, timeout=30)
         if resp.status_code in (200, 201):
             return resp.json()
-        st.error(f"Error al crear nota crédito ({resp.status_code}): {resp.text}")
+        st.error(f"Error al crear nota crédito ({resp.status_code}): {_mensaje_error(resp)}")
         return None
     except requests.RequestException as e:
         st.error(f"Error de conexión al crear nota crédito: {e}")
