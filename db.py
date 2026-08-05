@@ -252,8 +252,10 @@ def init_db():
                     diferencia REAL DEFAULT 0,
                     notas TEXT,
                     cerrado_por TEXT,
+                    cajero_id INTEGER,
                     fecha_cierre TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE
+                    FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE,
+                    FOREIGN KEY (cajero_id) REFERENCES Cajeros(id)
                 )
             '''))
             conn.execute(text('''
@@ -262,6 +264,8 @@ def init_db():
                     usuario_id INTEGER NOT NULL,
                     nombre TEXT NOT NULL,
                     pin TEXT NOT NULL,
+                    usuario_login TEXT,
+                    token_sesion TEXT,
                     activo BOOLEAN DEFAULT 1,
                     fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE
@@ -294,6 +298,8 @@ def init_db():
                     usuario_id INTEGER NOT NULL,
                     nombre TEXT NOT NULL,
                     pin TEXT NOT NULL,
+                    usuario_login VARCHAR(50),
+                    token_sesion VARCHAR(255),
                     activo BOOLEAN DEFAULT TRUE,
                     fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE
@@ -469,8 +475,10 @@ def init_db():
                     diferencia NUMERIC(12,2) DEFAULT 0,
                     notas TEXT,
                     cerrado_por TEXT,
+                    cajero_id INTEGER,
                     fecha_cierre TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE
+                    FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE,
+                    FOREIGN KEY (cajero_id) REFERENCES Cajeros(id)
                 )
             '''))
 
@@ -494,6 +502,8 @@ def init_db():
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_creditos_estado ON Creditos(usuario_id, estado)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_abonos_credito ON Abonos(credito_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cajeros_usuario ON Cajeros(usuario_id)"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS idx_cajeros_login ON Cajeros(usuario_login)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cajeros_token ON Cajeros(token_sesion)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cierres_caja_usuario ON Cierres_Caja(usuario_id, fecha)"))
 
         # ==========================================
@@ -518,12 +528,19 @@ def init_db():
                 cols_v = [r[1] for r in conn.execute(text("PRAGMA table_info(Ventas)")).fetchall()]
                 if 'cajero_id' not in cols_v:
                     conn.execute(text("ALTER TABLE Ventas ADD COLUMN cajero_id INTEGER"))
+                cols_caj = [r[1] for r in conn.execute(text("PRAGMA table_info(Cajeros)")).fetchall()]
+                if 'usuario_login' not in cols_caj:
+                    conn.execute(text("ALTER TABLE Cajeros ADD COLUMN usuario_login TEXT"))
+                if 'token_sesion' not in cols_caj:
+                    conn.execute(text("ALTER TABLE Cajeros ADD COLUMN token_sesion TEXT"))
                 cols_dv = [r[1] for r in conn.execute(text("PRAGMA table_info(Detalles_Venta)")).fetchall()]
                 if 'descuento' not in cols_dv:
                     conn.execute(text("ALTER TABLE Detalles_Venta ADD COLUMN descuento REAL DEFAULT 0"))
                 cols_cc = [r[1] for r in conn.execute(text("PRAGMA table_info(Cierres_Caja)")).fetchall()]
                 if 'total_descuentos' not in cols_cc:
                     conn.execute(text("ALTER TABLE Cierres_Caja ADD COLUMN total_descuentos REAL DEFAULT 0"))
+                if 'cajero_id' not in cols_cc:
+                    conn.execute(text("ALTER TABLE Cierres_Caja ADD COLUMN cajero_id INTEGER"))
                 if 'alegra_item_id' not in cols_p:
                     conn.execute(text("ALTER TABLE Productos ADD COLUMN alegra_item_id TEXT"))
                 cols_cli = [r[1] for r in conn.execute(text("PRAGMA table_info(Clientes)")).fetchall()]
@@ -572,11 +589,14 @@ def init_db():
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS telefono TEXT"))
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS direccion TEXT"))
                 conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS cajero_id INTEGER"))
+                conn.execute(text("ALTER TABLE Cajeros ADD COLUMN IF NOT EXISTS usuario_login VARCHAR(50)"))
+                conn.execute(text("ALTER TABLE Cajeros ADD COLUMN IF NOT EXISTS token_sesion VARCHAR(255)"))
                 conn.execute(text("ALTER TABLE Productos ADD COLUMN IF NOT EXISTS unidad_medida VARCHAR(20) DEFAULT 'Unidad'"))
                 conn.execute(text("ALTER TABLE Productos ALTER COLUMN stock_actual TYPE NUMERIC(12,3)"))
                 conn.execute(text("ALTER TABLE Productos ALTER COLUMN stock_minimo TYPE NUMERIC(12,3)"))
                 conn.execute(text("ALTER TABLE Detalles_Venta ADD COLUMN IF NOT EXISTS descuento NUMERIC(12,2) DEFAULT 0"))
                 conn.execute(text("ALTER TABLE Cierres_Caja ADD COLUMN IF NOT EXISTS total_descuentos NUMERIC(12,2) DEFAULT 0"))
+                conn.execute(text("ALTER TABLE Cierres_Caja ADD COLUMN IF NOT EXISTS cajero_id INTEGER"))
                 conn.execute(text("ALTER TABLE Productos ADD COLUMN IF NOT EXISTS alegra_item_id TEXT"))
                 conn.execute(text("ALTER TABLE Clientes ADD COLUMN IF NOT EXISTS tipo_documento TEXT DEFAULT 'CC'"))
                 conn.execute(text("ALTER TABLE Clientes ADD COLUMN IF NOT EXISTS alegra_contact_id TEXT"))

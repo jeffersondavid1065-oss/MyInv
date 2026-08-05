@@ -3,12 +3,13 @@ import pandas as pd
 from datetime import date, timedelta
 from sqlalchemy import text
 from db import obtener_conexion
-from utils import verificar_auth
+from utils import verificar_auth, bloquear_si_cajero
 from queries import obtener_ganancia_dia, obtener_ganancia_por_producto_dia, obtener_ganancia_acumulada
 from tz_utils import hoy_bogota, ahora_bogota_naive
 
 st.set_page_config(page_title="Cierre de Caja", layout="wide")
 user_id, nombre_negocio = verificar_auth()
+bloquear_si_cajero()
 
 engine = obtener_conexion()
 
@@ -158,7 +159,29 @@ with tab_cierre:
                 help="Cuenta los billetes y monedas en caja y escribe el total aquí."
             )
             notas_cierre = st.text_area("Notas del cierre (opcional)", height=80)
-            cerrado_por = st.text_input("Cerrado por", placeholder="Nombre del cajero o dueño")
+
+            with engine.connect() as conn:
+                cajeros_negocio = conn.execute(text("""
+                    SELECT id, nombre FROM Cajeros WHERE usuario_id = :uid AND activo = 1 ORDER BY nombre ASC
+                """), {"uid": user_id}).fetchall()
+
+            OTRO_DUENO = "Otro / Dueño"
+            opciones_cierre = [c[1] for c in cajeros_negocio] + [OTRO_DUENO]
+            # El cierre de caja solo lo puede hacer el dueño (los cajeros no
+            # llegan a esta página), así que por defecto se preselecciona "Otro / Dueño".
+            idx_default = len(opciones_cierre) - 1
+
+            if cajeros_negocio:
+                cerrado_por_sel = st.selectbox("Cerrado por", options=opciones_cierre, index=idx_default)
+                if cerrado_por_sel == OTRO_DUENO:
+                    cerrado_por = st.text_input("Nombre de quien cierra", placeholder="Ej: nombre del dueño")
+                    cajero_id_cierre = None
+                else:
+                    cerrado_por = cerrado_por_sel
+                    cajero_id_cierre = next(c[0] for c in cajeros_negocio if c[1] == cerrado_por_sel)
+            else:
+                cerrado_por = st.text_input("Cerrado por", placeholder="Nombre del cajero o dueño")
+                cajero_id_cierre = None
 
         with col_c2:
             diferencia = efectivo_contado - total_efectivo
@@ -186,9 +209,9 @@ with tab_cierre:
                             INSERT INTO Cierres_Caja
                             (usuario_id, fecha, total_ventas, total_efectivo,
                              total_transferencias, total_creditos, total_descuentos,
-                             efectivo_contado, diferencia, notas, cerrado_por, fecha_cierre)
+                             efectivo_contado, diferencia, notas, cerrado_por, cajero_id, fecha_cierre)
                             VALUES (:uid, :fecha, :tv, :tef, :ttr, :tcr, :tdesc,
-                                    :ec, :dif, :notas, :por, :fecha_cierre)
+                                    :ec, :dif, :notas, :por, :cajero_id, :fecha_cierre)
                         """), {
                             "uid": user_id,
                             "fecha": fecha_cierre.strftime('%Y-%m-%d'),
@@ -201,6 +224,7 @@ with tab_cierre:
                             "dif": diferencia,
                             "notas": notas_cierre or None,
                             "por": cerrado_por or None,
+                            "cajero_id": cajero_id_cierre,
                             "fecha_cierre": ahora_bogota_naive(),
                         })
                     st.success(f"Cierre de caja del {fecha_cierre.strftime('%d/%m/%Y')} registrado.")

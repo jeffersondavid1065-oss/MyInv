@@ -4,12 +4,13 @@ import hashlib
 from datetime import date, timedelta
 from sqlalchemy import text
 from db import obtener_conexion
-from utils import aplicar_estilos, verificar_auth
+from utils import aplicar_estilos, verificar_auth, bloquear_si_cajero
 from tz_utils import hoy_bogota
 
 st.set_page_config(page_title="Cajeros", layout="wide")
 aplicar_estilos()
 user_id, nombre_negocio = verificar_auth()
+bloquear_si_cajero()
 
 engine = obtener_conexion()
 
@@ -38,7 +39,7 @@ with tab_cajeros:
     try:
         with engine.connect() as conn:
             df_cajeros = pd.read_sql_query(text("""
-                SELECT c.id, c.nombre, c.activo, c.fecha_registro,
+                SELECT c.id, c.nombre, c.activo, c.fecha_registro, c.usuario_login,
                        COUNT(DISTINCT DATE(v.fecha)) as dias_trabajados,
                        COUNT(v.id) as total_ventas,
                        COALESCE(SUM(v.total), 0) as total_vendido
@@ -46,7 +47,7 @@ with tab_cajeros:
                 LEFT JOIN Ventas v ON v.cajero_id = c.id
                     AND v.estado != 'Anulada'
                 WHERE c.usuario_id = :uid
-                GROUP BY c.id, c.nombre, c.activo, c.fecha_registro
+                GROUP BY c.id, c.nombre, c.activo, c.fecha_registro, c.usuario_login
                 ORDER BY c.nombre ASC
             """), con=conn, params={"uid": user_id})
     except Exception:
@@ -60,7 +61,11 @@ with tab_cajeros:
                 with col_c1:
                     estado_icon = "🟢" if caj['activo'] else "🔴"
                     st.markdown(f"### {estado_icon} {caj['nombre']}")
-                    st.caption(f"Registrado: {str(caj['fecha_registro'])[:10]}")
+                    if caj['usuario_login']:
+                        st.caption(f"Usuario: **{caj['usuario_login']}** · Registrado: {str(caj['fecha_registro'])[:10]}")
+                    else:
+                        st.caption(f"Registrado: {str(caj['fecha_registro'])[:10]}")
+                        st.warning("Sin usuario de acceso asignado — no puede iniciar sesión todavía.", icon="⚠️")
                 with col_c2:
                     st.metric("Días trabajados", int(caj['dias_trabajados']))
                 with col_c3:
@@ -72,7 +77,7 @@ with tab_cajeros:
                         try:
                             with engine.begin() as conn:
                                 conn.execute(text("""
-                                    UPDATE Cajeros SET activo = :estado
+                                    UPDATE Cajeros SET activo = :estado, token_sesion = NULL
                                     WHERE id = :cid AND usuario_id = :uid
                                 """), {"estado": nuevo_estado, "cid": int(caj['id']), "uid": user_id})
                             st.rerun()
@@ -80,35 +85,60 @@ with tab_cajeros:
                             st.error(f"Error: {e}")
 
         st.markdown("---")
-        st.subheader("Cambiar PIN de un cajero")
+        st.subheader("Credenciales de acceso de un cajero")
+        st.caption("El usuario de acceso es con lo que el cajero inicia sesión de forma independiente (sin que tú tengas que entrar primero).")
         cajeros_activos = df_cajeros[df_cajeros['activo'] == True]
         if not cajeros_activos.empty:
-            dict_caj = {r['nombre']: r['id'] for _, r in cajeros_activos.iterrows()}
+            dict_caj = {r['nombre']: (r['id'], r['usuario_login']) for _, r in cajeros_activos.iterrows()}
             caj_sel = st.selectbox("Selecciona el cajero", options=list(dict_caj.keys()))
-            caj_id_sel = dict_caj[caj_sel]
+            caj_id_sel, login_actual_sel = dict_caj[caj_sel]
+
+            nuevo_login = st.text_input(
+                "Usuario de acceso", value=login_actual_sel or "",
+                placeholder="ej: maria_ferreteria", max_chars=30,
+                help="Único en toda la plataforma, sin espacios. El cajero lo usa junto con su PIN para entrar."
+            )
 
             col_pin1, col_pin2 = st.columns(2)
             with col_pin1:
-                nuevo_pin = st.text_input("Nuevo PIN (4 dígitos)", type="password", max_chars=4)
+                nuevo_pin = st.text_input("Nuevo PIN (4 dígitos, opcional)", type="password", max_chars=4)
             with col_pin2:
                 confirmar_pin = st.text_input("Confirmar PIN", type="password", max_chars=4)
 
-            if st.button("Actualizar PIN", use_container_width=True):
-                if nuevo_pin and len(nuevo_pin) == 4 and nuevo_pin.isdigit():
-                    if nuevo_pin == confirmar_pin:
-                        try:
-                            with engine.begin() as conn:
-                                conn.execute(text("""
-                                    UPDATE Cajeros SET pin = :pin
-                                    WHERE id = :cid AND usuario_id = :uid
-                                """), {"pin": hash_pin(nuevo_pin), "cid": caj_id_sel, "uid": user_id})
-                            st.success(f"PIN de {caj_sel} actualizado.")
-                        except Exception as e:
-                            st.error(f"Error: {e}")
-                    else:
-                        st.error("Los PINs no coinciden.")
+            if st.button("Guardar credenciales", use_container_width=True):
+                login_limpio = nuevo_login.strip() if nuevo_login else None
+                if login_limpio and " " in login_limpio:
+                    st.error("El usuario de acceso no puede contener espacios.")
+                elif nuevo_pin and not (len(nuevo_pin) == 4 and nuevo_pin.isdigit()):
+                    st.error("El PIN debe ser de exactamente 4 dígitos numéricos.")
+                elif nuevo_pin and nuevo_pin != confirmar_pin:
+                    st.error("Los PINs no coinciden.")
                 else:
-                    st.warning("El PIN debe ser de exactamente 4 dígitos numéricos.")
+                    try:
+                        if login_limpio:
+                            with engine.connect() as conn_check:
+                                existe = conn_check.execute(text("""
+                                    SELECT 1 FROM Cajeros WHERE usuario_login = :login AND id != :cid
+                                """), {"login": login_limpio, "cid": caj_id_sel}).fetchone()
+                            if existe:
+                                st.error(f"El usuario '{login_limpio}' ya está en uso. Elige otro.")
+                                st.stop()
+
+                        with engine.begin() as conn:
+                            if nuevo_pin:
+                                conn.execute(text("""
+                                    UPDATE Cajeros SET usuario_login = :login, pin = :pin
+                                    WHERE id = :cid AND usuario_id = :uid
+                                """), {"login": login_limpio, "pin": hash_pin(nuevo_pin), "cid": caj_id_sel, "uid": user_id})
+                            else:
+                                conn.execute(text("""
+                                    UPDATE Cajeros SET usuario_login = :login
+                                    WHERE id = :cid AND usuario_id = :uid
+                                """), {"login": login_limpio, "cid": caj_id_sel, "uid": user_id})
+                        st.success(f"Credenciales de {caj_sel} actualizadas.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error: {e}")
     else:
         st.info("No tienes cajeros registrados. Ve a 'Registrar Cajero' para agregar uno.")
 
@@ -117,45 +147,62 @@ with tab_cajeros:
 # ==========================================
 with tab_nuevo:
     st.subheader("Registrar Nuevo Cajero")
-    st.caption("El cajero usará su nombre y PIN para identificarse en las ventas.")
+    st.caption("El cajero inicia sesión por su cuenta, de forma independiente, con su usuario y PIN.")
 
     with st.form("form_nuevo_cajero", clear_on_submit=True):
         col_n1, col_n2 = st.columns(2)
         with col_n1:
             nombre_caj = st.text_input("Nombre del Cajero *")
+            login_caj = st.text_input(
+                "Usuario de acceso *", placeholder="ej: maria_ferreteria", max_chars=30,
+                help="Único en toda la plataforma, sin espacios."
+            )
         with col_n2:
             pin_caj = st.text_input("PIN (4 dígitos) *", type="password", max_chars=4,
                                      help="Solo números, exactamente 4 dígitos")
 
         st.markdown("")
         if st.form_submit_button("Registrar Cajero", type="primary"):
-            if nombre_caj and pin_caj:
-                if len(pin_caj) == 4 and pin_caj.isdigit():
-                    try:
+            login_limpio_nuevo = login_caj.strip() if login_caj else ""
+            if not (nombre_caj and login_limpio_nuevo and pin_caj):
+                st.warning("El nombre, el usuario de acceso y el PIN son obligatorios.")
+            elif " " in login_limpio_nuevo:
+                st.error("El usuario de acceso no puede contener espacios.")
+            elif not (len(pin_caj) == 4 and pin_caj.isdigit()):
+                st.error("El PIN debe ser de exactamente 4 dígitos numéricos.")
+            else:
+                try:
+                    with engine.connect() as conn_check:
+                        existe = conn_check.execute(
+                            text("SELECT 1 FROM Cajeros WHERE usuario_login = :login"),
+                            {"login": login_limpio_nuevo}
+                        ).fetchone()
+                    if existe:
+                        st.error(f"El usuario '{login_limpio_nuevo}' ya está en uso. Elige otro.")
+                    else:
                         with engine.begin() as conn:
                             conn.execute(text("""
-                                INSERT INTO Cajeros (usuario_id, nombre, pin)
-                                VALUES (:uid, :nom, :pin)
+                                INSERT INTO Cajeros (usuario_id, nombre, pin, usuario_login)
+                                VALUES (:uid, :nom, :pin, :login)
                             """), {
                                 "uid": user_id,
                                 "nom": nombre_caj,
-                                "pin": hash_pin(pin_caj)
+                                "pin": hash_pin(pin_caj),
+                                "login": login_limpio_nuevo,
                             })
                         st.success(f"Cajero '{nombre_caj}' registrado exitosamente.")
                         st.rerun()
-                    except Exception as e:
-                        st.error(f"Error al registrar: {e}")
-                else:
-                    st.error("El PIN debe ser de exactamente 4 dígitos numéricos.")
-            else:
-                st.warning("El nombre y el PIN son obligatorios.")
+                except Exception as e:
+                    st.error(f"Error al registrar: {e}")
 
     st.markdown("---")
     st.info("""
     **¿Cómo funciona el control de cajeros?**
-    
-    • Cada cajero tiene un **nombre** y un **PIN de 4 dígitos**
-    • Al abrir el Punto de Venta, el cajero selecciona su nombre e ingresa su PIN
+
+    • Cada cajero tiene un **usuario de acceso único** y un **PIN de 4 dígitos**
+    • El cajero entra directo desde la pantalla de inicio, en "🔒 Acceso de Cajero" — no necesita que tú entres primero
+    • Su sesión solo tiene acceso al **Punto de Venta**: generar ventas y, si aplica, emitir la factura electrónica ante la DIAN
+    • No puede ver Inventario, Reportes, Clientes, Configuración ni anular/devolver ventas — eso lo haces tú desde tu propia sesión
     • Las ventas quedan registradas con el cajero que las realizó
     • El dueño puede ver el rendimiento de cada cajero en "Rendimiento"
     • Si un cajero ya no trabaja, puedes **desactivarlo** sin borrarlo

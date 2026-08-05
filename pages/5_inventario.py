@@ -10,11 +10,12 @@ from queries import (
     obtener_proveedores,
     invalidar_cache_productos,
 )
-from utils import aplicar_estilos, verificar_auth
+from utils import aplicar_estilos, verificar_auth, bloquear_si_cajero
 
 st.set_page_config(page_title="Inventario", layout="wide")
 aplicar_estilos()
 user_id, nombre_negocio = verificar_auth()
+bloquear_si_cajero()
 
 engine = obtener_conexion()
 

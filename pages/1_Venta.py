@@ -33,58 +33,28 @@ st.markdown(f"Caja para: **{nombre_negocio}**")
 st.markdown("---")
 
 # ==========================================
-# IDENTIFICACIÓN DEL CAJERO
+# CAJERO ACTIVO
 # ==========================================
-if "cajero_activo_id" not in st.session_state:
-    st.session_state.cajero_activo_id = None
-if "cajero_activo_nombre" not in st.session_state:
-    st.session_state.cajero_activo_nombre = None
+# La identidad (dueño o cajero) ya se resolvió en el login de app.py — aquí
+# solo se lee. Si la identidad cambió desde el último carrito guardado en esta
+# misma pestaña (ej. un cajero cerró sesión y otro entró), se limpia el carrito
+# para que no quede visible ni cobrable bajo el nombre de otra persona.
+cajero_id_actual = st.session_state.auth.get("cajero_id")
+cajero_nombre_actual = st.session_state.auth.get("cajero_nombre")
+identidad_actual = f"cajero:{cajero_id_actual}" if cajero_id_actual else f"admin:{user_id}"
 
-try:
-    with engine.connect() as conn:
-        cajeros = conn.execute(text("""
-            SELECT id, nombre, pin FROM Cajeros
-            WHERE usuario_id = :uid AND activo = 1
-            ORDER BY nombre ASC
-        """), {"uid": user_id}).fetchall()
-except Exception:
-    cajeros = []
+if st.session_state.get("_identidad_carrito") != identidad_actual:
+    st.session_state.carrito = []
+    st.session_state.descuento_pos = 0
+    st.session_state.descuento_pct_global = 0
+    st.session_state.tipo_desc_global = "$ Fijo"
+    st.session_state.limpiar_buscador = True
+    st.session_state._identidad_carrito = identidad_actual
 
-if cajeros:
-    if not st.session_state.cajero_activo_id:
-        with st.container(border=True):
-            st.subheader("Identificación del Cajero")
-            col_id1, col_id2, col_id3 = st.columns([2, 1, 1])
-            with col_id1:
-                dict_cajeros = {c[1]: (c[0], c[2]) for c in cajeros}
-                cajero_sel_nombre = st.selectbox("Selecciona tu nombre", options=list(dict_cajeros.keys()))
-            with col_id2:
-                pin_input = st.text_input("Tu PIN", type="password", max_chars=4)
-            with col_id3:
-                st.write("")
-                st.write("")
-                if st.button("Entrar a Caja", type="primary", use_container_width=True):
-                    cajero_id_sel, pin_guardado = dict_cajeros[cajero_sel_nombre]
-                    import hashlib
-                    if hashlib.sha256(pin_input.encode()).hexdigest() == pin_guardado:
-                        st.session_state.cajero_activo_id = cajero_id_sel
-                        st.session_state.cajero_activo_nombre = cajero_sel_nombre
-                        st.rerun()
-                    else:
-                        st.error("PIN incorrecto.")
-        st.stop()
-    else:
-        col_caj1, col_caj2 = st.columns([3, 1])
-        with col_caj1:
-            st.success(f"Cajero activo: **{st.session_state.cajero_activo_nombre}**")
-        with col_caj2:
-            if st.button("Cambiar cajero"):
-                st.session_state.cajero_activo_id = None
-                st.session_state.cajero_activo_nombre = None
-                st.rerun()
-        st.markdown("")
+if cajero_nombre_actual:
+    st.success(f"Cajero activo: **{cajero_nombre_actual}**")
+    st.markdown("")
 
-cajero_id_actual = st.session_state.get("cajero_activo_id")
 if "limpiar_buscador" not in st.session_state:
     st.session_state.limpiar_buscador = False
 if "carrito" not in st.session_state:
@@ -625,7 +595,7 @@ with tab_pos:
                         st.info(f"Cambio: {formato_cop(cambio)}")
 
                     if confirmar_venta_factura:
-                        with st.spinner("Creando factura en Alegra..."):
+                        with st.spinner("Creando factura electrónica..."):
                             ok_f, msg_f = facturar_venta(user_id, venta_id)
                         if ok_f:
                             st.success(msg_f)
@@ -729,14 +699,14 @@ with tab_pos:
                         """), {"vid": vid}).fetchone()
 
                     if venta_factura and venta_factura[1] == "emitida":
-                        st.success(f"Factura electrónica emitida ante la DIAN (Alegra #{venta_factura[2]}).")
+                        st.success(f"Factura electrónica emitida ante la DIAN (#{venta_factura[2]}).")
                         col_fpdf, col_fxml = st.columns(2)
                         if venta_factura[3]:
                             col_fpdf.link_button("Ver PDF de la factura", venta_factura[3], use_container_width=True)
                         if venta_factura[4]:
                             col_fxml.link_button("Descargar XML (DIAN)", venta_factura[4], use_container_width=True)
                     elif venta_factura and venta_factura[1] == "abierta":
-                        st.info(f"Factura creada en Alegra (#{venta_factura[2]}) — todavía no se ha emitido ante la DIAN.")
+                        st.info(f"Factura creada (#{venta_factura[2]}) — todavía no se ha emitido ante la DIAN.")
                         if venta_factura[3]:
                             st.link_button("Ver PDF (borrador)", venta_factura[3], use_container_width=True)
                         if st.button("Emitir a la DIAN", use_container_width=True, type="primary"):
@@ -751,7 +721,7 @@ with tab_pos:
                         st.caption("Esta venta no tiene cliente asociado — no se puede facturar electrónicamente.")
                     else:
                         if st.button("Emitir factura electrónica", use_container_width=True):
-                            with st.spinner("Creando factura en Alegra..."):
+                            with st.spinner("Creando factura electrónica..."):
                                 ok, msg = facturar_venta(user_id, vid)
                             if ok:
                                 st.success(msg)
@@ -890,6 +860,10 @@ with tab_historial:
 # TAB 3: DEVOLUCIONES
 # ==========================================
 with tab_devolucion:
+    if st.session_state.auth.get("rol") == "cajero":
+        st.warning("🔒 Las devoluciones y anulaciones las debe hacer el dueño del negocio.")
+        st.stop()
+
     st.subheader("Devoluciones y Anulaciones")
 
     # ==========================================
@@ -956,7 +930,7 @@ with tab_devolucion:
                     key="reintento_nc_historial_sel"
                 )
                 if st.button("Reintentar nota crédito", use_container_width=True, key="btn_reintento_nc_historial"):
-                    with st.spinner("Emitiendo nota crédito ante Alegra..."):
+                    with st.spinner("Emitiendo nota crédito..."):
                         ok_nc_h, msg_nc_h = anular_factura_venta(user_id, dict_reintento_nc[reintento_nc_sel])
                     if ok_nc_h:
                         st.success(msg_nc_h)
@@ -1033,7 +1007,7 @@ with tab_devolucion:
                     numero_factura_dev = f"{venta_dev[8] or ''}{venta_dev[9] or ''}"
                     st.info(
                         f"Factura electrónica {numero_factura_dev} anulada mediante "
-                        f"nota crédito (Alegra #{venta_dev[10]})."
+                        f"nota crédito (#{venta_dev[10]})."
                     )
                     col_ncpdf, col_ncxml = st.columns(2)
                     if venta_dev[11]:
@@ -1045,7 +1019,7 @@ with tab_devolucion:
                         "Esta venta tenía factura electrónica emitida pero no se confirmó la nota crédito."
                     )
                     if st.button("Reintentar nota crédito", use_container_width=True):
-                        with st.spinner("Emitiendo nota crédito ante Alegra..."):
+                        with st.spinner("Emitiendo nota crédito..."):
                             ok_nc_r, msg_nc_r = anular_factura_venta(user_id, vid_dev)
                         if ok_nc_r:
                             st.success(msg_nc_r)

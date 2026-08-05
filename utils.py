@@ -69,3 +69,12 @@ def verificar_auth():
         st.session_state.auth["user_id"],
         st.session_state.auth["nombre_negocio"]
     )
+
+
+def bloquear_si_cajero(mensaje="🔒 Tu usuario de cajero solo tiene acceso al Punto de Venta."):
+    """Corta la página (con un aviso) si quien está autenticado es un cajero
+    y no el dueño del negocio. Debe llamarse justo después de verificar_auth()
+    en cualquier página que no sea el Punto de Venta."""
+    if st.session_state.get("auth", {}).get("rol") == "cajero":
+        st.warning(mensaje)
+        st.stop()

@@ -4,12 +4,13 @@ from datetime import date, timedelta
 from sqlalchemy import text
 from db import obtener_conexion
 from queries import obtener_proveedores, invalidar_cache_proveedores
-from utils import aplicar_estilos, verificar_auth
+from utils import aplicar_estilos, verificar_auth, bloquear_si_cajero
 from tz_utils import hoy_bogota
 
 st.set_page_config(page_title="Proveedores", layout="wide")
 aplicar_estilos()
 user_id, nombre_negocio = verificar_auth()
+bloquear_si_cajero()
 
 engine = obtener_conexion()
 

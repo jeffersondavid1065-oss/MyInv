@@ -5,7 +5,7 @@ from fpdf import FPDF
 from sqlalchemy import text
 from db import obtener_conexion
 from queries import obtener_todos_productos, invalidar_cache_productos
-from utils import verificar_auth
+from utils import verificar_auth, bloquear_si_cajero
 
 try:
     import barcode as barcode_lib
@@ -16,6 +16,7 @@ except ImportError:
 
 st.set_page_config(page_title="Etiquetas de Precio", layout="wide")
 user_id, nombre_negocio = verificar_auth()
+bloquear_si_cajero()
 
 engine = obtener_conexion()
 

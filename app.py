@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import bcrypt
 import hashlib
+import time
 import uuid
 from sqlalchemy import text
 from db import obtener_conexion, init_db
@@ -30,11 +31,16 @@ if "auth" not in st.session_state:
         "nombre_negocio": None,
         "email": None,
         "token": None,
+        "rol": None,             # "admin" o "cajero"
+        "cajero_id": None,       # solo si rol == "cajero"
+        "cajero_nombre": None,   # solo si rol == "cajero"
     }
 
 # ==========================================
 # 3. AUTO-LOGIN POR TOKEN EN URL
 # ==========================================
+# Primero se busca entre los dueños de negocio (Usuarios); si no hay
+# coincidencia, se busca entre los Cajeros con login independiente.
 if not st.session_state.auth["logged"]:
     token_en_url = st.query_params.get("token")
     if token_en_url:
@@ -52,8 +58,34 @@ if not st.session_state.auth["logged"]:
                     "nombre_negocio": usuario[1],
                     "email": usuario[2],
                     "token": token_en_url,
+                    "rol": "admin",
+                    "cajero_id": None,
+                    "cajero_nombre": None,
                 }
                 st.rerun()
+            else:
+                with engine_verify.connect() as conn2:
+                    cajero_token = conn2.execute(
+                        text("""
+                            SELECT c.id, c.nombre, c.usuario_id, u.nombre_negocio
+                            FROM Cajeros c
+                            JOIN Usuarios u ON c.usuario_id = u.id
+                            WHERE c.token_sesion = :token AND c.activo = 1
+                        """),
+                        {"token": token_en_url}
+                    ).fetchone()
+                if cajero_token:
+                    st.session_state.auth = {
+                        "logged": True,
+                        "user_id": cajero_token[2],
+                        "nombre_negocio": cajero_token[3],
+                        "email": None,
+                        "token": token_en_url,
+                        "rol": "cajero",
+                        "cajero_id": cajero_token[0],
+                        "cajero_nombre": cajero_token[1],
+                    }
+                    st.rerun()
         except Exception:
             pass
 
@@ -174,6 +206,9 @@ if not is_logged:
                                     "nombre_negocio": user[1],
                                     "email": email_login,
                                     "token": token_nuevo,
+                                    "rol": "admin",
+                                    "cajero_id": None,
+                                    "cajero_nombre": None,
                                 }
                                 st.query_params["token"] = token_nuevo
                                 st.rerun()
@@ -183,6 +218,79 @@ if not is_logged:
                         st.error(f"Error de conexión: {e}")
                 else:
                     st.warning("Completa todos los campos.")
+
+        st.markdown("")
+
+        # ---------------- Acceso de Cajero ----------------
+        with st.expander("🔒 Acceso de Cajero"):
+            st.caption("Acceso exclusivo para cajeros. Solo permite operar el Punto de Venta.")
+
+            if "cajero_pin_intentos" not in st.session_state:
+                st.session_state.cajero_pin_intentos = 0
+            if "cajero_pin_bloqueado_hasta" not in st.session_state:
+                st.session_state.cajero_pin_bloqueado_hasta = 0
+
+            bloqueado_cajero = time.time() < st.session_state.cajero_pin_bloqueado_hasta
+            if bloqueado_cajero:
+                segundos_rest = int(st.session_state.cajero_pin_bloqueado_hasta - time.time())
+                st.error(f"Demasiados intentos fallidos. Intenta de nuevo en {segundos_rest} segundos.")
+            else:
+                login_cajero = st.text_input("Usuario", key="login_cajero_user")
+                pin_cajero = st.text_input("PIN", type="password", max_chars=4, key="login_cajero_pin")
+
+                if st.button("Ingresar como Cajero", use_container_width=True, key="btn_login_cajero"):
+                    if login_cajero and pin_cajero:
+                        try:
+                            with engine.connect() as conn_c:
+                                cajero = conn_c.execute(
+                                    text("""
+                                        SELECT c.id, c.nombre, c.pin, c.usuario_id, u.nombre_negocio, c.activo
+                                        FROM Cajeros c
+                                        JOIN Usuarios u ON c.usuario_id = u.id
+                                        WHERE c.usuario_login = :login
+                                    """),
+                                    {"login": login_cajero.strip()}
+                                ).fetchone()
+
+                            cred_cajero_ok = False
+                            if cajero and cajero[5]:
+                                if hashlib.sha256(pin_cajero.encode()).hexdigest() == cajero[2]:
+                                    cred_cajero_ok = True
+
+                            if cred_cajero_ok:
+                                token_cajero = str(uuid.uuid4())
+                                with engine.begin() as conn_tc:
+                                    conn_tc.execute(
+                                        text("UPDATE Cajeros SET token_sesion = :token WHERE id = :cid"),
+                                        {"token": token_cajero, "cid": cajero[0]}
+                                    )
+                                st.session_state.auth = {
+                                    "logged": True,
+                                    "user_id": cajero[3],
+                                    "nombre_negocio": cajero[4],
+                                    "email": None,
+                                    "token": token_cajero,
+                                    "rol": "cajero",
+                                    "cajero_id": cajero[0],
+                                    "cajero_nombre": cajero[1],
+                                }
+                                st.session_state.cajero_pin_intentos = 0
+                                st.query_params["token"] = token_cajero
+                                st.rerun()
+                            elif cajero and not cajero[5]:
+                                st.error("Este usuario de cajero está desactivado. Contacta al dueño del negocio.")
+                            else:
+                                st.session_state.cajero_pin_intentos += 1
+                                if st.session_state.cajero_pin_intentos >= 5:
+                                    st.session_state.cajero_pin_bloqueado_hasta = time.time() + 60
+                                    st.session_state.cajero_pin_intentos = 0
+                                    st.rerun()
+                                else:
+                                    st.error("Usuario o PIN incorrectos.")
+                        except Exception as e:
+                            st.error(f"Error de conexión: {e}")
+                    else:
+                        st.warning("Completa usuario y PIN.")
 
         st.markdown("")
         with st.expander("Registrar Nuevo Almacén"):
@@ -210,9 +318,52 @@ if not is_logged:
                     else:
                         st.warning("Completa todos los campos.")
 
+elif st.session_state.auth.get("rol") == "cajero":
+    # ----------------
+    # PANEL SIMPLIFICADO PARA CAJERO
+    # ----------------
+    st.markdown(f"""
+        <div style='text-align: center; margin-top: 40px; margin-bottom: 10px;'>
+            <h1 style='font-weight: 800; font-size: 2rem; letter-spacing: -1px;'>
+                My<span style='color: #FF4B4B;'>Almacén</span> — Caja
+            </h1>
+        </div>
+    """, unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        with st.container(border=True):
+            st.subheader(f"👋 Hola, {st.session_state.auth['cajero_nombre']}")
+            st.write(f"**Negocio:** {st.session_state.auth['nombre_negocio']}")
+            st.write("Tu usuario solo tiene acceso al **Punto de Venta**.")
+            st.markdown("")
+            if st.button("➡️ Ir a Punto de Venta", type="primary", use_container_width=True):
+                try:
+                    st.switch_page("pages/1_Venta.py")
+                except Exception:
+                    st.info("Abre el módulo **'Venta'** desde el menú lateral.")
+
+        st.markdown("")
+        if st.button("Cerrar Sesión"):
+            try:
+                with engine.begin() as conn_out:
+                    conn_out.execute(
+                        text("UPDATE Cajeros SET token_sesion = NULL WHERE id = :cid"),
+                        {"cid": st.session_state.auth["cajero_id"]}
+                    )
+            except Exception:
+                pass
+            st.session_state.auth = {
+                "logged": False, "user_id": None, "nombre_negocio": None, "email": None,
+                "token": None, "rol": None, "cajero_id": None, "cajero_nombre": None,
+            }
+            if "token" in st.query_params:
+                del st.query_params["token"]
+            st.rerun()
+
 else:
     # ----------------
-    # DASHBOARD PRINCIPAL
+    # DASHBOARD PRINCIPAL (DUEÑO)
     # ----------------
     user_id       = st.session_state.auth["user_id"]
     nombre_negocio = st.session_state.auth["nombre_negocio"]
@@ -312,7 +463,8 @@ else:
             pass
         st.session_state.auth = {
             "logged": False, "user_id": None,
-            "nombre_negocio": None, "email": None, "token": None
+            "nombre_negocio": None, "email": None, "token": None,
+            "rol": None, "cajero_id": None, "cajero_nombre": None,
         }
         if "token" in st.query_params:
             del st.query_params["token"]
