@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from sqlalchemy import text
 from db import obtener_conexion
 from utils import aplicar_estilos
+from queries import establecer_fe_habilitada
 from tz_utils import hoy_bogota
 
 st.set_page_config(page_title="Administración - MyAlmacén", layout="wide")
@@ -37,7 +38,11 @@ def obtener_almacenes():
     engine = obtener_conexion()
     with engine.connect() as conn:
         return pd.read_sql_query(
-            text("SELECT id, nombre_negocio, nombre_dueno, email, activo, fecha_pago_limite FROM Usuarios ORDER BY id DESC"),
+            text("""
+                SELECT id, nombre_negocio, nombre_dueno, email, activo, fecha_pago_limite,
+                       COALESCE(fe_habilitada, FALSE) as fe_habilitada
+                FROM Usuarios ORDER BY id DESC
+            """),
             con=conn
         )
 
@@ -171,5 +176,28 @@ if not df_almacenes.empty:
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error: {e}")
+
+        st.markdown("---")
+        st.markdown("### Facturación Electrónica")
+        st.caption(
+            "Controla qué negocios pueden ver y usar la integración con Alegra "
+            "(configurar credenciales, emitir facturas/notas crédito ante la DIAN). "
+            "Nuevos almacenes empiezan sin acceso."
+        )
+        fe_activa = bool(row['fe_habilitada'])
+        st.write(f"Estado actual: {'✅ Habilitada' if fe_activa else '🔒 Deshabilitada'}")
+        col_fe1, col_fe2 = st.columns(2)
+        with col_fe1:
+            if st.button("Habilitar FE", type="primary", use_container_width=True, disabled=fe_activa):
+                establecer_fe_habilitada(almacen_id, True)
+                obtener_almacenes.clear()
+                st.success(f"Facturación Electrónica habilitada para '{row['nombre_negocio']}'.")
+                st.rerun()
+        with col_fe2:
+            if st.button("Deshabilitar FE", use_container_width=True, disabled=not fe_activa):
+                establecer_fe_habilitada(almacen_id, False)
+                obtener_almacenes.clear()
+                st.warning(f"Facturación Electrónica deshabilitada para '{row['nombre_negocio']}'.")
+                st.rerun()
 else:
     st.info("No hay almacenes registrados todavía.")

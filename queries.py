@@ -478,6 +478,29 @@ def eliminar_credenciales_alegra(uid):
         """), {"uid": uid})
 
 
+@st.cache_data(ttl=60)
+def tiene_fe_habilitada(uid):
+    """Indica si el administrador habilitó la Facturación Electrónica para este
+    negocio. Controla el acceso a toda la funcionalidad de Alegra/DIAN."""
+    engine = obtener_conexion()
+    with engine.connect() as conn:
+        valor = conn.execute(
+            text("SELECT fe_habilitada FROM Usuarios WHERE id = :uid"), {"uid": uid}
+        ).scalar()
+    return bool(valor)
+
+
+def establecer_fe_habilitada(uid, habilitada):
+    """Habilita o deshabilita la Facturación Electrónica para un negocio (solo admin)."""
+    engine = obtener_conexion()
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE Usuarios SET fe_habilitada = :val WHERE id = :uid"),
+            {"val": bool(habilitada), "uid": uid}
+        )
+    tiene_fe_habilitada.clear()
+
+
 def obtener_venta_id_de_credito(credito_id):
     """Devuelve el venta_id ligado a un crédito, para poder sincronizar abonos con Alegra."""
     engine = obtener_conexion()

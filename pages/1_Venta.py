@@ -12,6 +12,7 @@ from queries import (
     invalidar_cache_productos,
     obtener_facturas_periodo,
     obtener_historial_devoluciones,
+    tiene_fe_habilitada,
 )
 from utils import aplicar_estilos, verificar_auth
 from tz_utils import hoy_bogota, ahora_bogota_naive
@@ -22,6 +23,7 @@ aplicar_estilos()
 user_id, nombre_negocio = verificar_auth()
 
 engine = obtener_conexion()
+fe_activa = tiene_fe_habilitada(user_id)
 
 def formato_cop(numero):
     return f"${float(numero):,.0f}".replace(",", ".")
@@ -495,13 +497,19 @@ with tab_pos:
 
             st.markdown("---")
 
-            col_venta1, col_venta2 = st.columns(2)
-            confirmar_venta = tipo_pago and col_venta1.button(
-                "Registrar Venta", type="primary", use_container_width=True
-            )
-            confirmar_venta_factura = tipo_pago and col_venta2.button(
-                "Registrar Venta con Factura Electrónica", use_container_width=True
-            )
+            if fe_activa:
+                col_venta1, col_venta2 = st.columns(2)
+                confirmar_venta = tipo_pago and col_venta1.button(
+                    "Registrar Venta", type="primary", use_container_width=True
+                )
+                confirmar_venta_factura = tipo_pago and col_venta2.button(
+                    "Registrar Venta con Factura Electrónica", use_container_width=True
+                )
+            else:
+                confirmar_venta = tipo_pago and st.button(
+                    "Registrar Venta", type="primary", use_container_width=True
+                )
+                confirmar_venta_factura = False
 
             if confirmar_venta_factura and not cliente_id:
                 st.warning(
@@ -711,44 +719,45 @@ with tab_pos:
                 except Exception as e:
                     st.caption(f"PDF no disponible: {e}")
 
-                st.markdown("---")
-                venta_factura = conn_factura = None
-                with engine.connect() as conn_factura:
-                    venta_factura = conn_factura.execute(text("""
-                        SELECT cliente_id, factura_estado, factura_alegra_id, factura_pdf_url, factura_xml_url
-                        FROM Ventas WHERE id = :vid
-                    """), {"vid": vid}).fetchone()
+                if fe_activa:
+                    st.markdown("---")
+                    venta_factura = conn_factura = None
+                    with engine.connect() as conn_factura:
+                        venta_factura = conn_factura.execute(text("""
+                            SELECT cliente_id, factura_estado, factura_alegra_id, factura_pdf_url, factura_xml_url
+                            FROM Ventas WHERE id = :vid
+                        """), {"vid": vid}).fetchone()
 
-                if venta_factura and venta_factura[1] == "emitida":
-                    st.success(f"Factura electrónica emitida ante la DIAN (Alegra #{venta_factura[2]}).")
-                    col_fpdf, col_fxml = st.columns(2)
-                    if venta_factura[3]:
-                        col_fpdf.link_button("Ver PDF de la factura", venta_factura[3], use_container_width=True)
-                    if venta_factura[4]:
-                        col_fxml.link_button("Descargar XML (DIAN)", venta_factura[4], use_container_width=True)
-                elif venta_factura and venta_factura[1] == "abierta":
-                    st.info(f"Factura creada en Alegra (#{venta_factura[2]}) — todavía no se ha emitido ante la DIAN.")
-                    if venta_factura[3]:
-                        st.link_button("Ver PDF (borrador)", venta_factura[3], use_container_width=True)
-                    if st.button("Emitir a la DIAN", use_container_width=True, type="primary"):
-                        with st.spinner("Emitiendo ante la DIAN..."):
-                            ok_dian, msg_dian = emitir_factura_dian_venta(user_id, vid)
-                        if ok_dian:
-                            st.success(msg_dian)
-                        else:
-                            st.warning(msg_dian)
-                        st.rerun()
-                elif not venta_factura or not venta_factura[0]:
-                    st.caption("Esta venta no tiene cliente asociado — no se puede facturar electrónicamente.")
-                else:
-                    if st.button("Emitir factura electrónica", use_container_width=True):
-                        with st.spinner("Creando factura en Alegra..."):
-                            ok, msg = facturar_venta(user_id, vid)
-                        if ok:
-                            st.success(msg)
-                        else:
-                            st.warning(msg)
-                        st.rerun()
+                    if venta_factura and venta_factura[1] == "emitida":
+                        st.success(f"Factura electrónica emitida ante la DIAN (Alegra #{venta_factura[2]}).")
+                        col_fpdf, col_fxml = st.columns(2)
+                        if venta_factura[3]:
+                            col_fpdf.link_button("Ver PDF de la factura", venta_factura[3], use_container_width=True)
+                        if venta_factura[4]:
+                            col_fxml.link_button("Descargar XML (DIAN)", venta_factura[4], use_container_width=True)
+                    elif venta_factura and venta_factura[1] == "abierta":
+                        st.info(f"Factura creada en Alegra (#{venta_factura[2]}) — todavía no se ha emitido ante la DIAN.")
+                        if venta_factura[3]:
+                            st.link_button("Ver PDF (borrador)", venta_factura[3], use_container_width=True)
+                        if st.button("Emitir a la DIAN", use_container_width=True, type="primary"):
+                            with st.spinner("Emitiendo ante la DIAN..."):
+                                ok_dian, msg_dian = emitir_factura_dian_venta(user_id, vid)
+                            if ok_dian:
+                                st.success(msg_dian)
+                            else:
+                                st.warning(msg_dian)
+                            st.rerun()
+                    elif not venta_factura or not venta_factura[0]:
+                        st.caption("Esta venta no tiene cliente asociado — no se puede facturar electrónicamente.")
+                    else:
+                        if st.button("Emitir factura electrónica", use_container_width=True):
+                            with st.spinner("Creando factura en Alegra..."):
+                                ok, msg = facturar_venta(user_id, vid)
+                            if ok:
+                                st.success(msg)
+                            else:
+                                st.warning(msg)
+                            st.rerun()
 
                 if st.button("Nueva Venta", use_container_width=True, type="primary"):
                     st.session_state.ultima_venta_id = None

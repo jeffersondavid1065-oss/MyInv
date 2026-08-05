@@ -3,7 +3,7 @@ import os
 from sqlalchemy import text
 from db import obtener_conexion
 from utils import aplicar_estilos, verificar_auth
-from queries import obtener_credenciales_alegra, guardar_credenciales_alegra, eliminar_credenciales_alegra
+from queries import obtener_credenciales_alegra, guardar_credenciales_alegra, eliminar_credenciales_alegra, tiene_fe_habilitada
 import alegra_utils
 
 st.set_page_config(page_title="Configuración", layout="wide")
@@ -170,6 +170,14 @@ with tab_logo:
 # ==========================================
 with tab_alegra:
     st.subheader("Facturación Electrónica (Alegra)")
+
+    if not tiene_fe_habilitada(user_id):
+        st.info(
+            "Esta función todavía no está habilitada para tu negocio. "
+            "Contacta al administrador para activarla."
+        )
+        st.stop()
+
     st.caption(
         "Conecta tu propia cuenta de Alegra para poder emitir facturas electrónicas "
         "desde tus ventas. Cada negocio usa su propia cuenta — la factura sale a "
