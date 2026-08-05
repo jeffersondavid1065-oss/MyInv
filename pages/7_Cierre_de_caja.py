@@ -88,15 +88,17 @@ with tab_cierre:
         if ventas_anuladas > 0:
             st.warning(f"{ventas_anuladas} venta(s) anulada(s) hoy.")
 
-        ingresos_dia, costos_dia, ganancia_dia = obtener_ganancia_dia(user_id, fecha_cierre.strftime('%Y-%m-%d'))
+        ingresos_dia, costos_dia, ganancia_dia, iva_dia = obtener_ganancia_dia(user_id, fecha_cierre.strftime('%Y-%m-%d'))
         ganancia_acumulada = obtener_ganancia_acumulada(user_id)
 
-        col_g1, col_g2 = st.columns(2)
-        col_g1.metric("Ganancia del Día", formato_cop(ganancia_dia),
-                      delta_color="inverse" if ganancia_dia < 0 else "normal")
-        col_g2.metric("Ganancia Acumulada", formato_cop(ganancia_acumulada),
+        col_g1, col_g2, col_g3 = st.columns(3)
+        col_g1.metric("IVA Recaudado Hoy", formato_cop(iva_dia))
+        col_g2.metric("Ganancia del Día", formato_cop(ganancia_dia),
+                      delta_color="inverse" if ganancia_dia < 0 else "normal",
+                      help="Ingresos netos de IVA menos costo de mercancía vendida.")
+        col_g3.metric("Ganancia Acumulada", formato_cop(ganancia_acumulada),
                       delta_color="inverse" if ganancia_acumulada < 0 else "normal")
-        st.caption(f"Ingresos del día: {formato_cop(ingresos_dia)} — Costo de mercancía vendida: {formato_cop(costos_dia)}")
+        st.caption(f"Ingresos del día (con IVA): {formato_cop(ingresos_dia)} — Costo de mercancía vendida: {formato_cop(costos_dia)}")
 
         # Ganancia por producto vendido en el día
         with st.expander("Ver ganancia por producto vendido hoy", expanded=(ganancia_dia != 0)):
@@ -107,7 +109,7 @@ with tab_cierre:
                         'producto': 'Producto', 'cantidad': 'Cant.',
                         'costo_unitario': 'Costo Unitario', 'precio_unitario': 'Precio Venta Unitario',
                         'costo_total': 'Costo Total', 'venta_total': 'Venta Total',
-                        'ganancia': 'Ganancia',
+                        'iva_total': 'IVA', 'ganancia': 'Ganancia',
                     }),
                     use_container_width=True, hide_index=True,
                     column_config={
@@ -115,6 +117,7 @@ with tab_cierre:
                         "Precio Venta Unitario": st.column_config.NumberColumn("Precio Venta Unitario", format="$%,d"),
                         "Costo Total": st.column_config.NumberColumn("Costo Total", format="$%,d"),
                         "Venta Total": st.column_config.NumberColumn("Venta Total", format="$%,d"),
+                        "IVA": st.column_config.NumberColumn("IVA", format="$%,d"),
                         "Ganancia": st.column_config.NumberColumn("Ganancia", format="$%,d"),
                     }
                 )

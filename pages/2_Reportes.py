@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import calendar
 from datetime import date, timedelta, datetime
 from sqlalchemy import text
 from io import BytesIO
@@ -11,6 +12,8 @@ from queries import (
     obtener_top_productos,
     obtener_metricas_mes,
     obtener_facturas_periodo,
+    obtener_iva_periodo,
+    obtener_iva_por_tasa_periodo,
 )
 from utils import aplicar_estilos, verificar_auth, bloquear_si_cajero
 from tz_utils import hoy_bogota, ahora_bogota
@@ -30,7 +33,7 @@ def formato_cop(numero):
     return f"${float(numero):,.0f}".replace(",", ".")
 
 
-def generar_excel_ventas(df_ventas, fecha_ini, fecha_fin, ingresos, costos, margen, nombre_negocio):
+def generar_excel_ventas(df_ventas, fecha_ini, fecha_fin, ingresos, costos, margen, nombre_negocio, iva=0):
     """Genera reporte Excel de ventas del período."""
     wb = Workbook()
     ws = wb.active
@@ -45,6 +48,7 @@ def generar_excel_ventas(df_ventas, fecha_ini, fecha_fin, ingresos, costos, marg
     )
 
     descuentos = float(df_ventas['descuento'].sum()) if not df_ventas.empty else 0
+    ingresos_netos = ingresos - iva
 
     # Título
     ws.merge_cells("A1:H1")
@@ -63,10 +67,15 @@ def generar_excel_ventas(df_ventas, fecha_ini, fecha_fin, ingresos, costos, marg
     ws.append(["RESUMEN FINANCIERO", "", "", "", "", "", "", ""])
     ws["A4"].font = Font(bold=True, size=11, color="1F4E78")
 
-    ws.append(["Ingresos Totales", f"${ingresos:,.0f}".replace(",", ".")])
+    ws.append(["Ingresos Totales (con IVA)", f"${ingresos:,.0f}".replace(",", ".")])
+    ws.append(["IVA Recaudado", f"${iva:,.0f}".replace(",", ".")])
+    ws.append(["Ingresos Netos (sin IVA)", f"${ingresos_netos:,.0f}".replace(",", ".")])
     ws.append(["Costo de Ventas", f"${costos:,.0f}".replace(",", ".")])
     ws.append(["Descuentos Totales", f"${descuentos:,.0f}".replace(",", ".")])
-    ws.append(["Margen Bruto", f"${margen:,.0f}".replace(",", ".")])
+    ws.append(["Margen Bruto (Ingresos Netos - Costos)", f"${margen:,.0f}".replace(",", ".")])
+    ws.append([])
+    ws.append(["Nota: el IVA recaudado no es utilidad del negocio — es dinero cobrado a nombre de la DIAN que se debe declarar y remitir."])
+    ws.cell(row=ws.max_row, column=1).font = Font(italic=True, size=9, color="888888")
     ws.append([])
 
     # Headers de tabla
@@ -133,12 +142,13 @@ st.title("Reportes")
 st.markdown(f"Análisis de ventas para: **{nombre_negocio}**")
 st.markdown("---")
 
-tab_dia, tab_periodo, tab_productos, tab_cartera, tab_facturas = st.tabs([
+tab_dia, tab_periodo, tab_productos, tab_cartera, tab_facturas, tab_iva = st.tabs([
     "Ventas del Día",
     "Reporte por Período",
     "Productos Más Vendidos",
     "Cartera y Créditos",
-    "Facturación Electrónica"
+    "Facturación Electrónica",
+    "IVA"
 ])
 
 # ==========================================
@@ -276,15 +286,19 @@ with tab_periodo:
         }).scalar()
         costos_rep = float(costos_rep) if costos_rep else 0
 
-    margen_rep = ingresos_rep - costos_rep
+    iva_rep = obtener_iva_periodo(user_id, fecha_ini_rep, fecha_fin_rep)
+    ingresos_netos_rep = ingresos_rep - iva_rep
+    margen_rep = ingresos_netos_rep - costos_rep
 
-    col_r1, col_r2, col_r3, col_r4, col_r5 = st.columns(5)
-    col_r1.metric("Ingresos", formato_cop(ingresos_rep))
-    col_r2.metric("Efectivo", formato_cop(efectivo_rep))
-    col_r3.metric("Transferencias", formato_cop(transfer_rep))
-    col_r4.metric("Descuentos", formato_cop(descuentos_rep))
-    col_r5.metric("Margen Bruto", formato_cop(margen_rep),
+    col_r1, col_r2, col_r3, col_r4, col_r5, col_r6 = st.columns(6)
+    col_r1.metric("Ingresos (con IVA)", formato_cop(ingresos_rep))
+    col_r2.metric("IVA Recaudado", formato_cop(iva_rep))
+    col_r3.metric("Efectivo", formato_cop(efectivo_rep))
+    col_r4.metric("Transferencias", formato_cop(transfer_rep))
+    col_r5.metric("Descuentos", formato_cop(descuentos_rep))
+    col_r6.metric("Margen Bruto (sin IVA)", formato_cop(margen_rep),
                   delta_color="inverse" if margen_rep < 0 else "normal")
+    st.caption(f"Ingresos netos (sin IVA): {formato_cop(ingresos_netos_rep)} — el IVA recaudado no es utilidad, es dinero que se le debe a la DIAN.")
 
     st.markdown("---")
 
@@ -307,7 +321,7 @@ with tab_periodo:
         st.markdown("---")
         excel_buf = generar_excel_ventas(
             df_periodo, fecha_ini_rep, fecha_fin_rep,
-            ingresos_rep, costos_rep, margen_rep, nombre_negocio
+            ingresos_rep, costos_rep, margen_rep, nombre_negocio, iva_rep
         )
         st.download_button(
             label="Descargar Reporte en Excel (para DIAN)",
@@ -649,3 +663,101 @@ with tab_facturas:
                         st.error(msg_r)
         else:
             st.info("No hay ventas en este período.")
+
+# ==========================================
+# TAB 6: DECLARACIÓN DE IVA
+# ==========================================
+with tab_iva:
+    st.subheader("Ayuda para tu Declaración de IVA")
+    st.caption(
+        "Calcula el IVA Generado en tus ventas (el que le cobraste a tus clientes) para el período que "
+        "elijas — el dato que va en la casilla de IVA Generado del Formulario 300 de la DIAN."
+    )
+
+    PERIODICIDADES_IVA = {
+        "Bimestral": {
+            "Bimestre 1 (Ene-Feb)": (1, 2), "Bimestre 2 (Mar-Abr)": (3, 4),
+            "Bimestre 3 (May-Jun)": (5, 6), "Bimestre 4 (Jul-Ago)": (7, 8),
+            "Bimestre 5 (Sep-Oct)": (9, 10), "Bimestre 6 (Nov-Dic)": (11, 12),
+        },
+        "Cuatrimestral": {
+            "Cuatrimestre 1 (Ene-Abr)": (1, 4),
+            "Cuatrimestre 2 (May-Ago)": (5, 8),
+            "Cuatrimestre 3 (Sep-Dic)": (9, 12),
+        },
+    }
+
+    modo_periodo_iva = st.radio(
+        "¿Cómo declaras el IVA?",
+        ["Bimestral", "Cuatrimestral", "Rango personalizado"],
+        horizontal=True, key="modo_periodo_iva"
+    )
+    st.caption(
+        "La DIAN asigna la periodicidad según tus ingresos brutos del año anterior (Art. 600 E.T.): "
+        "la mayoría de responsables declaran bimestral; los negocios más pequeños, cuatrimestral. "
+        "Si no sabes cuál te aplica, revisa tu RUT o pregúntale a tu contador."
+    )
+
+    if modo_periodo_iva in PERIODICIDADES_IVA:
+        ETIQUETA_PERIODO = {"Bimestral": "Bimestre", "Cuatrimestral": "Cuatrimestre"}
+        col_iva_periodo, col_iva_anio = st.columns(2)
+        opciones_periodo_iva = PERIODICIDADES_IVA[modo_periodo_iva]
+        with col_iva_periodo:
+            periodo_sel_iva = st.selectbox(
+                ETIQUETA_PERIODO[modo_periodo_iva], options=list(opciones_periodo_iva.keys()),
+                key=f"periodo_iva_sel_{modo_periodo_iva}"
+            )
+        with col_iva_anio:
+            año_iva_sel = st.number_input(
+                "Año", min_value=2020, max_value=2100, value=hoy_bogota().year, step=1, key="anio_iva_sel"
+            )
+        mes_ini_iva, mes_fin_iva = opciones_periodo_iva[periodo_sel_iva]
+        f_ini_iva = date(int(año_iva_sel), mes_ini_iva, 1)
+        f_fin_iva = date(int(año_iva_sel), mes_fin_iva, calendar.monthrange(int(año_iva_sel), mes_fin_iva)[1])
+    else:
+        fechas_iva_rango = st.date_input(
+            "Rango de fechas", [hoy_bogota().replace(day=1), hoy_bogota()], key="fechas_iva_rango"
+        )
+        if len(fechas_iva_rango) == 2:
+            f_ini_iva, f_fin_iva = fechas_iva_rango
+        else:
+            f_ini_iva = f_fin_iva = hoy_bogota()
+
+    st.markdown(f"**Período:** {f_ini_iva.strftime('%d/%m/%Y')} — {f_fin_iva.strftime('%d/%m/%Y')}")
+    st.markdown("---")
+
+    df_iva_tasa = obtener_iva_por_tasa_periodo(user_id, f_ini_iva, f_fin_iva)
+
+    if df_iva_tasa.empty or float(df_iva_tasa['iva'].sum()) < 1:
+        st.info(
+            "No hay IVA generado en este período. Si esperabas ver un valor, revisa que tus productos "
+            "en Inventario tengan el % de IVA correctamente configurado."
+        )
+    else:
+        base_total_periodo = float(df_iva_tasa['base_gravable'].sum())
+        iva_total_periodo = float(df_iva_tasa['iva'].sum())
+
+        col_ivat1, col_ivat2 = st.columns(2)
+        col_ivat1.metric("Base Gravable Total", formato_cop(base_total_periodo))
+        col_ivat2.metric("IVA Generado Total", formato_cop(iva_total_periodo))
+
+        st.markdown("**Desglose por tasa:**")
+        st.dataframe(
+            df_iva_tasa.rename(columns={
+                'tasa': 'Tasa IVA', 'base_gravable': 'Base Gravable', 'iva': 'IVA Generado'
+            }),
+            hide_index=True, use_container_width=True,
+            column_config={
+                "Tasa IVA": st.column_config.NumberColumn("Tasa IVA", format="%.0f%%"),
+                "Base Gravable": st.column_config.NumberColumn("Base Gravable", format="$%,d"),
+                "IVA Generado": st.column_config.NumberColumn("IVA Generado", format="$%,d"),
+            }
+        )
+
+    st.markdown("---")
+    st.warning(
+        "⚠️ Esto es solo el **IVA Generado** (el que cobraste en tus ventas). Para la declaración completa "
+        "también necesitas el **IVA Descontable** de tus compras a proveedores — MyInv todavía no registra "
+        "el IVA pagado en tus entradas de inventario, así que debes sumarlo aparte de tus facturas de compra. "
+        "El valor a pagar (o el saldo a favor) es IVA Generado menos IVA Descontable."
+    )

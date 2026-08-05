@@ -17,6 +17,7 @@ from queries import (
 from utils import aplicar_estilos, verificar_auth
 from tz_utils import hoy_bogota, ahora_bogota_naive
 from alegra_utils import facturar_venta, anular_factura_venta, emitir_factura_dian_venta
+from iva_utils import calcular_desglose_iva, calcular_iva_desde_detalles, texto_tasa_iva
 
 st.set_page_config(page_title="Punto de Venta", layout="wide")
 aplicar_estilos()
@@ -90,43 +91,6 @@ def agregar_al_carrito(producto_id, nombre, codigo_barras, precio, stock_actual,
 
 def limpiar_carrito():
     st.session_state.carrito = []
-
-def calcular_desglose_iva(carrito, total_final, total_bruto):
-    """
-    A partir del carrito (precios ya con IVA incluido), calcula el subtotal
-    sin IVA y el IVA total, prorrateando el descuento global proporcionalmente.
-    """
-    subtotal_sin_iva = 0.0
-    iva_total = 0.0
-    for item in carrito:
-        cant = item["cantidad"]
-        if cant <= 0:
-            continue
-        iva_pct = item.get("iva_porcentaje", 0) or 0
-        precio_neto_unit = item["subtotal"] / cant
-        base_unit = precio_neto_unit / (1 + iva_pct / 100)
-        subtotal_sin_iva += base_unit * cant
-        iva_total += (precio_neto_unit - base_unit) * cant
-
-    factor = (total_final / total_bruto) if total_bruto else 1.0
-    return subtotal_sin_iva * factor, iva_total * factor
-
-def calcular_iva_desde_detalles(df_detalles, total_venta):
-    """Misma idea que calcular_desglose_iva, pero a partir del DataFrame de Detalles_Venta ya guardado."""
-    if df_detalles is None or df_detalles.empty or 'iva_porcentaje' not in df_detalles.columns:
-        return 0.0, 0.0
-    subtotal_sin_iva = 0.0
-    iva_total = 0.0
-    suma_lineas = 0.0
-    for _, row in df_detalles.iterrows():
-        linea = float(row.get('subtotal', 0) or 0)
-        iva_pct = float(row.get('iva_porcentaje', 0) or 0)
-        base = linea / (1 + iva_pct / 100)
-        subtotal_sin_iva += base
-        iva_total += (linea - base)
-        suma_lineas += linea
-    factor = (float(total_venta) / suma_lineas) if suma_lineas else 1.0
-    return subtotal_sin_iva * factor, iva_total * factor
 
 # ==========================================
 # TABS
@@ -229,7 +193,7 @@ with tab_pos:
             )
 
             # Headers carrito
-            h1, h2, h3, h4, h5, h6 = st.columns([3, 1, 1, 1, 1, 1])
+            h1, h2, h3, h4, h5, h6, h7 = st.columns([3, 1, 1, 1, 0.7, 1, 0.5])
             h1.markdown("**Producto**")
             h2.markdown("**Precio**")
             h3.markdown("**Cant.**")
@@ -237,14 +201,15 @@ with tab_pos:
                 h4.markdown("**Desc.$**")
             else:
                 h4.markdown("**Desc.%**")
-            h5.markdown("**Total**")
-            h6.markdown("**❌**")
+            h5.markdown("**IVA%**")
+            h6.markdown("**Total**")
+            h7.markdown("**❌**")
 
             items_a_eliminar = []
             total_carrito = 0
 
             for i, item in enumerate(st.session_state.carrito):
-                c1, c2, c3, c4, c5, c6 = st.columns([3, 1, 1, 1, 1, 1])
+                c1, c2, c3, c4, c5, c6, c7 = st.columns([3, 1, 1, 1, 0.7, 1, 0.5])
                 with c1:
                     st.write(item["nombre"])
                 with c2:
@@ -289,8 +254,11 @@ with tab_pos:
                             st.session_state.carrito[i]["subtotal"] = item["cantidad"] * max(0, precio_neto)
                             st.rerun()
                 with c5:
-                    st.write(formato_cop(item["subtotal"]))
+                    iva_pct_item = item.get("iva_porcentaje", 0) or 0
+                    st.write(f"{iva_pct_item:.0f}%" if iva_pct_item == int(iva_pct_item) else f"{iva_pct_item}%")
                 with c6:
+                    st.write(formato_cop(item["subtotal"]))
+                with c7:
                     if st.button("❌", key=f"del_{i}"):
                         items_a_eliminar.append(i)
 
@@ -665,20 +633,22 @@ with tab_pos:
 
                 st.write(f"**Venta #{vid}** — {st.session_state.ultima_venta_tipo}")
                 if not detalles.empty:
-                    st.dataframe(detalles.drop(columns=["iva_porcentaje"]).rename(columns={
+                    st.dataframe(detalles.rename(columns={
                         "nombre_producto": "Producto", "cantidad": "Cant.",
-                        "precio_unitario": "Precio", "descuento": "Descuento", "subtotal": "Subtotal"
+                        "precio_unitario": "Precio", "descuento": "Descuento", "subtotal": "Subtotal",
+                        "iva_porcentaje": "IVA%",
                     }), hide_index=True, use_container_width=True,
                     column_config={
                         "Precio": st.column_config.NumberColumn("Precio", format="$%,d"),
                         "Descuento": st.column_config.NumberColumn("Descuento", format="$%,d"),
                         "Subtotal": st.column_config.NumberColumn("Subtotal", format="$%,d"),
+                        "IVA%": st.column_config.NumberColumn("IVA%", format="%.0f%%"),
                     })
                 if venta_info and float(venta_info[1] or 0) > 0:
                     st.caption(f"Descuento total aplicado: {formato_cop(venta_info[1])}")
                 _, iva_ultima_venta = calcular_iva_desde_detalles(detalles, st.session_state.ultima_venta_total)
                 if iva_ultima_venta > 1:
-                    st.caption(f"IVA incluido: {formato_cop(iva_ultima_venta)}")
+                    st.caption(f"IVA incluido ({texto_tasa_iva(detalles)}): {formato_cop(iva_ultima_venta)}")
                 st.success(f"**Total: {formato_cop(st.session_state.ultima_venta_total)}**")
                 if st.session_state.ultima_venta_cambio > 0:
                     st.info(f"Cambio: {formato_cop(st.session_state.ultima_venta_cambio)}")
@@ -796,16 +766,18 @@ with tab_historial:
             'emitida': 'Emitida', 'abierta': 'Abierta (sin timbrar)', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
         })
         st.dataframe(
-            df_hoy[['id', 'fecha', 'cliente', 'total', 'tipo_pago', 'estado', 'fe_texto', 'numero_factura_texto',
-                    'factura_pdf_url', 'factura_xml_url']].rename(columns={
+            df_hoy[['id', 'fecha', 'cliente', 'total', 'iva_tasa_texto', 'iva_valor', 'tipo_pago', 'estado',
+                    'fe_texto', 'numero_factura_texto', 'factura_pdf_url', 'factura_xml_url']].rename(columns={
                 'id': 'N°', 'fecha': 'Hora', 'cliente': 'Cliente',
-                'total': 'Total', 'tipo_pago': 'Pago', 'estado': 'Estado',
+                'total': 'Total', 'iva_tasa_texto': 'Impuesto', 'iva_valor': 'Valor Imp',
+                'tipo_pago': 'Pago', 'estado': 'Estado',
                 'fe_texto': 'Factura Electrónica', 'numero_factura_texto': 'N° Factura',
                 'factura_pdf_url': 'Factura PDF', 'factura_xml_url': 'Factura XML',
             }),
             use_container_width=True, hide_index=True,
             column_config={
                 "Total": st.column_config.NumberColumn("Total", format="$%,d"),
+                "Valor Imp": st.column_config.NumberColumn("Valor Imp", format="$%,d"),
                 "Factura PDF": st.column_config.LinkColumn(display_text="Abrir"),
                 "Factura XML": st.column_config.LinkColumn(display_text="Abrir"),
             }
@@ -832,20 +804,22 @@ with tab_historial:
             """), {"vid": venta_id_reimp}).fetchone()
 
         if not detalles_reimp.empty:
-            st.dataframe(detalles_reimp.drop(columns=["iva_porcentaje"]).rename(columns={
+            st.dataframe(detalles_reimp.rename(columns={
                 "nombre_producto": "Producto", "cantidad": "Cant.",
-                "precio_unitario": "Precio", "descuento": "Descuento", "subtotal": "Subtotal"
+                "precio_unitario": "Precio", "descuento": "Descuento", "subtotal": "Subtotal",
+                "iva_porcentaje": "IVA%",
             }), hide_index=True, use_container_width=True,
             column_config={
                 "Precio": st.column_config.NumberColumn("Precio", format="$%,d"),
                 "Descuento": st.column_config.NumberColumn("Descuento", format="$%,d"),
                 "Subtotal": st.column_config.NumberColumn("Subtotal", format="$%,d"),
+                "IVA%": st.column_config.NumberColumn("IVA%", format="%.0f%%"),
             })
         if info_reimp and float(info_reimp[1] or 0) > 0:
             st.caption(f"Descuento total aplicado: {formato_cop(info_reimp[1])}")
         _, iva_reimp = calcular_iva_desde_detalles(detalles_reimp, float(info_reimp[2]) if info_reimp else 0)
         if iva_reimp > 1:
-            st.caption(f"IVA incluido: {formato_cop(iva_reimp)}")
+            st.caption(f"IVA incluido ({texto_tasa_iva(detalles_reimp)}): {formato_cop(iva_reimp)}")
 
         try:
             from pdf_utils import generar_ticket_venta

@@ -5,6 +5,7 @@ from sqlalchemy import text
 from db import obtener_conexion
 from datetime import datetime, date
 from tz_utils import hoy_bogota
+from iva_utils import calcular_iva_desde_detalles, texto_tasa_iva
 
 
 # ==========================================
@@ -297,6 +298,119 @@ def obtener_proveedores(uid):
 # ==========================================
 # VENTAS Y REPORTES
 # ==========================================
+def _iva_recaudado_rango(uid, f_ini=None, f_fin=None):
+    """
+    IVA recaudado (ya incluido en los precios) de las ventas no anuladas de un
+    negocio, opcionalmente acotado a un rango de fechas (f_ini/f_fin como
+    strings 'YYYY-MM-DD'; None = sin límite por ese lado). Se calcula por
+    venta (respetando el descuento global de cada una, igual que en el
+    ticket) y se suma, en vez de sacarlo directo del subtotal de los
+    renglones, para no sobrestimarlo en ventas con descuento.
+    """
+    engine = obtener_conexion()
+    filtro_fecha_v = ""
+    filtro_fecha_d = ""
+    params = {"uid": uid}
+    if f_ini:
+        filtro_fecha_v += " AND DATE(fecha) >= :f_ini"
+        filtro_fecha_d += " AND DATE(v.fecha) >= :f_ini"
+        params["f_ini"] = f_ini
+    if f_fin:
+        filtro_fecha_v += " AND DATE(fecha) <= :f_fin"
+        filtro_fecha_d += " AND DATE(v.fecha) <= :f_fin"
+        params["f_fin"] = f_fin
+
+    with engine.connect() as conn:
+        df_ventas = pd.read_sql_query(text(f"""
+            SELECT id, total FROM Ventas
+            WHERE usuario_id = :uid AND estado != 'Anulada' {filtro_fecha_v}
+        """), con=conn, params=params)
+
+        if df_ventas.empty:
+            return 0.0
+
+        df_det = pd.read_sql_query(text(f"""
+            SELECT dv.venta_id, dv.subtotal, dv.iva_porcentaje
+            FROM Detalles_Venta dv
+            JOIN Ventas v ON dv.venta_id = v.id
+            WHERE v.usuario_id = :uid AND v.estado != 'Anulada' {filtro_fecha_d}
+        """), con=conn, params=params)
+
+    if df_det.empty:
+        return 0.0
+
+    totales_por_venta = dict(zip(df_ventas['id'], df_ventas['total']))
+    iva_total = 0.0
+    for vid, grupo in df_det.groupby('venta_id'):
+        total_venta = float(totales_por_venta.get(vid, 0) or 0)
+        _, iva_valor = calcular_iva_desde_detalles(grupo, total_venta)
+        iva_total += iva_valor
+    return iva_total
+
+
+@st.cache_data(ttl=30)
+def obtener_iva_periodo(uid, fecha_inicio, fecha_fin):
+    """IVA recaudado (ya incluido en los precios) de las ventas no anuladas de un período."""
+    return _iva_recaudado_rango(uid, fecha_inicio.strftime('%Y-%m-%d'), fecha_fin.strftime('%Y-%m-%d'))
+
+
+@st.cache_data(ttl=30)
+def obtener_iva_por_tasa_periodo(uid, fecha_inicio, fecha_fin):
+    """
+    Desglose del IVA generado en ventas no anuladas de un período, agrupado
+    por tasa (base gravable + IVA de cada una). Sirve como insumo para la
+    casilla de IVA Generado de la Declaración de IVA (Formulario 300) - no
+    incluye IVA descontable de compras, que MyInv todavía no registra.
+    Prorratea el descuento global de cada venta antes de separar base/IVA,
+    igual que calcular_iva_desde_detalles.
+    """
+    engine = obtener_conexion()
+    f_ini = fecha_inicio.strftime('%Y-%m-%d')
+    f_fin = fecha_fin.strftime('%Y-%m-%d')
+    with engine.connect() as conn:
+        df_ventas = pd.read_sql_query(text("""
+            SELECT id, total FROM Ventas
+            WHERE usuario_id = :uid AND estado != 'Anulada'
+            AND DATE(fecha) >= :f_ini AND DATE(fecha) <= :f_fin
+        """), con=conn, params={"uid": uid, "f_ini": f_ini, "f_fin": f_fin})
+
+        if df_ventas.empty:
+            return pd.DataFrame(columns=['tasa', 'base_gravable', 'iva'])
+
+        df_det = pd.read_sql_query(text("""
+            SELECT dv.venta_id, dv.subtotal, dv.iva_porcentaje
+            FROM Detalles_Venta dv
+            JOIN Ventas v ON dv.venta_id = v.id
+            WHERE v.usuario_id = :uid AND v.estado != 'Anulada'
+            AND DATE(v.fecha) >= :f_ini AND DATE(v.fecha) <= :f_fin
+        """), con=conn, params={"uid": uid, "f_ini": f_ini, "f_fin": f_fin})
+
+    if df_det.empty:
+        return pd.DataFrame(columns=['tasa', 'base_gravable', 'iva'])
+
+    totales_por_venta = dict(zip(df_ventas['id'], df_ventas['total']))
+    resultado = {}
+    for vid, grupo in df_det.groupby('venta_id'):
+        total_venta = float(totales_por_venta.get(vid, 0) or 0)
+        suma_lineas = float(grupo['subtotal'].sum())
+        factor = (total_venta / suma_lineas) if suma_lineas else 1.0
+        for _, row in grupo.iterrows():
+            pct = float(row['iva_porcentaje'] or 0)
+            linea = float(row['subtotal'] or 0) * factor
+            base = linea / (1 + pct / 100) if pct else linea
+            iva_linea = linea - base
+            if pct not in resultado:
+                resultado[pct] = {'base_gravable': 0.0, 'iva': 0.0}
+            resultado[pct]['base_gravable'] += base
+            resultado[pct]['iva'] += iva_linea
+
+    filas = [
+        {'tasa': tasa, 'base_gravable': v['base_gravable'], 'iva': v['iva']}
+        for tasa, v in sorted(resultado.items())
+    ]
+    return pd.DataFrame(filas)
+
+
 @st.cache_data(ttl=30)
 def obtener_ventas_periodo(uid, fecha_inicio, fecha_fin):
     """Ventas en un rango de fechas para reportes."""
@@ -346,7 +460,8 @@ def obtener_top_productos(uid, fecha_inicio, fecha_fin, limite=10):
 
 @st.cache_data(ttl=60)
 def obtener_metricas_mes(uid, año, mes):
-    """Ingresos, costos y margen del mes."""
+    """Ingresos (con IVA), costos y margen del mes. El margen se calcula sobre
+    ingresos netos de IVA - el IVA recaudado no es utilidad del negocio."""
     engine = obtener_conexion()
     f_ini = date(año, mes, 1).strftime('%Y-%m-%d')
     f_fin = date(año, mes, calendar.monthrange(año, mes)[1]).strftime('%Y-%m-%d')
@@ -370,12 +485,15 @@ def obtener_metricas_mes(uid, año, mes):
 
     ingresos = float(ingresos) if ingresos else 0
     costos = float(costos) if costos else 0
-    return ingresos, costos, ingresos - costos
+    iva = _iva_recaudado_rango(uid, f_ini, f_fin)
+    margen = (ingresos - iva) - costos
+    return ingresos, costos, margen, iva
 
 
 @st.cache_data(ttl=60)
 def obtener_ganancia_dia(uid, fecha):
-    """Ingresos, costos y ganancia de un día específico (para Cierre de Caja)."""
+    """Ingresos (con IVA), costos y ganancia de un día específico (para Cierre
+    de Caja). La ganancia se calcula sobre ingresos netos de IVA."""
     engine = obtener_conexion()
     with engine.connect() as conn:
         ingresos = conn.execute(text("""
@@ -397,12 +515,16 @@ def obtener_ganancia_dia(uid, fecha):
 
     ingresos = float(ingresos) if ingresos else 0
     costos = float(costos) if costos else 0
-    return ingresos, costos, ingresos - costos
+    iva = _iva_recaudado_rango(uid, fecha, fecha)
+    ganancia = (ingresos - iva) - costos
+    return ingresos, costos, ganancia, iva
 
 
 @st.cache_data(ttl=60)
 def obtener_ganancia_por_producto_dia(uid, fecha):
-    """Ganancia detallada por producto vendido en una fecha (para Cierre de Caja)."""
+    """Ganancia detallada por producto vendido en una fecha (para Cierre de
+    Caja). La ganancia se calcula sobre la venta neta de IVA (el IVA de cada
+    renglón no es utilidad del negocio)."""
     engine = obtener_conexion()
     with engine.connect() as conn:
         df = pd.read_sql_query(text("""
@@ -412,7 +534,8 @@ def obtener_ganancia_por_producto_dia(uid, fecha):
                    SUM(dv.subtotal) / SUM(dv.cantidad) AS precio_unitario,
                    SUM(dv.costo_unitario * dv.cantidad) AS costo_total,
                    SUM(dv.subtotal) AS venta_total,
-                   SUM(dv.subtotal) - SUM(dv.costo_unitario * dv.cantidad) AS ganancia
+                   SUM(dv.subtotal - dv.subtotal / (1 + dv.iva_porcentaje / 100.0)) AS iva_total,
+                   SUM(dv.subtotal / (1 + dv.iva_porcentaje / 100.0)) - SUM(dv.costo_unitario * dv.cantidad) AS ganancia
             FROM Detalles_Venta dv
             JOIN Ventas v ON dv.venta_id = v.id
             WHERE v.usuario_id = :uid
@@ -426,7 +549,8 @@ def obtener_ganancia_por_producto_dia(uid, fecha):
 
 @st.cache_data(ttl=120)
 def obtener_ganancia_acumulada(uid):
-    """Ganancia bruta acumulada histórica: ingresos - costos de todas las ventas no anuladas."""
+    """Ganancia bruta acumulada histórica: ingresos netos de IVA - costos, de
+    todas las ventas no anuladas. El IVA recaudado no es utilidad del negocio."""
     engine = obtener_conexion()
     with engine.connect() as conn:
         ingresos = conn.execute(text("""
@@ -444,7 +568,8 @@ def obtener_ganancia_acumulada(uid):
 
     ingresos = float(ingresos) if ingresos else 0
     costos = float(costos) if costos else 0
-    return ingresos - costos
+    iva = _iva_recaudado_rango(uid)
+    return (ingresos - iva) - costos
 
 
 # ==========================================
@@ -542,6 +667,33 @@ def obtener_facturas_periodo(uid, fecha_inicio, fecha_fin):
     for col in ('factura_xml_url', 'nota_credito_xml_url', 'nota_credito_prefijo', 'nota_credito_numero'):
         if col not in df.columns:
             df[col] = None
+
+    # IVA por venta: se calcula desde los renglones de Detalles_Venta (misma
+    # lógica que el ticket individual) en un solo query por período, no uno
+    # por venta, para no multiplicar consultas en listados largos.
+    df['iva_valor'] = 0.0
+    df['iva_tasa_texto'] = "0%"
+    if not df.empty:
+        with engine.connect() as conn:
+            df_det = pd.read_sql_query(text("""
+                SELECT dv.venta_id, dv.subtotal, dv.iva_porcentaje
+                FROM Detalles_Venta dv
+                JOIN Ventas v ON dv.venta_id = v.id
+                WHERE v.usuario_id = :uid
+                AND DATE(v.fecha) >= :f_ini AND DATE(v.fecha) <= :f_fin
+            """), con=conn, params={
+                "uid": uid,
+                "f_ini": fecha_inicio.strftime('%Y-%m-%d'),
+                "f_fin": fecha_fin.strftime('%Y-%m-%d')
+            })
+        if not df_det.empty:
+            totales_por_venta = dict(zip(df['id'], df['total']))
+            for vid, grupo in df_det.groupby('venta_id'):
+                total_venta = float(totales_por_venta.get(vid, 0) or 0)
+                _, iva_valor = calcular_iva_desde_detalles(grupo, total_venta)
+                df.loc[df['id'] == vid, 'iva_valor'] = iva_valor
+                df.loc[df['id'] == vid, 'iva_tasa_texto'] = texto_tasa_iva(grupo)
+
     return df
 
 

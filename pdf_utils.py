@@ -7,6 +7,7 @@ from fpdf import FPDF
 import pandas as pd
 from datetime import datetime
 import os
+from iva_utils import texto_tasa_iva
 
 
 def generar_ticket_venta(
@@ -183,10 +184,11 @@ def generar_ticket_venta(
     pdf.set_xy(12, y_tabla + 2)
     pdf.set_font("Helvetica", "B", 9)
     pdf.set_text_color(*GRIS_OSCURO)
-    pdf.cell(95, 5, "ARTÍCULO")
-    pdf.cell(25, 5, "CANT.", align="C")
-    pdf.cell(33, 5, "PRECIO", align="R")
-    pdf.cell(33, 5, "SUBTOTAL", align="R")
+    pdf.cell(80, 5, "ARTÍCULO")
+    pdf.cell(20, 5, "CANT.", align="C")
+    pdf.cell(30, 5, "PRECIO", align="R")
+    pdf.cell(20, 5, "IVA%", align="R")
+    pdf.cell(36, 5, "SUBTOTAL", align="R")
 
     pdf.set_draw_color(*GRIS_CLARO)
     pdf.line(12, y_tabla + 8, 198, y_tabla + 8)
@@ -197,10 +199,11 @@ def generar_ticket_venta(
 
     if df_items is not None and not df_items.empty:
         for _, row in df_items.iterrows():
-            nombre = safe_str(row.get('nombre_producto', ''))[:68]
+            nombre = safe_str(row.get('nombre_producto', ''))[:60]
             cantidad = float(row.get('cantidad', 1))
             precio_u = float(row.get('precio_unitario', 0))
             subtotal_item = float(row.get('subtotal', 0))
+            iva_pct_item = float(row.get('iva_porcentaje', 0) or 0)
 
             # Formatear cantidad con unidad si está disponible
             unidad = safe_str(row.get('unidad_medida', 'Unidad'), 'Unidad')
@@ -214,10 +217,11 @@ def generar_ticket_venta(
                 cant_str = str(int(cantidad))
 
             pdf.set_xy(12, y_item)
-            pdf.cell(95, 5, nombre)
-            pdf.cell(25, 5, cant_str, align="C")
-            pdf.cell(33, 5, f"${precio_u:,.0f}".replace(",", "."), align="R")
-            pdf.cell(33, 5, f"${subtotal_item:,.0f}".replace(",", "."), align="R")
+            pdf.cell(80, 5, nombre)
+            pdf.cell(20, 5, cant_str, align="C")
+            pdf.cell(30, 5, f"${precio_u:,.0f}".replace(",", "."), align="R")
+            pdf.cell(20, 5, f"{iva_pct_item:.0f}%", align="R")
+            pdf.cell(36, 5, f"${subtotal_item:,.0f}".replace(",", "."), align="R")
             y_item += 5
 
             pdf.set_draw_color(230, 230, 230)
@@ -259,7 +263,7 @@ def generar_ticket_venta(
         pdf.set_xy(130, y_totales)
         pdf.set_font("Helvetica", "", 8)
         pdf.set_text_color(*GRIS_MEDIO)
-        pdf.cell(35, 5, "IVA incluido")
+        pdf.cell(35, 5, f"IVA incluido ({texto_tasa_iva(df_items)})")
         pdf.cell(33, 5, f"${total_iva:,.0f}".replace(",", "."), align="R")
         y_totales += 6
 
