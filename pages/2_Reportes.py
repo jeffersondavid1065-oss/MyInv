@@ -576,21 +576,39 @@ with tab_facturas:
             if not facturas_abiertas.empty:
                 st.markdown("---")
                 st.warning(f"{len(facturas_abiertas)} factura(s) creada(s) en Alegra pero sin emitir ante la DIAN.")
-                dict_emitir_dian = {
-                    f"Venta #{r['id']} — {r['cliente']} — {formato_cop(r['total'])}": r['id']
-                    for _, r in facturas_abiertas.iterrows()
-                }
-                emitir_dian_sel = st.selectbox(
-                    "Selecciona la factura a emitir", options=list(dict_emitir_dian.keys()), key="emitir_dian_sel"
+
+                df_abiertas_sel = facturas_abiertas[['id', 'cliente', 'total']].copy()
+                df_abiertas_sel.insert(0, 'Emitir', True)
+                df_abiertas_sel = df_abiertas_sel.rename(columns={
+                    'id': 'Venta #', 'cliente': 'Cliente', 'total': 'Total ($)'
+                })
+                df_abiertas_editada = st.data_editor(
+                    df_abiertas_sel,
+                    use_container_width=True, hide_index=True, key="editor_emitir_dian",
+                    disabled=['Venta #', 'Cliente', 'Total ($)'],
+                    column_config={
+                        "Total ($)": st.column_config.NumberColumn(format="$%,d"),
+                    }
                 )
-                if st.button("Emitir a la DIAN", use_container_width=True, key="btn_emitir_dian"):
-                    with st.spinner("Emitiendo ante la DIAN..."):
-                        ok_dian, msg_dian = emitir_factura_dian_venta(user_id, dict_emitir_dian[emitir_dian_sel])
-                    if ok_dian:
-                        st.success(msg_dian)
+                ids_seleccionados = df_abiertas_editada[df_abiertas_editada['Emitir']]['Venta #'].tolist()
+
+                if st.button(
+                    f"Emitir {len(ids_seleccionados)} factura(s) a la DIAN" if ids_seleccionados else "Emitir a la DIAN",
+                    use_container_width=True, key="btn_emitir_dian", disabled=not ids_seleccionados,
+                    type="primary",
+                ):
+                    exitosas, fallidas = [], []
+                    with st.spinner(f"Emitiendo {len(ids_seleccionados)} factura(s) ante la DIAN..."):
+                        for vid_emitir in ids_seleccionados:
+                            ok_dian, msg_dian = emitir_factura_dian_venta(user_id, int(vid_emitir))
+                            (exitosas if ok_dian else fallidas).append((vid_emitir, msg_dian))
+                    if exitosas:
+                        st.success(f"Emitidas: {', '.join(f'#{v}' for v, _ in exitosas)}.")
+                    if fallidas:
+                        for vid_f, msg_f in fallidas:
+                            st.error(f"Venta #{vid_f}: {msg_f}")
+                    if exitosas:
                         st.rerun()
-                    else:
-                        st.error(msg_dian)
 
             if not pendientes_pdf.empty:
                 st.markdown("---")
