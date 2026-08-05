@@ -27,10 +27,10 @@ def probar_conexion(email, token):
     try:
         resp = requests.get(f"{BASE_URL}/contacts", headers=_headers(email, token), params={"limit": 1}, timeout=15)
         if resp.status_code == 200:
-            return True, "Conexión exitosa con Alegra."
+            return True, "Conexión exitosa."
         if resp.status_code == 401:
-            return False, "Credenciales rechazadas por Alegra (email o token incorrectos)."
-        return False, f"Alegra respondió {resp.status_code}: {resp.text}"
+            return False, "Credenciales rechazadas (email o token incorrectos)."
+        return False, f"El proveedor respondió {resp.status_code}: {resp.text}"
     except requests.RequestException as e:
         return False, f"Error de conexión: {e}"
 
@@ -62,7 +62,7 @@ def crear_contacto(email, token, nombre, identificacion, tipo_identificacion="CC
         resp = requests.post(f"{BASE_URL}/contacts", headers=_headers(email, token), json=payload, timeout=15)
         if resp.status_code in (200, 201):
             return resp.json().get("id")
-        st.error(f"Error al crear contacto en Alegra ({resp.status_code}): {resp.text}")
+        st.error(f"Error al crear contacto ({resp.status_code}): {resp.text}")
         return None
     except requests.RequestException as e:
         st.error(f"Error de conexión al crear contacto: {e}")
@@ -100,7 +100,7 @@ def crear_item(email, token, nombre, precio, referencia=None, unidad_medida=None
         resp = requests.post(f"{BASE_URL}/items", headers=_headers(email, token), json=payload, timeout=15)
         if resp.status_code in (200, 201):
             return resp.json().get("id")
-        st.error(f"Error al crear ítem en Alegra ({resp.status_code}): {resp.text}")
+        st.error(f"Error al crear ítem ({resp.status_code}): {resp.text}")
         return None
     except requests.RequestException as e:
         st.error(f"Error de conexión al crear ítem: {e}")
@@ -160,7 +160,7 @@ def crear_factura_venta(email, token, cliente_id, items, due_date=None, periodic
         resp = requests.post(f"{BASE_URL}/invoices", headers=_headers(email, token), json=payload, timeout=30)
         if resp.status_code in (200, 201):
             return resp.json()
-        st.error(f"Error al crear factura en Alegra ({resp.status_code}): {resp.text}")
+        st.error(f"Error al crear factura ({resp.status_code}): {resp.text}")
         return None
     except requests.RequestException as e:
         st.error(f"Error de conexión al crear factura: {e}")
@@ -183,16 +183,16 @@ def emitir_factura_dian(email, token, factura_id):
         return False, f"Error de conexión al timbrar: {e}"
 
     if resp.status_code not in (200, 201):
-        return False, f"Alegra rechazó el timbrado ({resp.status_code}): {resp.text}"
+        return False, f"El timbrado fue rechazado ({resp.status_code}): {resp.text}"
 
     try:
         resultados = resp.json().get("data", [])
     except ValueError:
-        return False, "Alegra devolvió una respuesta inesperada al timbrar."
+        return False, "Se recibió una respuesta inesperada al timbrar."
 
     resultado = next((r for r in resultados if str(r.get("id")) == str(factura_id)), None)
     if not resultado or not resultado.get("success"):
-        msg = resultado.get("message") if resultado else "Alegra no confirmó el timbrado."
+        msg = resultado.get("message") if resultado else "No se confirmó el timbrado."
         return False, msg
 
     return True, resultado.get("message", "Factura emitida ante la DIAN.")
@@ -274,7 +274,7 @@ def registrar_pago_factura(email, token, factura_id, contacto_id, monto, metodo_
     tipo_cuenta = "bank" if metodo_pago == "transfer" else "cash"
     cuenta_id = obtener_cuenta_por_tipo(email, token, tipo_cuenta)
     if not cuenta_id:
-        return False, f"No se encontró una cuenta de tipo '{tipo_cuenta}' en tu cuenta de Alegra para registrar el pago."
+        return False, f"No se encontró una cuenta de tipo '{tipo_cuenta}' para registrar el pago."
 
     payload = {
         "date": hoy_bogota().isoformat(),
@@ -287,8 +287,8 @@ def registrar_pago_factura(email, token, factura_id, contacto_id, monto, metodo_
     try:
         resp = requests.post(f"{BASE_URL}/payments", headers=_headers(email, token), json=payload, timeout=20)
         if resp.status_code in (200, 201):
-            return True, "Pago registrado en Alegra."
-        return False, f"Alegra rechazó el pago ({resp.status_code}): {resp.text}"
+            return True, "Pago registrado."
+        return False, f"El pago fue rechazado ({resp.status_code}): {resp.text}"
     except requests.RequestException as e:
         return False, f"Error de conexión al registrar el pago: {e}"
 
@@ -319,7 +319,7 @@ def crear_nota_credito(email, token, factura_alegra_id, cliente_id, items, total
         resp = requests.post(f"{BASE_URL}/credit-notes", headers=_headers(email, token), json=payload, timeout=30)
         if resp.status_code in (200, 201):
             return resp.json()
-        st.error(f"Error al crear nota crédito en Alegra ({resp.status_code}): {resp.text}")
+        st.error(f"Error al crear nota crédito ({resp.status_code}): {resp.text}")
         return None
     except requests.RequestException as e:
         st.error(f"Error de conexión al crear nota crédito: {e}")
@@ -480,19 +480,19 @@ def facturar_venta(uid, venta_id):
 
     email, token = obtener_credenciales(uid)
     if not email or not token:
-        return False, "Este negocio no tiene configurada su cuenta de Alegra. Ve a Configuración → Facturación Electrónica."
+        return False, "Este negocio no tiene configurada su cuenta de facturación electrónica. Ve a Configuración → Facturación Electrónica."
 
     venta = queries.obtener_venta_para_facturar(uid, venta_id)
     if not venta:
         return False, "Venta no encontrada."
     if venta.factura_alegra_id:
-        return False, "Esta venta ya tiene una factura creada en Alegra."
+        return False, "Esta venta ya tiene una factura creada."
     if not venta.cliente_id:
         return False, "Esta venta no tiene un cliente asociado. Selecciona un cliente registrado (con documento) para poder facturar electrónicamente."
 
     contacto_id = obtener_o_crear_contacto(uid, venta.cliente_id, email, token)
     if not contacto_id:
-        return False, "No se pudo crear/obtener el cliente en Alegra."
+        return False, "No se pudo crear/obtener el cliente."
 
     renglones = queries.obtener_items_venta(venta_id)
     items_payload = []
@@ -501,7 +501,7 @@ def facturar_venta(uid, venta_id):
             return False, f"El renglón '{r.nombre_producto}' no está ligado a un producto del inventario, no se puede facturar."
         item_id = obtener_o_crear_item(uid, r.producto_id, email, token)
         if not item_id:
-            return False, f"No se pudo crear/obtener el producto '{r.nombre_producto}' en Alegra."
+            return False, f"No se pudo crear/obtener el producto '{r.nombre_producto}'."
         items_payload.append(_construir_item_payload(
             item_id, r.precio_unitario, r.cantidad, r.descuento, r.iva_porcentaje, email, token
         ))
@@ -521,7 +521,7 @@ def facturar_venta(uid, venta_id):
     )
     if not factura:
         queries.guardar_resultado_factura(venta_id, estado="error")
-        return False, "Alegra rechazó la factura. Revisa el error mostrado arriba."
+        return False, "La factura fue rechazada. Revisa el error mostrado arriba."
 
     number_template = factura.get("numberTemplate") if isinstance(factura.get("numberTemplate"), dict) else {}
     # El PDF sí llega para una factura abierta sin timbrar; el CUFE y el XML
@@ -542,7 +542,7 @@ def facturar_venta(uid, venta_id):
     )
 
     numero_texto = f"{number_template.get('prefix') or ''}{number_template.get('number') or factura.get('id')}"
-    return True, f"Factura {numero_texto} creada en Alegra. Pendiente de emitir ante la DIAN."
+    return True, f"Factura {numero_texto} creada. Pendiente de emitir ante la DIAN."
 
 
 def emitir_factura_dian_venta(uid, venta_id):
@@ -558,13 +558,13 @@ def emitir_factura_dian_venta(uid, venta_id):
     if not venta:
         return False, "Venta no encontrada."
     if not venta.factura_alegra_id:
-        return False, "Esta venta todavía no tiene una factura creada en Alegra."
+        return False, "Esta venta todavía no tiene una factura creada."
     if venta.factura_estado == "emitida":
         return False, "Esta factura ya fue emitida ante la DIAN."
 
     email, token = obtener_credenciales(uid)
     if not email or not token:
-        return False, "Este negocio no tiene configurada su cuenta de Alegra."
+        return False, "Este negocio no tiene configurada su cuenta de facturación electrónica."
 
     ok, msg = emitir_factura_dian(email, token, venta.factura_alegra_id)
     if not ok:
@@ -613,11 +613,11 @@ def anular_factura_venta(uid, venta_id):
 
     email, token = obtener_credenciales(uid)
     if not email or not token:
-        return False, "Este negocio no tiene configurada su cuenta de Alegra."
+        return False, "Este negocio no tiene configurada su cuenta de facturación electrónica."
 
     contacto_id = obtener_o_crear_contacto(uid, venta.cliente_id, email, token)
     if not contacto_id:
-        return False, "No se pudo obtener el cliente en Alegra."
+        return False, "No se pudo obtener el cliente."
 
     renglones = queries.obtener_items_venta(venta_id)
     items_payload = []
@@ -635,7 +635,7 @@ def anular_factura_venta(uid, venta_id):
 
     nota = crear_nota_credito(email, token, venta.factura_alegra_id, contacto_id, items_payload, venta.total)
     if not nota:
-        return False, "Alegra rechazó la nota crédito. Revisa el error mostrado arriba."
+        return False, "La nota crédito fue rechazada. Revisa el error mostrado arriba."
 
     pdf_url_nc = nota.get("pdf") if isinstance(nota.get("pdf"), str) else None
     xml_url_nc = nota.get("xml") if isinstance(nota.get("xml"), str) else None
@@ -729,15 +729,15 @@ def registrar_abono_credito(uid, venta_id, monto, metodo_pago="Efectivo"):
     if not venta:
         return False, "Venta no encontrada."
     if venta.factura_estado != "emitida" or not venta.factura_alegra_id:
-        return True, "Esta venta no tiene factura electrónica, el abono no se sincroniza con Alegra."
+        return True, "Esta venta no tiene factura electrónica, el abono no se sincroniza."
 
     email, token = obtener_credenciales(uid)
     if not email or not token:
-        return False, "Este negocio no tiene configurada su cuenta de Alegra."
+        return False, "Este negocio no tiene configurada su cuenta de facturación electrónica."
 
     contacto_id = obtener_o_crear_contacto(uid, venta.cliente_id, email, token)
     if not contacto_id:
-        return False, "No se pudo obtener el cliente en Alegra."
+        return False, "No se pudo obtener el cliente."
 
     metodo_alegra = "transfer" if metodo_pago == "Transferencia" else "cash"
     return registrar_pago_factura(email, token, venta.factura_alegra_id, contacto_id, monto, metodo_alegra)

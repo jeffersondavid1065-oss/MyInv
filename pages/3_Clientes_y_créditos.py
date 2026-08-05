@@ -12,13 +12,14 @@ from queries import (
     obtener_historial_ventas_cliente,
     obtener_historial_abonos_cliente,
 )
-from utils import aplicar_estilos, verificar_auth
+from utils import aplicar_estilos, verificar_auth, bloquear_si_cajero
 from tz_utils import hoy_bogota
 from alegra_utils import registrar_abono_credito
 
 st.set_page_config(page_title="Clientes y Créditos", layout="wide")
 aplicar_estilos()
 user_id, nombre_negocio = verificar_auth()
+bloquear_si_cajero()
 
 engine = obtener_conexion()
 
@@ -151,7 +152,7 @@ with tab_creditos:
                 tiene_factura = fila_credito.get('factura_estado') == 'emitida'
 
                 if tiene_factura:
-                    st.caption("🧾 Esta venta tiene factura electrónica emitida — el abono se sincronizará con Alegra.")
+                    st.caption("🧾 Esta venta tiene factura electrónica emitida — el abono se sincronizará automáticamente.")
 
                 col_ab1, col_ab2, col_ab3 = st.columns(3)
                 with col_ab1:
@@ -203,7 +204,7 @@ with tab_creditos:
                             st.success(f"Abono de {formato_cop(monto_abono)} registrado. Saldo pendiente: {formato_cop(nuevo_saldo)}")
 
                         if tiene_factura:
-                            with st.spinner("Sincronizando abono con Alegra..."):
+                            with st.spinner("Sincronizando abono..."):
                                 ok_al, msg_al = registrar_abono_credito(user_id, venta_id_credito, monto_abono, metodo_abono)
                             if not ok_al:
                                 st.warning(f"El abono quedó registrado en MyInv, pero: {msg_al}")

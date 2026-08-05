@@ -2,13 +2,14 @@ import streamlit as st
 import os
 from sqlalchemy import text
 from db import obtener_conexion
-from utils import aplicar_estilos, verificar_auth
+from utils import aplicar_estilos, verificar_auth, bloquear_si_cajero
 from queries import obtener_credenciales_alegra, guardar_credenciales_alegra, eliminar_credenciales_alegra, tiene_fe_habilitada
 import alegra_utils
 
 st.set_page_config(page_title="Configuración", layout="wide")
 aplicar_estilos()
 user_id, nombre_negocio = verificar_auth()
+bloquear_si_cajero()
 
 engine = obtener_conexion()
 
@@ -169,7 +170,7 @@ with tab_logo:
 # TAB 3: FACTURACIÓN ELECTRÓNICA
 # ==========================================
 with tab_alegra:
-    st.subheader("Facturación Electrónica (Alegra)")
+    st.subheader("Facturación Electrónica")
 
     if not tiene_fe_habilitada(user_id):
         st.info(
@@ -179,9 +180,9 @@ with tab_alegra:
         st.stop()
 
     st.caption(
-        "Conecta tu propia cuenta de Alegra para poder emitir facturas electrónicas "
-        "desde tus ventas. Cada negocio usa su propia cuenta — la factura sale a "
-        "nombre de tu NIT, no del nuestro."
+        "Conecta tu propia cuenta del proveedor de facturación electrónica para poder "
+        "emitir facturas desde tus ventas. Cada negocio usa su propia cuenta — la "
+        "factura sale a nombre de tu NIT, no del nuestro."
     )
 
     creds = obtener_credenciales_alegra(user_id)
@@ -202,7 +203,7 @@ with tab_alegra:
         with col_a2:
             if st.button("Desconectar cuenta", use_container_width=True):
                 eliminar_credenciales_alegra(user_id)
-                st.success("Cuenta de Alegra desconectada.")
+                st.success("Cuenta desconectada.")
                 st.rerun()
 
         st.markdown("---")
@@ -220,7 +221,7 @@ with tab_alegra:
             if not email_alegra_input or not token_alegra_input:
                 st.warning("Completa ambos campos.")
             else:
-                with st.spinner("Validando credenciales con Alegra..."):
+                with st.spinner("Validando credenciales..."):
                     ok, msg = alegra_utils.probar_conexion(email_alegra_input, token_alegra_input)
                 if ok:
                     guardar_credenciales_alegra(user_id, email_alegra_input, token_alegra_input)

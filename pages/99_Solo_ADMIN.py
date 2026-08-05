@@ -180,7 +180,7 @@ if not df_almacenes.empty:
         st.markdown("---")
         st.markdown("### Facturación Electrónica")
         st.caption(
-            "Controla qué negocios pueden ver y usar la integración con Alegra "
+            "Controla qué negocios pueden ver y usar la integración de facturación electrónica "
             "(configurar credenciales, emitir facturas/notas crédito ante la DIAN). "
             "Nuevos almacenes empiezan sin acceso."
         )

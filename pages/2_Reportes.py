@@ -12,16 +12,17 @@ from queries import (
     obtener_metricas_mes,
     obtener_facturas_periodo,
 )
-from utils import aplicar_estilos, verificar_auth
+from utils import aplicar_estilos, verificar_auth, bloquear_si_cajero
 from tz_utils import hoy_bogota, ahora_bogota
 from alegra_utils import (
-    facturar_venta, actualizar_pdf_cufe_venta, obtener_factura, obtener_credenciales,
+    facturar_venta, actualizar_pdf_cufe_venta,
     emitir_factura_dian_venta,
 )
 
 st.set_page_config(page_title="Reportes", layout="wide")
 aplicar_estilos()
 user_id, nombre_negocio = verificar_auth()
+bloquear_si_cajero()
 
 engine = obtener_conexion()
 
@@ -575,7 +576,7 @@ with tab_facturas:
             facturas_abiertas = df_facturas[df_facturas['factura_estado'] == 'abierta']
             if not facturas_abiertas.empty:
                 st.markdown("---")
-                st.warning(f"{len(facturas_abiertas)} factura(s) creada(s) en Alegra pero sin emitir ante la DIAN.")
+                st.warning(f"{len(facturas_abiertas)} factura(s) creada(s) pero sin emitir ante la DIAN.")
 
                 df_abiertas_sel = facturas_abiertas[['id', 'cliente', 'total']].copy()
                 df_abiertas_sel.insert(0, 'Emitir', True)
@@ -614,10 +615,10 @@ with tab_facturas:
                 st.markdown("---")
                 st.caption(
                     f"{len(pendientes_pdf)} venta(s) sin CUFE, PDF o XML confirmado todavía — "
-                    "Alegra puede tardar unos minutos en validarlas ante la DIAN."
+                    "el sistema puede tardar unos minutos en validarlas ante la DIAN."
                 )
                 if st.button("Actualizar CUFE/PDF/XML pendientes", use_container_width=True):
-                    with st.spinner("Consultando Alegra..."):
+                    with st.spinner("Consultando..."):
                         actualizadas = sum(
                             actualizar_pdf_cufe_venta(user_id, int(r['id']))
                             for _, r in pendientes_pdf.iterrows()
@@ -625,29 +626,8 @@ with tab_facturas:
                     if actualizadas:
                         st.success(f"Se completaron datos de {actualizadas} venta(s).")
                     else:
-                        st.info("Todavía no hay novedades en Alegra para estas facturas/notas crédito.")
+                        st.info("Todavía no hay novedades para estas facturas/notas crédito.")
                     st.rerun()
-
-            with st.expander("Diagnóstico: ver respuesta cruda de Alegra (temporal)"):
-                facturadas_debug = df_facturas[df_facturas['factura_alegra_id'].notna()]
-                if facturadas_debug.empty:
-                    st.caption("No hay facturas emitidas en este período para consultar.")
-                else:
-                    dict_debug = {
-                        f"Venta #{r['id']} — {r['cliente']}": r['factura_alegra_id']
-                        for _, r in facturadas_debug.iterrows()
-                    }
-                    debug_sel = st.selectbox(
-                        "Selecciona la factura a inspeccionar", options=list(dict_debug.keys()), key="debug_factura_sel"
-                    )
-                    if st.button("Consultar Alegra", key="btn_debug_factura"):
-                        email_dbg, token_dbg = obtener_credenciales(user_id)
-                        with st.spinner("Consultando..."):
-                            respuesta_dbg = obtener_factura(email_dbg, token_dbg, dict_debug[debug_sel])
-                        if respuesta_dbg:
-                            st.json(respuesta_dbg)
-                        else:
-                            st.error("Alegra no respondió o rechazó la consulta.")
 
             facturas_con_error = df_facturas[df_facturas['factura_estado'] == 'error']
             if not facturas_con_error.empty:
