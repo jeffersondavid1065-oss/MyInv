@@ -14,7 +14,10 @@ from queries import (
 )
 from utils import aplicar_estilos, verificar_auth
 from tz_utils import hoy_bogota, ahora_bogota
-from alegra_utils import facturar_venta, actualizar_pdf_cufe_venta, obtener_factura, obtener_credenciales
+from alegra_utils import (
+    facturar_venta, actualizar_pdf_cufe_venta, obtener_factura, obtener_credenciales,
+    emitir_factura_dian_venta,
+)
 
 st.set_page_config(page_title="Reportes", layout="wide")
 aplicar_estilos()
@@ -454,18 +457,22 @@ with tab_facturas:
 
         if not df_facturas.empty:
             emitidas = (df_facturas['factura_estado'] == 'emitida').sum()
+            abiertas = (df_facturas['factura_estado'] == 'abierta').sum()
             con_error = (df_facturas['factura_estado'] == 'error').sum()
             anuladas_nc = (df_facturas['factura_estado'] == 'anulada').sum()
             sin_facturar = df_facturas['factura_estado'].isna().sum()
 
-            col_e1, col_e2, col_e3, col_e4, col_e5 = st.columns(5)
+            col_e1, col_e2, col_e3, col_e4, col_e5, col_e6 = st.columns(6)
             col_e1.metric("Ventas del período", len(df_facturas))
-            col_e2.metric("Facturadas", int(emitidas))
-            col_e3.metric("Con error", int(con_error),
+            col_e2.metric("Emitidas (DIAN)", int(emitidas))
+            col_e3.metric("Abiertas sin timbrar", int(abiertas),
+                          delta="Emitir" if abiertas > 0 else None,
+                          delta_color="inverse")
+            col_e4.metric("Con error", int(con_error),
                           delta="Revisar" if con_error > 0 else None,
                           delta_color="inverse")
-            col_e4.metric("Anuladas (N.C.)", int(anuladas_nc))
-            col_e5.metric("Sin facturar", int(sin_facturar))
+            col_e5.metric("Anuladas (N.C.)", int(anuladas_nc))
+            col_e6.metric("Sin facturar", int(sin_facturar))
 
             st.markdown("---")
 
@@ -479,7 +486,7 @@ with tab_facturas:
             with col_s3:
                 filtro_estado = st.selectbox(
                     "Filtrar por estado",
-                    ["Todas", "Facturadas", "Con error", "Anuladas (N.C.)", "Sin facturar"],
+                    ["Todas", "Emitidas (DIAN)", "Abiertas sin timbrar", "Con error", "Anuladas (N.C.)", "Sin facturar"],
                     key="filtro_estado_factura"
                 )
 
@@ -492,8 +499,10 @@ with tab_facturas:
                 busq_fecha = st.date_input("Buscar por fecha exacta", value=None, key="busq_factura_fecha")
 
             df_mostrar_fe = df_facturas.copy()
-            if filtro_estado == "Facturadas":
+            if filtro_estado == "Emitidas (DIAN)":
                 df_mostrar_fe = df_mostrar_fe[df_mostrar_fe['factura_estado'] == 'emitida']
+            elif filtro_estado == "Abiertas sin timbrar":
+                df_mostrar_fe = df_mostrar_fe[df_mostrar_fe['factura_estado'] == 'abierta']
             elif filtro_estado == "Con error":
                 df_mostrar_fe = df_mostrar_fe[df_mostrar_fe['factura_estado'] == 'error']
             elif filtro_estado == "Anuladas (N.C.)":
@@ -529,7 +538,7 @@ with tab_facturas:
                 ]
 
             df_mostrar_fe['estado_texto'] = df_mostrar_fe['factura_estado'].fillna('Sin facturar').replace({
-                'emitida': 'Emitida', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
+                'emitida': 'Emitida', 'abierta': 'Abierta (sin timbrar)', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
             })
 
             st.dataframe(
@@ -555,12 +564,34 @@ with tab_facturas:
             )
 
             pendientes_pdf = df_facturas[
-                (df_facturas['factura_alegra_id'].notna()
+                # Solo facturas YA emitidas: las 'abierta' no tienen CUFE/XML a
+                # propósito hasta que se emitan a la DIAN con el botón de abajo.
+                ((df_facturas['factura_estado'] == 'emitida')
                  & (df_facturas['factura_cufe'].isna() | df_facturas['factura_pdf_url'].isna()
                     | df_facturas['factura_xml_url'].isna()))
                 | (df_facturas['nota_credito_alegra_id'].notna()
                    & (df_facturas['nota_credito_pdf_url'].isna() | df_facturas['nota_credito_xml_url'].isna()))
             ]
+            facturas_abiertas = df_facturas[df_facturas['factura_estado'] == 'abierta']
+            if not facturas_abiertas.empty:
+                st.markdown("---")
+                st.warning(f"{len(facturas_abiertas)} factura(s) creada(s) en Alegra pero sin emitir ante la DIAN.")
+                dict_emitir_dian = {
+                    f"Venta #{r['id']} — {r['cliente']} — {formato_cop(r['total'])}": r['id']
+                    for _, r in facturas_abiertas.iterrows()
+                }
+                emitir_dian_sel = st.selectbox(
+                    "Selecciona la factura a emitir", options=list(dict_emitir_dian.keys()), key="emitir_dian_sel"
+                )
+                if st.button("Emitir a la DIAN", use_container_width=True, key="btn_emitir_dian"):
+                    with st.spinner("Emitiendo ante la DIAN..."):
+                        ok_dian, msg_dian = emitir_factura_dian_venta(user_id, dict_emitir_dian[emitir_dian_sel])
+                    if ok_dian:
+                        st.success(msg_dian)
+                        st.rerun()
+                    else:
+                        st.error(msg_dian)
+
             if not pendientes_pdf.empty:
                 st.markdown("---")
                 st.caption(

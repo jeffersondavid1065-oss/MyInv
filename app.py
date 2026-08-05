@@ -273,6 +273,12 @@ else:
     if metricas["por_agotarse"] > 0:
         st.info(f"**{metricas['por_agotarse']} productos** están por agotarse pronto.")
 
+    if metricas["facturas_abiertas"] > 0:
+        st.warning(
+            f"Tienes **{metricas['facturas_abiertas']} factura(s) electrónica(s) abierta(s) sin emitir ante la DIAN**. "
+            "Ve a Punto de Venta o Reportes → Facturación Electrónica para emitirlas."
+        )
+
     st.markdown("---")
 
     # Accesos rápidos

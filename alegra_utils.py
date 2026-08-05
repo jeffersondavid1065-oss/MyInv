@@ -137,7 +137,10 @@ def crear_factura_venta(email, token, cliente_id, items, due_date=None, periodic
     payment_form: 'CASH' o 'CREDIT' - obligatorio para facturación electrónica 2.1 en Colombia.
     payment_method: medio de pago (ej. 'CASH', 'DEBIT_TRANSFER_BANK') - obligatorio cuando
     payment_form es 'CASH' con facturación electrónica 2.1 activa.
-    Devuelve el JSON de la factura creada (incluye pdf/estado DIAN) o None si falla.
+    No se envía 'stamp' (timbrado): la factura queda 'abierta' en Alegra con su
+    número asignado pero sin CUFE, hasta que se llame a emitir_factura_dian()
+    para emitirla ante la DIAN cuando el negocio lo decida.
+    Devuelve el JSON de la factura creada (incluye pdf) o None si falla.
     """
     payload = {
         "date": hoy_bogota().isoformat(),
@@ -145,10 +148,6 @@ def crear_factura_venta(email, token, cliente_id, items, due_date=None, periodic
         "client": {"id": cliente_id},
         "items": items,
         "status": "open",
-        # Sin esto Alegra crea la factura pero NUNCA intenta timbrarla ante la
-        # DIAN - se queda como un documento abierto normal a la espera de que
-        # alguien la emita a mano desde el dashboard de Alegra.
-        "stamp": {"generateStamp": True},
     }
     if periodicity:
         payload["periodicity"] = periodicity
@@ -166,6 +165,37 @@ def crear_factura_venta(email, token, cliente_id, items, due_date=None, periodic
     except requests.RequestException as e:
         st.error(f"Error de conexión al crear factura: {e}")
         return None
+
+
+def emitir_factura_dian(email, token, factura_id):
+    """
+    Timbra ante la DIAN una factura que ya existe en Alegra en estado 'abierta'
+    (creada sin generateStamp). Devuelve (True, mensaje) o (False, mensaje).
+    """
+    try:
+        resp = requests.post(
+            f"{BASE_URL}/invoices/stamp",
+            headers=_headers(email, token),
+            json={"ids": [int(factura_id)]},
+            timeout=30,
+        )
+    except requests.RequestException as e:
+        return False, f"Error de conexión al timbrar: {e}"
+
+    if resp.status_code not in (200, 201):
+        return False, f"Alegra rechazó el timbrado ({resp.status_code}): {resp.text}"
+
+    try:
+        resultados = resp.json().get("data", [])
+    except ValueError:
+        return False, "Alegra devolvió una respuesta inesperada al timbrar."
+
+    resultado = next((r for r in resultados if str(r.get("id")) == str(factura_id)), None)
+    if not resultado or not resultado.get("success"):
+        msg = resultado.get("message") if resultado else "Alegra no confirmó el timbrado."
+        return False, msg
+
+    return True, resultado.get("message", "Factura emitida ante la DIAN.")
 
 
 def obtener_factura(email, token, factura_id):
@@ -437,10 +467,13 @@ def _forma_y_medio_pago(tipo_pago):
 
 def facturar_venta(uid, venta_id):
     """
-    Emite la factura electrónica de una venta ya registrada en MyInv, usando
-    la cuenta de Alegra propia del negocio 'uid': crea (o reutiliza) el
-    cliente y los productos en Alegra, arma la factura con los renglones de
-    la venta, la crea, y guarda el resultado en Ventas.
+    Crea en Alegra la factura electrónica de una venta ya registrada en MyInv,
+    usando la cuenta de Alegra propia del negocio 'uid': crea (o reutiliza) el
+    cliente y los productos, arma la factura con los renglones de la venta y
+    la crea en Alegra.
+    La factura queda 'abierta' (con su número asignado) pero SIN timbrar ante
+    la DIAN todavía - eso requiere un paso aparte (emitir_factura_dian_venta),
+    para que el negocio pueda revisarla antes de emitirla oficialmente.
     Devuelve (True, mensaje) o (False, mensaje).
     """
     import queries
@@ -452,8 +485,8 @@ def facturar_venta(uid, venta_id):
     venta = queries.obtener_venta_para_facturar(uid, venta_id)
     if not venta:
         return False, "Venta no encontrada."
-    if venta.factura_alegra_id and venta.factura_estado == "emitida":
-        return False, "Esta venta ya tiene una factura electrónica emitida."
+    if venta.factura_alegra_id:
+        return False, "Esta venta ya tiene una factura creada en Alegra."
     if not venta.cliente_id:
         return False, "Esta venta no tiene un cliente asociado. Selecciona un cliente registrado (con documento) para poder facturar electrónicamente."
 
@@ -491,40 +524,71 @@ def facturar_venta(uid, venta_id):
         return False, "Alegra rechazó la factura. Revisa el error mostrado arriba."
 
     number_template = factura.get("numberTemplate") if isinstance(factura.get("numberTemplate"), dict) else {}
-    cufe = factura.get("stamp", {}).get("cufe") if isinstance(factura.get("stamp"), dict) else None
+    # El PDF sí llega para una factura abierta sin timbrar; el CUFE y el XML
+    # solo existen después de emitirla ante la DIAN (emitir_factura_dian_venta).
     pdf_url = factura.get("pdf") if isinstance(factura.get("pdf"), str) else None
-    xml_url = factura.get("xml") if isinstance(factura.get("xml"), str) else None
-
-    # La creación no trae el PDF ni el XML (Alegra solo los incluye si se piden
-    # con ?fields=pdf,xml, y ese parámetro no aplica al crear). Se consultan de
-    # una vez para que queden listos sin que el negocio tenga que ir a
-    # "Actualizar CUFE/PDF pendientes" — el cliente a veces necesita la
-    # factura impresa de inmediato.
-    if not pdf_url or not xml_url:
+    if not pdf_url:
         factura_completa = obtener_factura(email, token, factura.get("id"))
         if factura_completa:
-            if not pdf_url:
-                pdf_url = factura_completa.get("pdf") if isinstance(factura_completa.get("pdf"), str) else None
-            if not xml_url:
-                xml_url = factura_completa.get("xml") if isinstance(factura_completa.get("xml"), str) else None
-            if not cufe and isinstance(factura_completa.get("stamp"), dict):
-                cufe = factura_completa["stamp"].get("cufe")
+            pdf_url = factura_completa.get("pdf") if isinstance(factura_completa.get("pdf"), str) else None
 
     queries.guardar_resultado_factura(
         venta_id,
         alegra_id=factura.get("id"),
-        cufe=cufe,
         pdf_url=pdf_url,
-        xml_url=xml_url,
-        estado="emitida",
+        estado="abierta",
         prefijo=number_template.get("prefix"),
         numero=str(number_template["number"]) if number_template.get("number") is not None else None,
     )
 
-    mensaje = f"Factura emitida (Alegra #{factura.get('id')})."
+    numero_texto = f"{number_template.get('prefix') or ''}{number_template.get('number') or factura.get('id')}"
+    return True, f"Factura {numero_texto} creada en Alegra. Pendiente de emitir ante la DIAN."
+
+
+def emitir_factura_dian_venta(uid, venta_id):
+    """
+    Emite ante la DIAN una factura que MyInv ya creó en Alegra pero que quedó
+    'abierta' (ver facturar_venta). Al emitirla completa CUFE/PDF/XML y, si el
+    cliente tiene email registrado, le envía la factura por correo.
+    Devuelve (True, mensaje) o (False, mensaje).
+    """
+    import queries
+
+    venta = queries.obtener_venta_para_facturar(uid, venta_id)
+    if not venta:
+        return False, "Venta no encontrada."
+    if not venta.factura_alegra_id:
+        return False, "Esta venta todavía no tiene una factura creada en Alegra."
+    if venta.factura_estado == "emitida":
+        return False, "Esta factura ya fue emitida ante la DIAN."
+
+    email, token = obtener_credenciales(uid)
+    if not email or not token:
+        return False, "Este negocio no tiene configurada su cuenta de Alegra."
+
+    ok, msg = emitir_factura_dian(email, token, venta.factura_alegra_id)
+    if not ok:
+        return False, msg
+
+    factura_completa = obtener_factura(email, token, venta.factura_alegra_id)
+    cufe = pdf_url = xml_url = prefijo = numero = None
+    if factura_completa:
+        cufe = factura_completa.get("stamp", {}).get("cufe") if isinstance(factura_completa.get("stamp"), dict) else None
+        pdf_url = factura_completa.get("pdf") if isinstance(factura_completa.get("pdf"), str) else None
+        xml_url = factura_completa.get("xml") if isinstance(factura_completa.get("xml"), str) else None
+        number_template = factura_completa.get("numberTemplate") if isinstance(factura_completa.get("numberTemplate"), dict) else {}
+        prefijo = number_template.get("prefix")
+        numero = str(number_template["number"]) if number_template.get("number") is not None else None
+
+    queries.guardar_resultado_factura(
+        venta_id, alegra_id=venta.factura_alegra_id, cufe=cufe, pdf_url=pdf_url, xml_url=xml_url,
+        estado="emitida", prefijo=prefijo, numero=numero,
+    )
+
+    mensaje = "Factura emitida ante la DIAN."
     cliente = queries.obtener_datos_facturacion_cliente(uid, venta.cliente_id)
     if cliente and cliente.email:
-        ok_mail, msg_mail = enviar_factura_email(email, token, factura.get("id"), cliente.email)
+        ok_mail, msg_mail = enviar_factura_email(email, token, venta.factura_alegra_id, cliente.email)
         mensaje += " Enviada por correo." if ok_mail else f" (No se pudo enviar por correo: {msg_mail})"
 
     return True, mensaje
@@ -615,7 +679,9 @@ def actualizar_pdf_cufe_venta(uid, venta_id):
 
     actualizo = False
 
-    if venta.factura_alegra_id and (not venta.factura_cufe or not venta.factura_pdf_url or not venta.factura_xml_url):
+    if venta.factura_estado == "emitida" and venta.factura_alegra_id and (
+        not venta.factura_cufe or not venta.factura_pdf_url or not venta.factura_xml_url
+    ):
         factura = obtener_factura(email, token, venta.factura_alegra_id)
         if factura:
             cufe = factura.get("stamp", {}).get("cufe") if isinstance(factura.get("stamp"), dict) else None

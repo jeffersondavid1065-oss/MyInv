@@ -15,7 +15,7 @@ from queries import (
 )
 from utils import aplicar_estilos, verificar_auth
 from tz_utils import hoy_bogota, ahora_bogota_naive
-from alegra_utils import facturar_venta, anular_factura_venta
+from alegra_utils import facturar_venta, anular_factura_venta, emitir_factura_dian_venta
 
 st.set_page_config(page_title="Punto de Venta", layout="wide")
 aplicar_estilos()
@@ -617,7 +617,7 @@ with tab_pos:
                         st.info(f"Cambio: {formato_cop(cambio)}")
 
                     if confirmar_venta_factura:
-                        with st.spinner("Emitiendo factura ante Alegra..."):
+                        with st.spinner("Creando factura en Alegra..."):
                             ok_f, msg_f = facturar_venta(user_id, venta_id)
                         if ok_f:
                             st.success(msg_f)
@@ -720,17 +720,29 @@ with tab_pos:
                     """), {"vid": vid}).fetchone()
 
                 if venta_factura and venta_factura[1] == "emitida":
-                    st.success(f"Factura electrónica emitida (Alegra #{venta_factura[2]}).")
+                    st.success(f"Factura electrónica emitida ante la DIAN (Alegra #{venta_factura[2]}).")
                     col_fpdf, col_fxml = st.columns(2)
                     if venta_factura[3]:
                         col_fpdf.link_button("Ver PDF de la factura", venta_factura[3], use_container_width=True)
                     if venta_factura[4]:
                         col_fxml.link_button("Descargar XML (DIAN)", venta_factura[4], use_container_width=True)
+                elif venta_factura and venta_factura[1] == "abierta":
+                    st.info(f"Factura creada en Alegra (#{venta_factura[2]}) — todavía no se ha emitido ante la DIAN.")
+                    if venta_factura[3]:
+                        st.link_button("Ver PDF (borrador)", venta_factura[3], use_container_width=True)
+                    if st.button("Emitir a la DIAN", use_container_width=True, type="primary"):
+                        with st.spinner("Emitiendo ante la DIAN..."):
+                            ok_dian, msg_dian = emitir_factura_dian_venta(user_id, vid)
+                        if ok_dian:
+                            st.success(msg_dian)
+                        else:
+                            st.warning(msg_dian)
+                        st.rerun()
                 elif not venta_factura or not venta_factura[0]:
                     st.caption("Esta venta no tiene cliente asociado — no se puede facturar electrónicamente.")
                 else:
                     if st.button("Emitir factura electrónica", use_container_width=True):
-                        with st.spinner("Emitiendo factura ante Alegra..."):
+                        with st.spinner("Creando factura en Alegra..."):
                             ok, msg = facturar_venta(user_id, vid)
                         if ok:
                             st.success(msg)
@@ -767,7 +779,7 @@ with tab_historial:
             df_hoy['factura_prefijo'].fillna('').astype(str) + df_hoy['factura_numero'].fillna('').astype(str)
         )
         df_hoy['fe_texto'] = df_hoy['factura_estado'].fillna('Sin facturar').replace({
-            'emitida': 'Emitida', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
+            'emitida': 'Emitida', 'abierta': 'Abierta (sin timbrar)', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
         })
         st.dataframe(
             df_hoy[['id', 'fecha', 'cliente', 'total', 'tipo_pago', 'estado', 'fe_texto', 'numero_factura_texto',
@@ -897,8 +909,10 @@ with tab_devolucion:
             def _estado_nc(row):
                 if row['nota_credito_alegra_id']:
                     return 'Emitida'
-                if row['factura_alegra_id']:
+                if row['factura_estado'] == 'emitida':
                     return 'Pendiente'
+                if row['factura_estado'] == 'abierta':
+                    return 'No aplica (factura nunca se emitió a la DIAN)'
                 return 'No aplica (sin FE)'
 
             df_devoluciones['nc_estado_texto'] = df_devoluciones.apply(_estado_nc, axis=1)

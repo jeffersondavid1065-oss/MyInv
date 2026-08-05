@@ -79,7 +79,7 @@ with tab_creditos:
             df_mostrar['factura_prefijo'].fillna('').astype(str) + df_mostrar['factura_numero'].fillna('').astype(str)
         )
         df_mostrar['factura_estado'] = df_mostrar['factura_estado'].fillna('Sin facturar').replace({
-            'emitida': 'Facturada', 'error': 'Error factura', 'anulada': 'Anulada (N.C.)'
+            'emitida': 'Facturada', 'abierta': 'Abierta (sin timbrar)', 'error': 'Error factura', 'anulada': 'Anulada (N.C.)'
         })
         df_mostrar = df_mostrar[[
             'cliente', 'total', 'saldo_pendiente', 'fecha_limite', 'tipo_cuota',
@@ -323,7 +323,7 @@ with tab_estado_cuenta:
                 + df_compras_mostrar['factura_numero'].fillna('').astype(str)
             )
             df_compras_mostrar['fe_texto'] = df_compras_mostrar['factura_estado'].fillna('Sin facturar').replace({
-                'emitida': 'Emitida', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
+                'emitida': 'Emitida', 'abierta': 'Abierta (sin timbrar)', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
             })
             st.dataframe(
                 df_compras_mostrar[[

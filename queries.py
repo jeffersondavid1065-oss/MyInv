@@ -61,6 +61,11 @@ def obtener_metricas_dashboard(uid):
             WHERE usuario_id = :uid AND estado = 'Activo'
         """), {"uid": uid}).scalar()
 
+        facturas_abiertas = conn.execute(text("""
+            SELECT COUNT(*) FROM Ventas
+            WHERE usuario_id = :uid AND factura_estado = 'abierta'
+        """), {"uid": uid}).scalar()
+
     return {
         "ventas_hoy": int(ventas_hoy[0]) if ventas_hoy else 0,
         "total_ventas_hoy": float(ventas_hoy[1]) if ventas_hoy else 0,
@@ -70,6 +75,7 @@ def obtener_metricas_dashboard(uid):
         "por_agotarse": int(por_agotarse) if por_agotarse else 0,
         "creditos_vencidos": int(creditos_vencidos) if creditos_vencidos else 0,
         "total_deuda": float(total_deuda) if total_deuda else 0,
+        "facturas_abiertas": int(facturas_abiertas) if facturas_abiertas else 0,
     }
 
 
