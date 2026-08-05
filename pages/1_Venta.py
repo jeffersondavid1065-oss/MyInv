@@ -141,6 +141,11 @@ tab_pos, tab_historial, tab_devolucion = st.tabs([
 # TAB 1: NUEVA VENTA
 # ==========================================
 with tab_pos:
+    _msg_post = st.session_state.pop("_msg_post_venta", None)
+    if _msg_post:
+        _nivel, _texto = _msg_post
+        getattr(st, _nivel)(_texto)
+
     col_izq, col_der = st.columns([3, 2])
 
     with col_izq:
@@ -709,14 +714,24 @@ with tab_pos:
                         st.info(f"Factura creada (#{venta_factura[2]}) — todavía no se ha emitido ante la DIAN.")
                         if venta_factura[3]:
                             st.link_button("Ver PDF (borrador)", venta_factura[3], use_container_width=True)
-                        if st.button("Emitir a la DIAN", use_container_width=True, type="primary"):
-                            with st.spinner("Emitiendo ante la DIAN..."):
-                                ok_dian, msg_dian = emitir_factura_dian_venta(user_id, vid)
-                            if ok_dian:
-                                st.success(msg_dian)
-                            else:
-                                st.warning(msg_dian)
-                            st.rerun()
+                        st.markdown("**¿Qué quieres hacer con esta factura?**")
+                        col_fe1, col_fe2 = st.columns(2)
+                        with col_fe1:
+                            if st.button("📧 Emitir a correo/DIAN", use_container_width=True, type="primary"):
+                                with st.spinner("Emitiendo ante la DIAN..."):
+                                    ok_dian, msg_dian = emitir_factura_dian_venta(user_id, vid)
+                                st.session_state._msg_post_venta = ("success" if ok_dian else "warning", msg_dian)
+                                st.session_state.ultima_venta_id = None
+                                st.rerun()
+                        with col_fe2:
+                            if st.button("🗂️ Dejar abierta", use_container_width=True):
+                                st.session_state._msg_post_venta = (
+                                    "info",
+                                    f"Factura #{venta_factura[2]} quedó abierta, pendiente de emitir ante la DIAN. "
+                                    "Puedes emitirla después desde Reportes → Facturación Electrónica."
+                                )
+                                st.session_state.ultima_venta_id = None
+                                st.rerun()
                     elif not venta_factura or not venta_factura[0]:
                         st.caption("Esta venta no tiene cliente asociado — no se puede facturar electrónicamente.")
                     else:
