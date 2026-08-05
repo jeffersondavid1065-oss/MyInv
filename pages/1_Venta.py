@@ -780,8 +780,9 @@ with tab_historial:
 
         st.markdown("---")
         df_hoy = df_hoy.copy()
-        with st.spinner("Actualizando enlaces PDF/XML..."):
-            df_hoy = refrescar_urls_dataframe(user_id, df_hoy)
+        if st.button("🔄 Actualizar enlaces PDF/XML", key="refrescar_urls_hoy"):
+            with st.spinner("Pidiendo enlaces actualizados a Alegra..."):
+                df_hoy = refrescar_urls_dataframe(user_id, df_hoy)
         df_hoy['numero_factura_texto'] = (
             df_hoy['factura_prefijo'].fillna('').astype(str) + df_hoy['factura_numero'].fillna('').astype(str)
         )
@@ -919,8 +920,9 @@ with tab_devolucion:
 
         if not df_devoluciones.empty:
             df_devoluciones = df_devoluciones.copy()
-            with st.spinner("Actualizando enlaces PDF/XML..."):
-                df_devoluciones = refrescar_urls_dataframe(user_id, df_devoluciones)
+            if st.button("🔄 Actualizar enlaces PDF/XML", key="refrescar_urls_devoluciones"):
+                with st.spinner("Pidiendo enlaces actualizados a Alegra..."):
+                    df_devoluciones = refrescar_urls_dataframe(user_id, df_devoluciones)
             df_devoluciones['numero_factura_texto'] = (
                 df_devoluciones['factura_prefijo'].fillna('').astype(str)
                 + df_devoluciones['factura_numero'].fillna('').astype(str)

@@ -82,8 +82,9 @@ with tab_creditos:
         df_mostrar['factura_estado'] = df_mostrar['factura_estado'].fillna('Sin facturar').replace({
             'emitida': 'Facturada', 'abierta': 'Abierta (sin timbrar)', 'error': 'Error factura', 'anulada': 'Anulada (N.C.)'
         })
-        with st.spinner("Actualizando enlaces PDF/XML..."):
-            df_mostrar = refrescar_urls_dataframe(user_id, df_mostrar)
+        if st.button("🔄 Actualizar enlaces PDF/XML", key="refrescar_urls_creditos"):
+            with st.spinner("Pidiendo enlaces actualizados a Alegra..."):
+                df_mostrar = refrescar_urls_dataframe(user_id, df_mostrar)
         df_mostrar = df_mostrar[[
             'cliente', 'total', 'saldo_pendiente', 'fecha_limite', 'tipo_cuota',
             'estado', 'vencido', 'factura_estado', 'numero_factura_texto',
@@ -328,8 +329,9 @@ with tab_estado_cuenta:
             df_compras_mostrar['fe_texto'] = df_compras_mostrar['factura_estado'].fillna('Sin facturar').replace({
                 'emitida': 'Emitida', 'abierta': 'Abierta (sin timbrar)', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
             })
-            with st.spinner("Actualizando enlaces PDF/XML..."):
-                df_compras_mostrar = refrescar_urls_dataframe(user_id, df_compras_mostrar)
+            if st.button("🔄 Actualizar enlaces PDF/XML", key="refrescar_urls_estado_cuenta"):
+                with st.spinner("Pidiendo enlaces actualizados a Alegra..."):
+                    df_compras_mostrar = refrescar_urls_dataframe(user_id, df_compras_mostrar)
             st.dataframe(
                 df_compras_mostrar[[
                     'id', 'fecha', 'total', 'tipo_pago', 'estado', 'fe_texto', 'numero_factura_texto',
