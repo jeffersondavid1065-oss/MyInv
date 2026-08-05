@@ -163,10 +163,13 @@ with tab_cierre:
             )
             notas_cierre = st.text_area("Notas del cierre (opcional)", height=80)
 
-            with engine.connect() as conn:
-                cajeros_negocio = conn.execute(text("""
-                    SELECT id, nombre FROM Cajeros WHERE usuario_id = :uid AND activo = 1 ORDER BY nombre ASC
-                """), {"uid": user_id}).fetchall()
+            try:
+                with engine.connect() as conn:
+                    cajeros_negocio = conn.execute(text("""
+                        SELECT id, nombre FROM Cajeros WHERE usuario_id = :uid AND activo = 1 ORDER BY nombre ASC
+                    """), {"uid": user_id}).fetchall()
+            except Exception:
+                cajeros_negocio = []
 
             OTRO_DUENO = "Otro / Dueño"
             opciones_cierre = [c[1] for c in cajeros_negocio] + [OTRO_DUENO]
