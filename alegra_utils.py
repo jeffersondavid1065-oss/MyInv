@@ -738,6 +738,107 @@ def actualizar_pdf_cufe_venta(uid, venta_id):
     return actualizo
 
 
+def refrescar_url_factura(uid, venta_id):
+    """
+    Pide a Alegra un enlace fresco del PDF/XML de la factura de esta venta y lo
+    guarda en la base de datos. Los enlaces que Alegra entrega son URLs firmadas
+    de S3 con vencimiento (minutos/horas) - la que se guardó al crear/emitir la
+    factura deja de servir después de un rato, por eso hay que pedir una nueva
+    justo antes de mostrarla.
+    Devuelve (pdf_url, xml_url) frescos, o (None, None) si no se pudo obtener.
+    """
+    import queries
+
+    venta = queries.obtener_venta_para_facturar(uid, venta_id)
+    if not venta or not venta.factura_alegra_id:
+        return None, None
+    email, token = obtener_credenciales(uid)
+    if not email or not token:
+        return None, None
+    factura = obtener_factura(email, token, venta.factura_alegra_id)
+    if not factura:
+        return None, None
+    pdf_url = factura.get("pdf") if isinstance(factura.get("pdf"), str) else None
+    xml_url = factura.get("xml") if isinstance(factura.get("xml"), str) else None
+    if pdf_url or xml_url:
+        queries.actualizar_datos_factura(venta_id, pdf_url=pdf_url, xml_url=xml_url)
+    return pdf_url, xml_url
+
+
+def refrescar_url_nota_credito(uid, venta_id):
+    """Igual que refrescar_url_factura(), pero para la nota crédito de la venta."""
+    import queries
+
+    venta = queries.obtener_venta_para_facturar(uid, venta_id)
+    if not venta or not venta.nota_credito_alegra_id:
+        return None, None
+    email, token = obtener_credenciales(uid)
+    if not email or not token:
+        return None, None
+    nota = obtener_nota_credito(email, token, venta.nota_credito_alegra_id)
+    if not nota:
+        return None, None
+    pdf_url = nota.get("pdf") if isinstance(nota.get("pdf"), str) else None
+    xml_url = nota.get("xml") if isinstance(nota.get("xml"), str) else None
+    if pdf_url or xml_url:
+        queries.actualizar_pdf_nota_credito(venta_id, pdf_url, xml_url=xml_url)
+    return pdf_url, xml_url
+
+
+def refrescar_urls_dataframe(uid, df):
+    """
+    Actualiza en memoria (y en la base de datos) las columnas de PDF/XML de
+    facturas y notas crédito de un DataFrame de ventas, pidiéndole a Alegra un
+    enlace fresco de cada documento que tenga: el que se guardó al crear/emitir
+    el documento es una URL firmada de S3 con vencimiento y ya no sirve para
+    verla después de un rato. Solo toca las columnas que ya existen en el
+    DataFrame recibido (factura_pdf_url/factura_xml_url y/o
+    nota_credito_pdf_url/nota_credito_xml_url). No falla si Alegra no responde
+    para algún documento puntual - en ese caso deja la URL anterior tal cual.
+    """
+    import queries
+
+    if df.empty:
+        return df
+
+    email, token = obtener_credenciales(uid)
+    if not email or not token:
+        return df
+
+    id_col = "venta_id" if "venta_id" in df.columns else "id"
+    tiene_factura = "factura_alegra_id" in df.columns and "factura_pdf_url" in df.columns
+    tiene_nc = "nota_credito_alegra_id" in df.columns and "nota_credito_pdf_url" in df.columns
+
+    for idx, row in df.iterrows():
+        venta_id = row.get(id_col) if id_col in df.columns else None
+
+        if tiene_factura and row.get("factura_alegra_id") and row.get("factura_estado") in ("abierta", "emitida"):
+            factura = obtener_factura(email, token, row["factura_alegra_id"])
+            if factura:
+                pdf_url = factura.get("pdf") if isinstance(factura.get("pdf"), str) else None
+                xml_url = factura.get("xml") if isinstance(factura.get("xml"), str) else None
+                if pdf_url:
+                    df.at[idx, "factura_pdf_url"] = pdf_url
+                if xml_url and "factura_xml_url" in df.columns:
+                    df.at[idx, "factura_xml_url"] = xml_url
+                if venta_id is not None and (pdf_url or xml_url):
+                    queries.actualizar_datos_factura(int(venta_id), pdf_url=pdf_url, xml_url=xml_url)
+
+        if tiene_nc and row.get("nota_credito_alegra_id"):
+            nota = obtener_nota_credito(email, token, row["nota_credito_alegra_id"])
+            if nota:
+                pdf_url_nc = nota.get("pdf") if isinstance(nota.get("pdf"), str) else None
+                xml_url_nc = nota.get("xml") if isinstance(nota.get("xml"), str) else None
+                if pdf_url_nc:
+                    df.at[idx, "nota_credito_pdf_url"] = pdf_url_nc
+                if xml_url_nc and "nota_credito_xml_url" in df.columns:
+                    df.at[idx, "nota_credito_xml_url"] = xml_url_nc
+                if venta_id is not None and (pdf_url_nc or xml_url_nc):
+                    queries.actualizar_pdf_nota_credito(int(venta_id), pdf_url_nc, xml_url=xml_url_nc)
+
+    return df
+
+
 def registrar_abono_credito(uid, venta_id, monto, metodo_pago="Efectivo"):
     """
     Sincroniza con Alegra un abono hecho en MyInv sobre una venta a crédito:

@@ -20,7 +20,7 @@ from utils import aplicar_estilos, verificar_auth, bloquear_si_cajero
 from tz_utils import hoy_bogota, ahora_bogota
 from alegra_utils import (
     facturar_venta, actualizar_pdf_cufe_venta,
-    emitir_factura_dian_venta,
+    emitir_factura_dian_venta, refrescar_urls_dataframe,
 )
 
 st.set_page_config(page_title="Reportes", layout="wide")
@@ -574,6 +574,11 @@ with tab_facturas:
             df_mostrar_fe['estado_texto'] = df_mostrar_fe['factura_estado'].fillna('Sin facturar').replace({
                 'emitida': 'Emitida', 'abierta': 'Abierta (sin timbrar)', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
             })
+
+            if st.button("🔄 Actualizar enlaces PDF/XML", key="refrescar_urls_reportes"):
+                with st.spinner("Pidiendo enlaces actualizados a Alegra (puede tardar según cuántas facturas se muestren)..."):
+                    df_mostrar_fe = refrescar_urls_dataframe(user_id, df_mostrar_fe)
+            st.caption("Los enlaces de Alegra vencen después de un rato. Si dan error (\"Request has expired\") al abrirlos, usa el botón de arriba para renovar los de la tabla filtrada.")
 
             st.dataframe(
                 df_mostrar_fe[['id', 'fecha', 'cliente', 'cliente_documento', 'total', 'estado_texto',

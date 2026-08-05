@@ -17,7 +17,10 @@ from queries import (
 )
 from utils import aplicar_estilos, verificar_auth
 from tz_utils import hoy_bogota, ahora_bogota_naive
-from alegra_utils import facturar_venta, anular_factura_venta, emitir_factura_dian_venta
+from alegra_utils import (
+    facturar_venta, anular_factura_venta, emitir_factura_dian_venta,
+    refrescar_url_factura, refrescar_url_nota_credito, refrescar_urls_dataframe,
+)
 from iva_utils import calcular_desglose_iva, calcular_iva_desde_detalles, texto_tasa_iva
 
 st.set_page_config(page_title="Punto de Venta", layout="wide")
@@ -723,15 +726,34 @@ with tab_pos:
 
                     if venta_factura and venta_factura[1] == "emitida":
                         st.success(f"Factura electrónica emitida ante la DIAN (#{venta_factura[2]}).")
+                        if st.button("🔄 Obtener PDF/XML actualizados", use_container_width=True, key=f"refrescar_factura_{vid}"):
+                            with st.spinner("Pidiendo un enlace actualizado a Alegra..."):
+                                pdf_fresh, xml_fresh = refrescar_url_factura(user_id, vid)
+                            if pdf_fresh or xml_fresh:
+                                st.session_state[f"_pdf_factura_{vid}"] = pdf_fresh
+                                st.session_state[f"_xml_factura_{vid}"] = xml_fresh
+                            else:
+                                st.error("No se pudo obtener un enlace actualizado de Alegra. Intenta de nuevo en un momento.")
+                        pdf_mostrar = st.session_state.get(f"_pdf_factura_{vid}") or venta_factura[3]
+                        xml_mostrar = st.session_state.get(f"_xml_factura_{vid}") or venta_factura[4]
                         col_fpdf, col_fxml = st.columns(2)
-                        if venta_factura[3]:
-                            col_fpdf.link_button("Ver PDF de la factura", venta_factura[3], use_container_width=True)
-                        if venta_factura[4]:
-                            col_fxml.link_button("Descargar XML (DIAN)", venta_factura[4], use_container_width=True)
+                        if pdf_mostrar:
+                            col_fpdf.link_button("Ver PDF de la factura", pdf_mostrar, use_container_width=True)
+                        if xml_mostrar:
+                            col_fxml.link_button("Descargar XML (DIAN)", xml_mostrar, use_container_width=True)
+                        st.caption("Los enlaces de Alegra vencen después de un rato. Si dan error (\"Request has expired\"), usa el botón de arriba para renovarlos.")
                     elif venta_factura and venta_factura[1] == "abierta":
                         st.info(f"Factura creada (#{venta_factura[2]}) — todavía no se ha emitido ante la DIAN.")
-                        if venta_factura[3]:
-                            st.link_button("Ver PDF (borrador)", venta_factura[3], use_container_width=True)
+                        if st.button("🔄 Obtener PDF actualizado", use_container_width=True, key=f"refrescar_factura_abierta_{vid}"):
+                            with st.spinner("Pidiendo un enlace actualizado a Alegra..."):
+                                pdf_fresh_ab, _ = refrescar_url_factura(user_id, vid)
+                            if pdf_fresh_ab:
+                                st.session_state[f"_pdf_factura_{vid}"] = pdf_fresh_ab
+                            else:
+                                st.error("No se pudo obtener un enlace actualizado de Alegra. Intenta de nuevo en un momento.")
+                        pdf_mostrar_ab = st.session_state.get(f"_pdf_factura_{vid}") or venta_factura[3]
+                        if pdf_mostrar_ab:
+                            st.link_button("Ver PDF (borrador)", pdf_mostrar_ab, use_container_width=True)
                         if st.button("📧 Emitir a correo/DIAN", use_container_width=True, type="primary"):
                             with st.spinner("Emitiendo ante la DIAN..."):
                                 ok_dian, msg_dian = emitir_factura_dian_venta(user_id, vid)
@@ -775,6 +797,9 @@ with tab_historial:
 
         st.markdown("---")
         df_hoy = df_hoy.copy()
+        if st.button("🔄 Actualizar enlaces PDF/XML", key="refrescar_urls_hoy"):
+            with st.spinner("Pidiendo enlaces actualizados a Alegra..."):
+                df_hoy = refrescar_urls_dataframe(user_id, df_hoy)
         df_hoy['numero_factura_texto'] = (
             df_hoy['factura_prefijo'].fillna('').astype(str) + df_hoy['factura_numero'].fillna('').astype(str)
         )
@@ -912,6 +937,9 @@ with tab_devolucion:
 
         if not df_devoluciones.empty:
             df_devoluciones = df_devoluciones.copy()
+            if st.button("🔄 Actualizar enlaces PDF/XML", key="refrescar_urls_devoluciones"):
+                with st.spinner("Pidiendo enlaces actualizados a Alegra..."):
+                    df_devoluciones = refrescar_urls_dataframe(user_id, df_devoluciones)
             df_devoluciones['numero_factura_texto'] = (
                 df_devoluciones['factura_prefijo'].fillna('').astype(str)
                 + df_devoluciones['factura_numero'].fillna('').astype(str)
@@ -1041,11 +1069,22 @@ with tab_devolucion:
                         f"Factura electrónica {numero_factura_dev} anulada mediante "
                         f"nota crédito (#{venta_dev[10]})."
                     )
+                    if st.button("🔄 Obtener PDF/XML actualizados", use_container_width=True, key=f"refrescar_nc_{vid_dev}"):
+                        with st.spinner("Pidiendo un enlace actualizado a Alegra..."):
+                            pdf_fresh_nc, xml_fresh_nc = refrescar_url_nota_credito(user_id, vid_dev)
+                        if pdf_fresh_nc or xml_fresh_nc:
+                            st.session_state[f"_pdf_nc_{vid_dev}"] = pdf_fresh_nc
+                            st.session_state[f"_xml_nc_{vid_dev}"] = xml_fresh_nc
+                        else:
+                            st.error("No se pudo obtener un enlace actualizado de Alegra. Intenta de nuevo en un momento.")
+                    pdf_mostrar_nc = st.session_state.get(f"_pdf_nc_{vid_dev}") or venta_dev[11]
+                    xml_mostrar_nc = st.session_state.get(f"_xml_nc_{vid_dev}") or venta_dev[12]
                     col_ncpdf, col_ncxml = st.columns(2)
-                    if venta_dev[11]:
-                        col_ncpdf.link_button("Ver PDF de la Nota Crédito", venta_dev[11], use_container_width=True)
-                    if venta_dev[12]:
-                        col_ncxml.link_button("Descargar XML (DIAN)", venta_dev[12], use_container_width=True)
+                    if pdf_mostrar_nc:
+                        col_ncpdf.link_button("Ver PDF de la Nota Crédito", pdf_mostrar_nc, use_container_width=True)
+                    if xml_mostrar_nc:
+                        col_ncxml.link_button("Descargar XML (DIAN)", xml_mostrar_nc, use_container_width=True)
+                    st.caption("Los enlaces de Alegra vencen después de un rato. Si dan error (\"Request has expired\"), usa el botón de arriba para renovarlos.")
                 elif venta_dev[7]:
                     st.warning(
                         "Esta venta tenía factura electrónica emitida pero no se confirmó la nota crédito."

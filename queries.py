@@ -220,7 +220,8 @@ def obtener_creditos_cliente(uid, cliente_id):
         return pd.read_sql_query(text("""
             SELECT c.id, v.id as venta_id, c.total, c.saldo_pendiente,
                    c.fecha_inicio, c.fecha_limite, c.tipo_cuota,
-                   c.valor_cuota, c.estado, v.factura_estado, v.factura_pdf_url, v.factura_xml_url,
+                   c.valor_cuota, c.estado, v.factura_estado, v.factura_alegra_id,
+                   v.factura_pdf_url, v.factura_xml_url,
                    v.factura_prefijo, v.factura_numero
             FROM Creditos c
             JOIN Ventas v ON c.venta_id = v.id
@@ -236,7 +237,7 @@ def obtener_historial_ventas_cliente(uid, cliente_id):
     with engine.connect() as conn:
         return pd.read_sql_query(text("""
             SELECT v.id, v.fecha, v.total, v.tipo_pago, v.estado,
-                   v.factura_estado, v.factura_prefijo, v.factura_numero,
+                   v.factura_estado, v.factura_alegra_id, v.factura_prefijo, v.factura_numero,
                    v.factura_pdf_url, v.factura_xml_url,
                    v.nota_credito_alegra_id, v.nota_credito_pdf_url, v.nota_credito_xml_url
             FROM Ventas v
@@ -269,7 +270,7 @@ def obtener_creditos_pendientes(uid):
                    cr.total, cr.saldo_pendiente,
                    cr.fecha_limite, cr.tipo_cuota, cr.estado,
                    CASE WHEN cr.fecha_limite < :hoy THEN TRUE ELSE FALSE END as vencido,
-                   v.factura_estado, v.factura_prefijo, v.factura_numero,
+                   v.factura_estado, v.factura_alegra_id, v.factura_prefijo, v.factura_numero,
                    v.factura_pdf_url, v.factura_xml_url
             FROM Creditos cr
             JOIN Clientes cl ON cr.cliente_id = cl.id
