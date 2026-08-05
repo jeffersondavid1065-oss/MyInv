@@ -472,26 +472,49 @@ with tab_pos:
 
             st.markdown("---")
 
+            emitir_dian_inmediato = False
+
             if fe_activa:
-                col_venta1, col_venta2 = st.columns(2)
-                confirmar_venta = tipo_pago and col_venta1.button(
-                    "Registrar Venta", type="primary", use_container_width=True
-                )
-                confirmar_venta_factura = tipo_pago and col_venta2.button(
-                    "Registrar Venta con Factura Electrónica", use_container_width=True
-                )
+                if st.session_state.get("fe_pendiente_decision"):
+                    st.info("Venta lista. ¿Qué quieres hacer con la factura electrónica?")
+                    col_fe1, col_fe2, col_fe3 = st.columns([2, 2, 1])
+                    emitir_ahora = tipo_pago and col_fe1.button(
+                        "📧 Emitir a correo/DIAN", type="primary", use_container_width=True
+                    )
+                    guardar_abierta = tipo_pago and col_fe2.button(
+                        "💾 Guardar (dejar abierta)", use_container_width=True
+                    )
+                    if col_fe3.button("Cancelar", use_container_width=True):
+                        st.session_state.fe_pendiente_decision = False
+                        st.rerun()
+                    confirmar_venta = False
+                    confirmar_venta_factura = emitir_ahora or guardar_abierta
+                    emitir_dian_inmediato = emitir_ahora
+                else:
+                    col_venta1, col_venta2 = st.columns(2)
+                    confirmar_venta = tipo_pago and col_venta1.button(
+                        "Registrar Venta", type="primary", use_container_width=True
+                    )
+                    pedir_decision_fe = tipo_pago and col_venta2.button(
+                        "Registrar Venta con Factura Electrónica", use_container_width=True
+                    )
+                    confirmar_venta_factura = False
+                    if pedir_decision_fe:
+                        if cliente_id:
+                            st.session_state.fe_pendiente_decision = True
+                            st.rerun()
+                        else:
+                            st.warning(
+                                "Selecciona un cliente registrado (con documento) en 'Cliente' "
+                                "para poder facturar electrónicamente."
+                            )
             else:
                 confirmar_venta = tipo_pago and st.button(
                     "Registrar Venta", type="primary", use_container_width=True
                 )
                 confirmar_venta_factura = False
 
-            if confirmar_venta_factura and not cliente_id:
-                st.warning(
-                    "Selecciona un cliente registrado (con documento) en 'Cliente' "
-                    "para poder facturar electrónicamente."
-                )
-            elif confirmar_venta or confirmar_venta_factura:
+            if confirmar_venta or confirmar_venta_factura:
                 try:
                     # Subtotal bruto (antes de cualquier descuento) y descuento total
                     # (suma de descuentos por ítem + descuento global), para que el
@@ -595,6 +618,7 @@ with tab_pos:
                     st.session_state.ultima_venta_tipo = tipo_pago
 
                     limpiar_carrito()
+                    st.session_state.fe_pendiente_decision = False
                     st.success(f"Venta #{venta_id} registrada.")
                     if cambio > 0:
                         st.info(f"Cambio: {formato_cop(cambio)}")
@@ -603,7 +627,15 @@ with tab_pos:
                         with st.spinner("Creando factura electrónica..."):
                             ok_f, msg_f = facturar_venta(user_id, venta_id)
                         if ok_f:
-                            st.success(msg_f)
+                            if emitir_dian_inmediato:
+                                with st.spinner("Emitiendo ante la DIAN..."):
+                                    ok_dian, msg_dian = emitir_factura_dian_venta(user_id, venta_id)
+                                if ok_dian:
+                                    st.success(msg_dian)
+                                else:
+                                    st.warning(f"La factura se creó pero no se pudo emitir: {msg_dian}")
+                            else:
+                                st.info(f"{msg_f} Queda pendiente — puedes emitirla luego desde Reportes → Facturación Electrónica.")
                         else:
                             st.warning(msg_f)
 
@@ -714,24 +746,12 @@ with tab_pos:
                         st.info(f"Factura creada (#{venta_factura[2]}) — todavía no se ha emitido ante la DIAN.")
                         if venta_factura[3]:
                             st.link_button("Ver PDF (borrador)", venta_factura[3], use_container_width=True)
-                        st.markdown("**¿Qué quieres hacer con esta factura?**")
-                        col_fe1, col_fe2 = st.columns(2)
-                        with col_fe1:
-                            if st.button("📧 Emitir a correo/DIAN", use_container_width=True, type="primary"):
-                                with st.spinner("Emitiendo ante la DIAN..."):
-                                    ok_dian, msg_dian = emitir_factura_dian_venta(user_id, vid)
-                                st.session_state._msg_post_venta = ("success" if ok_dian else "warning", msg_dian)
-                                st.session_state.ultima_venta_id = None
-                                st.rerun()
-                        with col_fe2:
-                            if st.button("🗂️ Dejar abierta", use_container_width=True):
-                                st.session_state._msg_post_venta = (
-                                    "info",
-                                    f"Factura #{venta_factura[2]} quedó abierta, pendiente de emitir ante la DIAN. "
-                                    "Puedes emitirla después desde Reportes → Facturación Electrónica."
-                                )
-                                st.session_state.ultima_venta_id = None
-                                st.rerun()
+                        if st.button("📧 Emitir a correo/DIAN", use_container_width=True, type="primary"):
+                            with st.spinner("Emitiendo ante la DIAN..."):
+                                ok_dian, msg_dian = emitir_factura_dian_venta(user_id, vid)
+                            st.session_state._msg_post_venta = ("success" if ok_dian else "warning", msg_dian)
+                            st.session_state.ultima_venta_id = None
+                            st.rerun()
                     elif not venta_factura or not venta_factura[0]:
                         st.caption("Esta venta no tiene cliente asociado — no se puede facturar electrónicamente.")
                     else:
