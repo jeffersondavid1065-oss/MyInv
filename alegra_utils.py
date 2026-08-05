@@ -822,6 +822,16 @@ def refrescar_urls_dataframe(uid, df):
     if not email or not token:
         return df
 
+    def _tiene_valor(v):
+        """True si v no es None ni NaN (pandas deja NaN, no None, en columnas
+        numéricas con NULL de SQL - y bool(float('nan')) es True en Python,
+        así que un `if row.get(...)` simple deja pasar filas sin ese id)."""
+        if v is None:
+            return False
+        if isinstance(v, float) and v != v:
+            return False
+        return bool(v)
+
     id_col = "venta_id" if "venta_id" in df.columns else "id"
     tiene_factura = "factura_alegra_id" in df.columns and "factura_pdf_url" in df.columns
     tiene_nc = "nota_credito_alegra_id" in df.columns and "nota_credito_pdf_url" in df.columns
@@ -829,8 +839,10 @@ def refrescar_urls_dataframe(uid, df):
     for idx, row in df.iterrows():
         venta_id = row.get(id_col) if id_col in df.columns else None
 
-        if tiene_factura and row.get("factura_alegra_id") and row.get("factura_estado") in ("abierta", "emitida"):
-            factura = _factura_cache(email, token, row["factura_alegra_id"])
+        if tiene_factura and _tiene_valor(row.get("factura_alegra_id")) and row.get("factura_estado") in ("abierta", "emitida"):
+            # int(...): pandas guarda esta columna como float (12345.0) cuando
+            # alguna otra fila tiene NULL - un id así no existe en Alegra.
+            factura = _factura_cache(email, token, int(row["factura_alegra_id"]))
             if factura:
                 pdf_url = factura.get("pdf") if isinstance(factura.get("pdf"), str) else None
                 xml_url = factura.get("xml") if isinstance(factura.get("xml"), str) else None
@@ -843,8 +855,8 @@ def refrescar_urls_dataframe(uid, df):
                 if venta_id is not None and (cambio_pdf or cambio_xml):
                     queries.actualizar_datos_factura(int(venta_id), pdf_url=pdf_url, xml_url=xml_url)
 
-        if tiene_nc and row.get("nota_credito_alegra_id"):
-            nota = _nota_credito_cache(email, token, row["nota_credito_alegra_id"])
+        if tiene_nc and _tiene_valor(row.get("nota_credito_alegra_id")):
+            nota = _nota_credito_cache(email, token, int(row["nota_credito_alegra_id"]))
             if nota:
                 pdf_url_nc = nota.get("pdf") if isinstance(nota.get("pdf"), str) else None
                 xml_url_nc = nota.get("xml") if isinstance(nota.get("xml"), str) else None
