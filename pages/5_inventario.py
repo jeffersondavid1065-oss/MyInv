@@ -9,6 +9,7 @@ from queries import (
     obtener_metricas_inventario,
     obtener_proveedores,
     invalidar_cache_productos,
+    tiene_iva_habilitado,
 )
 from utils import aplicar_estilos, verificar_auth, bloquear_si_cajero
 
@@ -16,6 +17,8 @@ st.set_page_config(page_title="Inventario", layout="wide")
 aplicar_estilos()
 user_id, nombre_negocio = verificar_auth()
 bloquear_si_cajero()
+
+iva_activo = tiene_iva_habilitado(user_id)
 
 engine = obtener_conexion()
 
@@ -127,40 +130,45 @@ with tab_stock:
 
             cols_mostrar = ['id', 'nombre', 'codigo_barras', 'codigo_ref',
                             'categoria', 'unidad_medida', 'stock_actual',
-                            'stock_minimo', 'costo_compra', 'precio_venta',
-                            'iva_porcentaje', 'ganancia', 'pct_ganancia']
+                            'stock_minimo', 'costo_compra', 'precio_venta']
+            if iva_activo:
+                cols_mostrar.append('iva_porcentaje')
+            cols_mostrar += ['ganancia', 'pct_ganancia']
             cols_disponibles = [c for c in cols_mostrar if c in df_show.columns]
+
+            column_config_inv = {
+                "id": None,
+                "nombre": "Producto",
+                "codigo_barras": st.column_config.TextColumn("Código Barras"),
+                "codigo_ref": "Referencia",
+                "categoria": "Categoría",
+                "unidad_medida": st.column_config.SelectboxColumn(
+                    "Unidad", options=UNIDADES,
+                    help="Ej: kg para granel, m para cable, Unidad para repuestos"
+                ),
+                "stock_actual": st.column_config.NumberColumn(
+                    "Stock", min_value=0, format="localized"
+                ),
+                "stock_minimo": st.column_config.NumberColumn(
+                    "Stock Mín.", min_value=0, format="localized"
+                ),
+                "costo_compra": st.column_config.NumberColumn("Costo ($)", format="$%,d"),
+                "precio_venta": st.column_config.NumberColumn("Precio Venta ($)", format="$%,d"),
+                "ganancia": st.column_config.NumberColumn("Ganancia ($)", format="$%,d"),
+                "pct_ganancia": st.column_config.NumberColumn("% Ganancia", format="%.1f%%"),
+            }
+            if iva_activo:
+                column_config_inv["iva_porcentaje"] = st.column_config.SelectboxColumn(
+                    "IVA", options=OPCIONES_IVA,
+                    help="0 = sin IVA/excluido. El precio de venta ya lo incluye."
+                )
 
             df_edit = st.data_editor(
                 df_show[cols_disponibles],
                 hide_index=True,
                 use_container_width=True,
                 disabled=["id", "ganancia", "pct_ganancia"],
-                column_config={
-                    "id": None,
-                    "nombre": "Producto",
-                    "codigo_barras": st.column_config.TextColumn("Código Barras"),
-                    "codigo_ref": "Referencia",
-                    "categoria": "Categoría",
-                    "unidad_medida": st.column_config.SelectboxColumn(
-                        "Unidad", options=UNIDADES,
-                        help="Ej: kg para granel, m para cable, Unidad para repuestos"
-                    ),
-                    "stock_actual": st.column_config.NumberColumn(
-                        "Stock", min_value=0, format="localized"
-                    ),
-                    "stock_minimo": st.column_config.NumberColumn(
-                        "Stock Mín.", min_value=0, format="localized"
-                    ),
-                    "costo_compra": st.column_config.NumberColumn("Costo ($)", format="$%,d"),
-                    "precio_venta": st.column_config.NumberColumn("Precio Venta ($)", format="$%,d"),
-                    "iva_porcentaje": st.column_config.SelectboxColumn(
-                        "IVA", options=OPCIONES_IVA,
-                        help="0 = sin IVA/excluido. El precio de venta ya lo incluye."
-                    ),
-                    "ganancia": st.column_config.NumberColumn("Ganancia ($)", format="$%,d"),
-                    "pct_ganancia": st.column_config.NumberColumn("% Ganancia", format="%.1f%%"),
-                },
+                column_config=column_config_inv,
                 key=f"editor_inv_{busqueda_inv}_{filtro_estado}"
             )
 
@@ -169,16 +177,8 @@ with tab_stock:
                     with engine.begin() as conn:
                         for _, row in df_edit.iterrows():
                             um = row.get('unidad_medida', 'Unidad') if 'unidad_medida' in row else 'Unidad'
-                            conn.execute(text("""
-                                UPDATE Productos
-                                SET nombre = :nom, codigo_barras = :cod,
-                                    codigo_ref = :ref, categoria = :cat,
-                                    unidad_medida = :um,
-                                    stock_actual = :st_act, stock_minimo = :st_min,
-                                    costo_compra = :costo, precio_venta = :pvp,
-                                    iva_porcentaje = :iva
-                                WHERE id = :id AND usuario_id = :uid
-                            """), {
+                            sql_iva = ", iva_porcentaje = :iva" if iva_activo else ""
+                            params = {
                                 "nom": row['nombre'],
                                 "cod": row['codigo_barras'] or None,
                                 "ref": row['codigo_ref'] or None,
@@ -188,11 +188,22 @@ with tab_stock:
                                 "st_min": float(row['stock_minimo']),
                                 "costo": float(row['costo_compra']),
                                 "pvp": float(row['precio_venta']),
-                                "iva": float(row.get('iva_porcentaje', 0) or 0),
                                 # ganancia y pct_ganancia son calculadas, NO se guardan
                                 "id": int(row['id']),
                                 "uid": user_id
-                            })
+                            }
+                            if iva_activo:
+                                params["iva"] = float(row.get('iva_porcentaje', 0) or 0)
+                            conn.execute(text(f"""
+                                UPDATE Productos
+                                SET nombre = :nom, codigo_barras = :cod,
+                                    codigo_ref = :ref, categoria = :cat,
+                                    unidad_medida = :um,
+                                    stock_actual = :st_act, stock_minimo = :st_min,
+                                    costo_compra = :costo, precio_venta = :pvp
+                                    {sql_iva}
+                                WHERE id = :id AND usuario_id = :uid
+                            """), params)
                     invalidar_cache_productos()
                     st.success("Inventario actualizado correctamente.")
                     st.rerun()
@@ -216,11 +227,14 @@ with tab_nuevo:
                                     placeholder="Escanea con el lector o escribe manualmente")
         cod_ref = st.text_input("Referencia interna (opcional)")
         categoria_p = st.text_input("Categoría", value="General")
-        iva_p = st.selectbox(
-            "IVA", options=OPCIONES_IVA, index=0,
-            format_func=lambda v: "Sin IVA / Excluido" if v == 0 else f"{v}%",
-            help="Opcional. El precio de venta que definas abajo ya debe incluir el IVA."
-        )
+        if iva_activo:
+            iva_p = st.selectbox(
+                "IVA", options=OPCIONES_IVA, index=0,
+                format_func=lambda v: "Sin IVA / Excluido" if v == 0 else f"{v}%",
+                help="Opcional. El precio de venta que definas abajo ya debe incluir el IVA."
+            )
+        else:
+            iva_p = 0
 
         unidad_p = st.selectbox("Unidad de Medida", options=UNIDADES,
                                  help="Cómo se mide/vende este producto")

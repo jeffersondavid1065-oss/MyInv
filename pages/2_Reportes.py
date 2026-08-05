@@ -14,6 +14,7 @@ from queries import (
     obtener_facturas_periodo,
     obtener_iva_periodo,
     obtener_iva_por_tasa_periodo,
+    tiene_iva_habilitado,
 )
 from utils import aplicar_estilos, verificar_auth, bloquear_si_cajero
 from tz_utils import hoy_bogota, ahora_bogota
@@ -27,13 +28,15 @@ aplicar_estilos()
 user_id, nombre_negocio = verificar_auth()
 bloquear_si_cajero()
 
+iva_activo = tiene_iva_habilitado(user_id)
+
 engine = obtener_conexion()
 
 def formato_cop(numero):
     return f"${float(numero):,.0f}".replace(",", ".")
 
 
-def generar_excel_ventas(df_ventas, fecha_ini, fecha_fin, ingresos, costos, margen, nombre_negocio, iva=0):
+def generar_excel_ventas(df_ventas, fecha_ini, fecha_fin, ingresos, costos, margen, nombre_negocio, iva=0, mostrar_iva=True):
     """Genera reporte Excel de ventas del período."""
     wb = Workbook()
     ws = wb.active
@@ -67,16 +70,23 @@ def generar_excel_ventas(df_ventas, fecha_ini, fecha_fin, ingresos, costos, marg
     ws.append(["RESUMEN FINANCIERO", "", "", "", "", "", "", ""])
     ws["A4"].font = Font(bold=True, size=11, color="1F4E78")
 
-    ws.append(["Ingresos Totales (con IVA)", f"${ingresos:,.0f}".replace(",", ".")])
-    ws.append(["IVA Recaudado", f"${iva:,.0f}".replace(",", ".")])
-    ws.append(["Ingresos Netos (sin IVA)", f"${ingresos_netos:,.0f}".replace(",", ".")])
-    ws.append(["Costo de Ventas", f"${costos:,.0f}".replace(",", ".")])
-    ws.append(["Descuentos Totales", f"${descuentos:,.0f}".replace(",", ".")])
-    ws.append(["Margen Bruto (Ingresos Netos - Costos)", f"${margen:,.0f}".replace(",", ".")])
-    ws.append([])
-    ws.append(["Nota: el IVA recaudado no es utilidad del negocio — es dinero cobrado a nombre de la DIAN que se debe declarar y remitir."])
-    ws.cell(row=ws.max_row, column=1).font = Font(italic=True, size=9, color="888888")
-    ws.append([])
+    if mostrar_iva:
+        ws.append(["Ingresos Totales (con IVA)", f"${ingresos:,.0f}".replace(",", ".")])
+        ws.append(["IVA Recaudado", f"${iva:,.0f}".replace(",", ".")])
+        ws.append(["Ingresos Netos (sin IVA)", f"${ingresos_netos:,.0f}".replace(",", ".")])
+        ws.append(["Costo de Ventas", f"${costos:,.0f}".replace(",", ".")])
+        ws.append(["Descuentos Totales", f"${descuentos:,.0f}".replace(",", ".")])
+        ws.append(["Margen Bruto (Ingresos Netos - Costos)", f"${margen:,.0f}".replace(",", ".")])
+        ws.append([])
+        ws.append(["Nota: el IVA recaudado no es utilidad del negocio — es dinero cobrado a nombre de la DIAN que se debe declarar y remitir."])
+        ws.cell(row=ws.max_row, column=1).font = Font(italic=True, size=9, color="888888")
+        ws.append([])
+    else:
+        ws.append(["Ingresos Totales", f"${ingresos:,.0f}".replace(",", ".")])
+        ws.append(["Costo de Ventas", f"${costos:,.0f}".replace(",", ".")])
+        ws.append(["Descuentos Totales", f"${descuentos:,.0f}".replace(",", ".")])
+        ws.append(["Margen Bruto", f"${margen:,.0f}".replace(",", ".")])
+        ws.append([])
 
     # Headers de tabla
     headers = ["ID Venta", "Fecha", "Cliente", "Descuento ($)", "Total ($)", "Tipo Pago", "Estado", "Cambio ($)"]
@@ -286,19 +296,28 @@ with tab_periodo:
         }).scalar()
         costos_rep = float(costos_rep) if costos_rep else 0
 
-    iva_rep = obtener_iva_periodo(user_id, fecha_ini_rep, fecha_fin_rep)
+    iva_rep = obtener_iva_periodo(user_id, fecha_ini_rep, fecha_fin_rep) if iva_activo else 0.0
     ingresos_netos_rep = ingresos_rep - iva_rep
     margen_rep = ingresos_netos_rep - costos_rep
 
-    col_r1, col_r2, col_r3, col_r4, col_r5, col_r6 = st.columns(6)
-    col_r1.metric("Ingresos (con IVA)", formato_cop(ingresos_rep))
-    col_r2.metric("IVA Recaudado", formato_cop(iva_rep))
-    col_r3.metric("Efectivo", formato_cop(efectivo_rep))
-    col_r4.metric("Transferencias", formato_cop(transfer_rep))
-    col_r5.metric("Descuentos", formato_cop(descuentos_rep))
-    col_r6.metric("Margen Bruto (sin IVA)", formato_cop(margen_rep),
-                  delta_color="inverse" if margen_rep < 0 else "normal")
-    st.caption(f"Ingresos netos (sin IVA): {formato_cop(ingresos_netos_rep)} — el IVA recaudado no es utilidad, es dinero que se le debe a la DIAN.")
+    if iva_activo:
+        col_r1, col_r2, col_r3, col_r4, col_r5, col_r6 = st.columns(6)
+        col_r1.metric("Ingresos (con IVA)", formato_cop(ingresos_rep))
+        col_r2.metric("IVA Recaudado", formato_cop(iva_rep))
+        col_r3.metric("Efectivo", formato_cop(efectivo_rep))
+        col_r4.metric("Transferencias", formato_cop(transfer_rep))
+        col_r5.metric("Descuentos", formato_cop(descuentos_rep))
+        col_r6.metric("Margen Bruto (sin IVA)", formato_cop(margen_rep),
+                      delta_color="inverse" if margen_rep < 0 else "normal")
+        st.caption(f"Ingresos netos (sin IVA): {formato_cop(ingresos_netos_rep)} — el IVA recaudado no es utilidad, es dinero que se le debe a la DIAN.")
+    else:
+        col_r1, col_r2, col_r3, col_r4, col_r5 = st.columns(5)
+        col_r1.metric("Ingresos", formato_cop(ingresos_rep))
+        col_r2.metric("Efectivo", formato_cop(efectivo_rep))
+        col_r3.metric("Transferencias", formato_cop(transfer_rep))
+        col_r4.metric("Descuentos", formato_cop(descuentos_rep))
+        col_r5.metric("Margen Bruto", formato_cop(margen_rep),
+                      delta_color="inverse" if margen_rep < 0 else "normal")
 
     st.markdown("---")
 
@@ -321,7 +340,7 @@ with tab_periodo:
         st.markdown("---")
         excel_buf = generar_excel_ventas(
             df_periodo, fecha_ini_rep, fecha_fin_rep,
-            ingresos_rep, costos_rep, margen_rep, nombre_negocio, iva_rep
+            ingresos_rep, costos_rep, margen_rep, nombre_negocio, iva_rep, mostrar_iva=iva_activo
         )
         st.download_button(
             label="Descargar Reporte en Excel (para DIAN)",
@@ -669,6 +688,14 @@ with tab_facturas:
 # ==========================================
 with tab_iva:
     st.subheader("Ayuda para tu Declaración de IVA")
+
+    if not iva_activo:
+        st.info(
+            "Tu negocio está configurado como que **no declara IVA**. Si esto no es correcto, "
+            "ve a Configuración → Impuestos y actívalo — ahí se explica qué cambia."
+        )
+        st.stop()
+
     st.caption(
         "Calcula el IVA Generado en tus ventas (el que le cobraste a tus clientes) para el período que "
         "elijas — el dato que va en la casilla de IVA Generado del Formulario 300 de la DIAN."

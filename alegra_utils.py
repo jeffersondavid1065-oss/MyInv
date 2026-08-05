@@ -507,6 +507,12 @@ def facturar_venta(uid, venta_id):
     if not contacto_id:
         return False, "No se pudo crear/obtener el cliente."
 
+    # Red de seguridad: si el negocio está configurado como que no declara
+    # IVA, nunca se le manda IVA a la factura aunque algún producto haya
+    # quedado con un % viejo - evita el rechazo del proveedor por facturar
+    # con IVA a una cuenta "No responsable de IVA".
+    iva_permitido = queries.tiene_iva_habilitado(uid)
+
     renglones = queries.obtener_items_venta(venta_id)
     items_payload = []
     for r in renglones:
@@ -516,7 +522,8 @@ def facturar_venta(uid, venta_id):
         if not item_id:
             return False, f"No se pudo crear/obtener el producto '{r.nombre_producto}'."
         items_payload.append(_construir_item_payload(
-            item_id, r.precio_unitario, r.cantidad, r.descuento, r.iva_porcentaje, email, token
+            item_id, r.precio_unitario, r.cantidad, r.descuento,
+            r.iva_porcentaje if iva_permitido else 0, email, token
         ))
 
     due_date = None
@@ -632,6 +639,8 @@ def anular_factura_venta(uid, venta_id):
     if not contacto_id:
         return False, "No se pudo obtener el cliente."
 
+    iva_permitido = queries.tiene_iva_habilitado(uid)
+
     renglones = queries.obtener_items_venta(venta_id)
     items_payload = []
     for r in renglones:
@@ -640,7 +649,8 @@ def anular_factura_venta(uid, venta_id):
         item_id = obtener_o_crear_item(uid, r.producto_id, email, token)
         if item_id:
             items_payload.append(_construir_item_payload(
-                item_id, r.precio_unitario, r.cantidad, r.descuento, r.iva_porcentaje, email, token
+                item_id, r.precio_unitario, r.cantidad, r.descuento,
+                r.iva_porcentaje if iva_permitido else 0, email, token
             ))
 
     if not items_payload:

@@ -177,6 +177,15 @@ def generar_ticket_venta(
     # ==========================================
     # TABLA DE ARTÍCULOS
     # ==========================================
+    # La columna IVA% solo se muestra si algún renglón realmente tiene IVA -
+    # si el negocio no declara IVA, todos los productos quedan en 0% y esta
+    # columna sería puro ruido.
+    mostrar_iva = (
+        df_items is not None and not df_items.empty
+        and 'iva_porcentaje' in df_items.columns
+        and df_items['iva_porcentaje'].fillna(0).astype(float).sum() > 0
+    )
+
     y_tabla = y_cols + 32
     pdf.set_draw_color(*GRIS_CLARO)
     pdf.line(12, y_tabla, 198, y_tabla)
@@ -184,11 +193,17 @@ def generar_ticket_venta(
     pdf.set_xy(12, y_tabla + 2)
     pdf.set_font("Helvetica", "B", 9)
     pdf.set_text_color(*GRIS_OSCURO)
-    pdf.cell(80, 5, "ARTÍCULO")
-    pdf.cell(20, 5, "CANT.", align="C")
-    pdf.cell(30, 5, "PRECIO", align="R")
-    pdf.cell(20, 5, "IVA%", align="R")
-    pdf.cell(36, 5, "SUBTOTAL", align="R")
+    if mostrar_iva:
+        pdf.cell(80, 5, "ARTÍCULO")
+        pdf.cell(20, 5, "CANT.", align="C")
+        pdf.cell(30, 5, "PRECIO", align="R")
+        pdf.cell(20, 5, "IVA%", align="R")
+        pdf.cell(36, 5, "SUBTOTAL", align="R")
+    else:
+        pdf.cell(95, 5, "ARTÍCULO")
+        pdf.cell(25, 5, "CANT.", align="C")
+        pdf.cell(33, 5, "PRECIO", align="R")
+        pdf.cell(33, 5, "SUBTOTAL", align="R")
 
     pdf.set_draw_color(*GRIS_CLARO)
     pdf.line(12, y_tabla + 8, 198, y_tabla + 8)
@@ -199,7 +214,7 @@ def generar_ticket_venta(
 
     if df_items is not None and not df_items.empty:
         for _, row in df_items.iterrows():
-            nombre = safe_str(row.get('nombre_producto', ''))[:60]
+            nombre = safe_str(row.get('nombre_producto', ''))[:60 if mostrar_iva else 68]
             cantidad = float(row.get('cantidad', 1))
             precio_u = float(row.get('precio_unitario', 0))
             subtotal_item = float(row.get('subtotal', 0))
@@ -217,11 +232,17 @@ def generar_ticket_venta(
                 cant_str = str(int(cantidad))
 
             pdf.set_xy(12, y_item)
-            pdf.cell(80, 5, nombre)
-            pdf.cell(20, 5, cant_str, align="C")
-            pdf.cell(30, 5, f"${precio_u:,.0f}".replace(",", "."), align="R")
-            pdf.cell(20, 5, f"{iva_pct_item:.0f}%", align="R")
-            pdf.cell(36, 5, f"${subtotal_item:,.0f}".replace(",", "."), align="R")
+            if mostrar_iva:
+                pdf.cell(80, 5, nombre)
+                pdf.cell(20, 5, cant_str, align="C")
+                pdf.cell(30, 5, f"${precio_u:,.0f}".replace(",", "."), align="R")
+                pdf.cell(20, 5, f"{iva_pct_item:.0f}%", align="R")
+                pdf.cell(36, 5, f"${subtotal_item:,.0f}".replace(",", "."), align="R")
+            else:
+                pdf.cell(95, 5, nombre)
+                pdf.cell(25, 5, cant_str, align="C")
+                pdf.cell(33, 5, f"${precio_u:,.0f}".replace(",", "."), align="R")
+                pdf.cell(33, 5, f"${subtotal_item:,.0f}".replace(",", "."), align="R")
             y_item += 5
 
             pdf.set_draw_color(230, 230, 230)

@@ -638,6 +638,36 @@ def establecer_fe_habilitada(uid, habilitada):
     tiene_fe_habilitada.clear()
 
 
+@st.cache_data(ttl=60)
+def tiene_iva_habilitado(uid):
+    """Indica si el negocio declara IVA. Controla si se muestran/permiten
+    campos de IVA en Inventario, Venta y Reportes - y si se le puede cobrar
+    IVA a un cliente en la factura electrónica. Si algo falla (ej. la
+    migración de la columna todavía no corrió), se asume que no declara -
+    es el lado seguro (nunca cobrar IVA por accidente)."""
+    try:
+        engine = obtener_conexion()
+        with engine.connect() as conn:
+            valor = conn.execute(
+                text("SELECT declara_iva FROM Usuarios WHERE id = :uid"), {"uid": uid}
+            ).scalar()
+        return bool(valor)
+    except Exception as e:
+        print(f"[tiene_iva_habilitado] Error: {e}")
+        return False
+
+
+def establecer_declara_iva(uid, declara):
+    """Guarda si el negocio declara IVA o no (lo define el propio dueño en Configuración)."""
+    engine = obtener_conexion()
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE Usuarios SET declara_iva = :val WHERE id = :uid"),
+            {"val": bool(declara), "uid": uid}
+        )
+    tiene_iva_habilitado.clear()
+
+
 def obtener_venta_id_de_credito(credito_id):
     """Devuelve el venta_id ligado a un crédito, para poder sincronizar abonos con Alegra."""
     engine = obtener_conexion()

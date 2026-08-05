@@ -3,7 +3,10 @@ import os
 from sqlalchemy import text
 from db import obtener_conexion
 from utils import aplicar_estilos, verificar_auth, bloquear_si_cajero
-from queries import obtener_credenciales_alegra, guardar_credenciales_alegra, eliminar_credenciales_alegra, tiene_fe_habilitada
+from queries import (
+    obtener_credenciales_alegra, guardar_credenciales_alegra, eliminar_credenciales_alegra, tiene_fe_habilitada,
+    tiene_iva_habilitado, establecer_declara_iva,
+)
 import alegra_utils
 
 st.set_page_config(page_title="Configuración", layout="wide")
@@ -35,7 +38,7 @@ tel_actual      = datos[4] if datos else ""
 dir_actual      = datos[5] if datos else ""
 logo_actual     = datos[6] if datos else None
 
-tab_datos, tab_logo, tab_alegra = st.tabs(["Datos del Negocio", "Logotipo", "Facturación Electrónica"])
+tab_datos, tab_iva, tab_logo, tab_alegra = st.tabs(["Datos del Negocio", "Impuestos", "Logotipo", "Facturación Electrónica"])
 
 # ==========================================
 # TAB 1: DATOS DEL NEGOCIO
@@ -104,6 +107,45 @@ with tab_datos:
             "email": email_actual or "",
             "logo_path": logo_actual,
         }
+
+# ==========================================
+# TAB IMPUESTOS: ¿DECLARA IVA?
+# ==========================================
+with tab_iva:
+    st.subheader("Impuestos (IVA)")
+    st.caption(
+        "Indica si tu negocio declara IVA ante la DIAN. Esto controla si se te pide el % "
+        "de IVA en tus productos (Inventario), si aparece discriminado en tus ventas y "
+        "reportes, y si tus facturas electrónicas lo incluyen."
+    )
+
+    declara_actual = tiene_iva_habilitado(user_id)
+    opcion_iva = st.radio(
+        "¿Tu negocio declara IVA?",
+        ["No declaro IVA", "Sí declaro IVA"],
+        index=1 if declara_actual else 0,
+        key="radio_declara_iva",
+    )
+    nuevo_valor_iva = (opcion_iva == "Sí declaro IVA")
+
+    if nuevo_valor_iva != declara_actual:
+        if st.button("Guardar", type="primary", key="btn_guardar_iva"):
+            establecer_declara_iva(user_id, nuevo_valor_iva)
+            if nuevo_valor_iva:
+                st.success("Listo. Ahora puedes configurar el % de IVA en tus productos desde Inventario.")
+            else:
+                st.success("Listo. Ya no se mostrarán ni se cobrarán campos de IVA en tu negocio.")
+            st.rerun()
+    else:
+        st.info(f"Configuración actual: **{opcion_iva}**")
+
+    if not declara_actual:
+        st.caption(
+            "Si activas la Facturación Electrónica pero tu cuenta del proveedor está "
+            "configurada como \"Responsable de IVA\", tus facturas de todas formas nunca "
+            "van a incluir IVA mientras esta opción diga \"No declaro IVA\" — es a propósito, "
+            "para que nunca se cobre IVA por accidente."
+        )
 
 # ==========================================
 # TAB 2: LOGOTIPO

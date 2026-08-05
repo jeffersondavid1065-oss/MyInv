@@ -79,7 +79,8 @@ def init_db():
                     fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     alegra_email TEXT,
                     alegra_token TEXT,
-                    fe_habilitada BOOLEAN DEFAULT 0
+                    fe_habilitada BOOLEAN DEFAULT 0,
+                    declara_iva BOOLEAN DEFAULT 0
                 )
             '''))
             conn.execute(text('''
@@ -289,7 +290,8 @@ def init_db():
                     fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     alegra_email TEXT,
                     alegra_token TEXT,
-                    fe_habilitada BOOLEAN DEFAULT FALSE
+                    fe_habilitada BOOLEAN DEFAULT FALSE,
+                    declara_iva BOOLEAN DEFAULT FALSE
                 )
             '''))
             conn.execute(text('''
@@ -566,6 +568,8 @@ def init_db():
                     conn.execute(text("ALTER TABLE Usuarios ADD COLUMN alegra_token TEXT"))
                 if 'fe_habilitada' not in cols:
                     conn.execute(text("ALTER TABLE Usuarios ADD COLUMN fe_habilitada BOOLEAN DEFAULT 0"))
+                if 'declara_iva' not in cols:
+                    conn.execute(text("ALTER TABLE Usuarios ADD COLUMN declara_iva BOOLEAN DEFAULT 0"))
                 if 'nota_credito_alegra_id' not in cols_v:
                     conn.execute(text("ALTER TABLE Ventas ADD COLUMN nota_credito_alegra_id TEXT"))
                 if 'nota_credito_pdf_url' not in cols_v:
@@ -608,6 +612,7 @@ def init_db():
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS alegra_email TEXT"))
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS alegra_token TEXT"))
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS fe_habilitada BOOLEAN DEFAULT FALSE"))
+                conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS declara_iva BOOLEAN DEFAULT FALSE"))
                 conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS nota_credito_alegra_id TEXT"))
                 conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS nota_credito_pdf_url TEXT"))
                 conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS nota_credito_xml_url TEXT"))
