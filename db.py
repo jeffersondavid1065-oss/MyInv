@@ -502,8 +502,6 @@ def init_db():
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_creditos_estado ON Creditos(usuario_id, estado)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_abonos_credito ON Abonos(credito_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cajeros_usuario ON Cajeros(usuario_id)"))
-        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS idx_cajeros_login ON Cajeros(usuario_login)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cajeros_token ON Cajeros(token_sesion)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cierres_caja_usuario ON Cierres_Caja(usuario_id, fecha)"))
 
         # ==========================================
@@ -622,5 +620,15 @@ def init_db():
             # falle, pero silenciarla del todo (como antes) hace invisibles
             # errores reales - queda al menos en los logs de Streamlit Cloud.
             print(f"[init_db] Error en migraciones: {e}")
+
+        # Estos índices dependen de columnas agregadas arriba por la migración
+        # (usuario_login, token_sesion) - deben crearse DESPUÉS de que esas
+        # columnas existan, nunca antes, o fallan en una base ya existente
+        # que todavía no las tenía.
+        try:
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS idx_cajeros_login ON Cajeros(usuario_login)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cajeros_token ON Cajeros(token_sesion)"))
+        except Exception as e:
+            print(f"[init_db] Error creando índices de Cajeros: {e}")
 
     return True
