@@ -134,7 +134,7 @@ def obtener_datos_facturacion_producto(uid, producto_id):
     engine = obtener_conexion()
     with engine.connect() as conn:
         return conn.execute(text("""
-            SELECT id, nombre, precio_venta, alegra_item_id
+            SELECT id, nombre, precio_venta, alegra_item_id, unidad_medida
             FROM Productos
             WHERE usuario_id = :uid AND id = :producto_id
         """), {"uid": uid, "producto_id": producto_id}).fetchone()

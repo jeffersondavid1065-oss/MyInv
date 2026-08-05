@@ -69,11 +69,32 @@ def crear_contacto(email, token, nombre, identificacion, tipo_identificacion="CC
         return None
 
 
-def crear_item(email, token, nombre, precio, referencia=None):
+# Unidad de medida de MyInv -> catálogo de Alegra/DIAN. Es obligatoria para
+# poder timbrar la factura electrónica ante la DIAN ("el campo unidad de
+# medida es requerido"); sin esto Alegra crea la factura pero nunca la emite.
+# Las unidades de MyInv sin equivalente exacto en el catálogo de Alegra caen
+# en 'unit' (unidad), el valor más genérico y seguro.
+UNIDAD_MEDIDA_ALEGRA = {
+    "Unidad": "unit",
+    "kg": "kilogram",
+    "g": "gram",
+    "m": "meter",
+    "cm": "centimeter",
+    "L": "liter",
+    "mL": "mililiter",
+    "galón": "gallon",
+    "Caja": "box",
+    "m²": "meterSquared",
+    "m³": "cubicMeter",
+}
+
+
+def crear_item(email, token, nombre, precio, referencia=None, unidad_medida=None):
     """Crea un ítem/producto en el catálogo de Alegra y devuelve su id, o None si falla."""
     payload = {"name": nombre, "price": precio}
     if referencia:
         payload["reference"] = referencia
+    payload["inventory"] = {"unit": UNIDAD_MEDIDA_ALEGRA.get(unidad_medida, "unit")}
 
     try:
         resp = requests.post(f"{BASE_URL}/items", headers=_headers(email, token), json=payload, timeout=15)
@@ -84,6 +105,26 @@ def crear_item(email, token, nombre, precio, referencia=None):
     except requests.RequestException as e:
         st.error(f"Error de conexión al crear ítem: {e}")
         return None
+
+
+def actualizar_unidad_item(email, token, item_id, unidad_medida):
+    """
+    Corrige la unidad de medida de un ítem ya existente en Alegra (creado antes
+    de que MyInv empezara a enviar este campo, o si el producto cambió de
+    unidad en MyInv). Best-effort: si falla, no bloquea la venta - la factura
+    igual se intenta emitir y, si Alegra la rechaza por esto, el mensaje de
+    error ya lo indica explícitamente.
+    """
+    try:
+        resp = requests.put(
+            f"{BASE_URL}/items/{item_id}",
+            headers=_headers(email, token),
+            json={"inventory": {"unit": UNIDAD_MEDIDA_ALEGRA.get(unidad_medida, "unit")}},
+            timeout=15,
+        )
+        return resp.status_code in (200, 201)
+    except requests.RequestException:
+        return False
 
 
 def crear_factura_venta(email, token, cliente_id, items, due_date=None, periodicity=None,
@@ -104,6 +145,10 @@ def crear_factura_venta(email, token, cliente_id, items, due_date=None, periodic
         "client": {"id": cliente_id},
         "items": items,
         "status": "open",
+        # Sin esto Alegra crea la factura pero NUNCA intenta timbrarla ante la
+        # DIAN - se queda como un documento abierto normal a la espera de que
+        # alguien la emita a mano desde el dashboard de Alegra.
+        "stamp": {"generateStamp": True},
     }
     if periodicity:
         payload["periodicity"] = periodicity
@@ -235,6 +280,9 @@ def crear_nota_credito(email, token, factura_alegra_id, cliente_id, items, total
         # Como esta función siempre se usa para anular una factura electrónica
         # ya emitida (ver anular_factura_venta), el motivo es fijo.
         "type": "VOID_ELECTRONIC_INVOICE",
+        # Igual que en la factura: sin esto Alegra crea la nota crédito pero
+        # nunca la emite ante la DIAN.
+        "stamp": {"generateStamp": True},
     }
 
     try:
@@ -351,9 +399,13 @@ def obtener_o_crear_item(uid, producto_id, email, token):
         return None
 
     if producto.alegra_item_id:
+        actualizar_unidad_item(email, token, producto.alegra_item_id, producto.unidad_medida)
         return producto.alegra_item_id
 
-    alegra_id = crear_item(email, token, nombre=producto.nombre, precio=float(producto.precio_venta))
+    alegra_id = crear_item(
+        email, token, nombre=producto.nombre, precio=float(producto.precio_venta),
+        unidad_medida=producto.unidad_medida,
+    )
     if alegra_id:
         queries.guardar_alegra_item_id(producto_id, alegra_id)
     return alegra_id
