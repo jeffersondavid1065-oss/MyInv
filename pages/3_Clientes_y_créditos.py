@@ -14,7 +14,7 @@ from queries import (
 )
 from utils import aplicar_estilos, verificar_auth, bloquear_si_cajero
 from tz_utils import hoy_bogota
-from alegra_utils import registrar_abono_credito, refrescar_url_factura, refrescar_url_nota_credito
+from alegra_utils import registrar_abono_credito, refrescar_url_factura, refrescar_url_nota_credito, mostrar_documento
 
 st.set_page_config(page_title="Clientes y Créditos", layout="wide")
 aplicar_estilos()
@@ -89,14 +89,12 @@ with tab_creditos:
         df_mostrar.loc[falta_copia, 'pedir'] = False
         df_mostrar = df_mostrar[[
             'venta_id', 'cliente', 'total', 'saldo_pendiente', 'fecha_limite', 'tipo_cuota',
-            'estado', 'vencido', 'factura_estado', 'numero_factura_texto',
-            'factura_pdf_url', 'factura_xml_url', 'pedir'
+            'estado', 'vencido', 'factura_estado', 'numero_factura_texto', 'pedir'
         ]].rename(columns={
             'venta_id': 'Venta #',
             'cliente': 'Cliente', 'total': 'Total Original', 'saldo_pendiente': 'Saldo Pendiente',
             'fecha_limite': 'Fecha Límite', 'tipo_cuota': 'Tipo Cuota', 'estado': 'Estado',
-            'vencido': 'Vencido', 'factura_estado': 'Facturación', 'numero_factura_texto': 'N° Factura',
-            'factura_pdf_url': 'Factura PDF', 'factura_xml_url': 'Factura XML', 'pedir': 'Pedir',
+            'vencido': 'Vencido', 'factura_estado': 'Facturación', 'numero_factura_texto': 'N° Factura', 'pedir': 'Pedir',
         })
         df_creditos_editada = st.data_editor(
             df_mostrar,
@@ -107,13 +105,12 @@ with tab_creditos:
             column_config={
                 "Total Original": st.column_config.NumberColumn(format="$%,d"),
                 "Saldo Pendiente": st.column_config.NumberColumn(format="$%,d"),
-                "Factura PDF": st.column_config.LinkColumn(display_text="Abrir"),
-                "Factura XML": st.column_config.LinkColumn(display_text="Abrir"),
                 "Pedir": st.column_config.CheckboxColumn(
                     "Pedir", help='Marca la(s) venta(s) y pulsa el botón de abajo para guardar su factura.'
                 ),
             }
         )
+        st.caption("Para descargar la factura de una venta específica, selecciónala abajo en \"Registrar Abono\".")
         seleccionadas_cartera = df_creditos_editada[df_creditos_editada['Pedir'] == True]
         if not seleccionadas_cartera.empty:
             if st.button(f"Guardar factura de {len(seleccionadas_cartera)} venta(s) marcada(s)", key="btn_pedir_cartera"):
@@ -171,6 +168,9 @@ with tab_creditos:
 
                 if tiene_factura:
                     st.caption("🧾 Esta venta tiene factura electrónica emitida — el abono se sincronizará automáticamente.")
+                    col_fd1, col_fd2 = st.columns(2)
+                    mostrar_documento(col_fd1, "Factura PDF", fila_credito.get('factura_pdf_url'), f"Factura_Venta_{venta_id_credito}.pdf", "application/pdf")
+                    mostrar_documento(col_fd2, "Factura XML", fila_credito.get('factura_xml_url'), f"Factura_Venta_{venta_id_credito}.xml", "application/xml")
 
                 col_ab1, col_ab2, col_ab3 = st.columns(3)
                 with col_ab1:
@@ -357,14 +357,11 @@ with tab_estado_cuenta:
             )
             df_compras_mostrar.loc[falta_factura | falta_nc, 'pedir'] = False
             df_compras_display = df_compras_mostrar[[
-                'id', 'fecha', 'total', 'tipo_pago', 'estado', 'fe_texto', 'numero_factura_texto',
-                'factura_pdf_url', 'factura_xml_url', 'nota_credito_pdf_url', 'nota_credito_xml_url', 'pedir'
+                'id', 'fecha', 'total', 'tipo_pago', 'estado', 'fe_texto', 'numero_factura_texto', 'pedir'
             ]].rename(columns={
                 'id': 'Venta #', 'fecha': 'Fecha', 'total': 'Total',
                 'tipo_pago': 'Pago', 'estado': 'Estado',
-                'fe_texto': 'Factura Electrónica', 'numero_factura_texto': 'N° Factura',
-                'factura_pdf_url': 'Factura PDF', 'factura_xml_url': 'Factura XML',
-                'nota_credito_pdf_url': 'N.C. PDF', 'nota_credito_xml_url': 'N.C. XML', 'pedir': 'Pedir',
+                'fe_texto': 'Factura Electrónica', 'numero_factura_texto': 'N° Factura', 'pedir': 'Pedir',
             })
             df_compras_editada = st.data_editor(
                 df_compras_display,
@@ -373,10 +370,6 @@ with tab_estado_cuenta:
                 key="editor_estado_cuenta",
                 column_config={
                     "Total": st.column_config.NumberColumn(format="$%,d"),
-                    "Factura PDF": st.column_config.LinkColumn(display_text="Abrir"),
-                    "Factura XML": st.column_config.LinkColumn(display_text="Abrir"),
-                    "N.C. PDF": st.column_config.LinkColumn(display_text="Abrir"),
-                    "N.C. XML": st.column_config.LinkColumn(display_text="Abrir"),
                     "Pedir": st.column_config.CheckboxColumn(
                         "Pedir", help='Marca la(s) venta(s) y pulsa el botón de abajo para guardar su factura o nota crédito.'
                     ),
@@ -390,6 +383,23 @@ with tab_estado_cuenta:
                             refrescar_url_factura(user_id, int(vid_sel))
                             refrescar_url_nota_credito(user_id, int(vid_sel))
                     st.rerun()
+
+            con_documento_ec = df_compras_mostrar[
+                df_compras_mostrar['factura_alegra_id'].notna() | df_compras_mostrar['nota_credito_alegra_id'].notna()
+            ]
+            if not con_documento_ec.empty:
+                st.markdown("**Descargar factura o nota crédito de una compra específica:**")
+                dict_desc_ec = {
+                    f"Venta #{r['id']} — {formato_cop(r['total'])} — {r['fecha']}": i
+                    for i, r in con_documento_ec.iterrows()
+                }
+                desc_sel_ec_str = st.selectbox("Selecciona la compra", options=list(dict_desc_ec.keys()), key="desc_sel_ec")
+                fila_desc_ec = con_documento_ec.loc[dict_desc_ec[desc_sel_ec_str]]
+                col_de1, col_de2, col_de3, col_de4 = st.columns(4)
+                mostrar_documento(col_de1, "Factura PDF", fila_desc_ec['factura_pdf_url'], f"Factura_Venta_{fila_desc_ec['id']}.pdf", "application/pdf")
+                mostrar_documento(col_de2, "Factura XML", fila_desc_ec['factura_xml_url'], f"Factura_Venta_{fila_desc_ec['id']}.xml", "application/xml")
+                mostrar_documento(col_de3, "N.C. PDF", fila_desc_ec['nota_credito_pdf_url'], f"NotaCredito_Venta_{fila_desc_ec['id']}.pdf", "application/pdf")
+                mostrar_documento(col_de4, "N.C. XML", fila_desc_ec['nota_credito_xml_url'], f"NotaCredito_Venta_{fila_desc_ec['id']}.xml", "application/xml")
         else:
             st.caption("Este cliente todavía no tiene compras registradas.")
 

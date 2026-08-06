@@ -21,6 +21,7 @@ from tz_utils import hoy_bogota, ahora_bogota
 from alegra_utils import (
     facturar_venta, actualizar_pdf_cufe_venta,
     emitir_factura_dian_venta, refrescar_url_factura, refrescar_url_nota_credito,
+    mostrar_documento,
 )
 
 st.set_page_config(page_title="Reportes", layout="wide")
@@ -591,15 +592,11 @@ with tab_facturas:
             df_mostrar_fe.loc[falta_factura | falta_nc, 'pedir'] = False
             df_reportes_display = df_mostrar_fe[[
                 'id', 'fecha', 'cliente', 'cliente_documento', 'total', 'estado_texto',
-                'numero_factura_texto', 'factura_cufe',
-                'factura_pdf_url', 'factura_xml_url',
-                'nota_credito_pdf_url', 'nota_credito_xml_url', 'pedir']].rename(columns={
+                'numero_factura_texto', 'factura_cufe', 'pedir']].rename(columns={
                 'id': 'Venta #', 'fecha': 'Fecha', 'cliente': 'Cliente',
                 'cliente_documento': 'NIT/Documento',
                 'total': 'Total ($)', 'estado_texto': 'Estado',
-                'numero_factura_texto': 'N° Factura', 'factura_cufe': 'CUFE',
-                'factura_pdf_url': 'Factura PDF', 'factura_xml_url': 'Factura XML',
-                'nota_credito_pdf_url': 'N.C. PDF', 'nota_credito_xml_url': 'N.C. XML', 'pedir': 'Pedir',
+                'numero_factura_texto': 'N° Factura', 'factura_cufe': 'CUFE', 'pedir': 'Pedir',
             })
             df_reportes_editada = st.data_editor(
                 df_reportes_display,
@@ -608,10 +605,6 @@ with tab_facturas:
                 key="editor_reportes_fe",
                 column_config={
                     "Total ($)": st.column_config.NumberColumn(format="$%,d"),
-                    "Factura PDF": st.column_config.LinkColumn(display_text="Abrir"),
-                    "Factura XML": st.column_config.LinkColumn(display_text="Abrir"),
-                    "N.C. PDF": st.column_config.LinkColumn(display_text="Abrir"),
-                    "N.C. XML": st.column_config.LinkColumn(display_text="Abrir"),
                     "Pedir": st.column_config.CheckboxColumn(
                         "Pedir", help='Marca la(s) venta(s) y pulsa el botón de abajo para guardar su factura o nota crédito.'
                     ),
@@ -625,6 +618,23 @@ with tab_facturas:
                             refrescar_url_factura(user_id, int(vid_sel))
                             refrescar_url_nota_credito(user_id, int(vid_sel))
                     st.rerun()
+
+            con_documento = df_mostrar_fe[
+                df_mostrar_fe['factura_alegra_id'].notna() | df_mostrar_fe['nota_credito_alegra_id'].notna()
+            ]
+            if not con_documento.empty:
+                st.markdown("**Descargar factura o nota crédito de una venta específica:**")
+                dict_desc_reportes = {
+                    f"Venta #{r['id']} — {formato_cop(r['total'])} — {r['cliente']}": i
+                    for i, r in con_documento.iterrows()
+                }
+                desc_sel_reportes_str = st.selectbox("Selecciona la venta", options=list(dict_desc_reportes.keys()), key="desc_sel_reportes")
+                fila_desc_rep = con_documento.loc[dict_desc_reportes[desc_sel_reportes_str]]
+                col_dr1, col_dr2, col_dr3, col_dr4 = st.columns(4)
+                mostrar_documento(col_dr1, "Factura PDF", fila_desc_rep['factura_pdf_url'], f"Factura_Venta_{fila_desc_rep['id']}.pdf", "application/pdf")
+                mostrar_documento(col_dr2, "Factura XML", fila_desc_rep['factura_xml_url'], f"Factura_Venta_{fila_desc_rep['id']}.xml", "application/xml")
+                mostrar_documento(col_dr3, "N.C. PDF", fila_desc_rep['nota_credito_pdf_url'], f"NotaCredito_Venta_{fila_desc_rep['id']}.pdf", "application/pdf")
+                mostrar_documento(col_dr4, "N.C. XML", fila_desc_rep['nota_credito_xml_url'], f"NotaCredito_Venta_{fila_desc_rep['id']}.xml", "application/xml")
 
             pendientes_pdf = df_facturas[
                 # Solo facturas YA emitidas: las 'abierta' no tienen CUFE/XML a

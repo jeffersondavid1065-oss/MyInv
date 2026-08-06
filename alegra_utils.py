@@ -799,8 +799,48 @@ def _nota_credito_cache(email, token, nota_id):
 
 def _es_copia_propia(url):
     """True si el enlace ya contiene el archivo adentro (no depende de que
-    Alegra lo siga teniendo) - no hace falta pedir nada más para ese caso."""
-    return bool(url) and url.startswith("data:")
+    Alegra lo siga teniendo) - no hace falta pedir nada más para ese caso.
+    isinstance(url, str) primero: un valor vacío proveniente de un DataFrame
+    de pandas llega como NaN (float), no None, y bool(float('nan')) es True
+    - sin este chequeo, NaN.startswith(...) revienta con AttributeError."""
+    return isinstance(url, str) and url.startswith("data:")
+
+
+def _bytes_desde_enlace_propio(url):
+    """Si el enlace ya es una copia propia (data:...;base64,...), devuelve
+    los bytes del archivo decodificados. None si no es una copia propia o
+    no se pudo decodificar."""
+    if not _es_copia_propia(url):
+        return None
+    try:
+        _, b64data = url.split(",", 1)
+        return base64.b64decode(b64data)
+    except Exception:
+        return None
+
+
+def mostrar_documento(contenedor, etiqueta, url, nombre_archivo, mime_type):
+    """
+    Muestra un botón para abrir/descargar un PDF o XML de una factura o nota
+    crédito. Si ya es una copia propia (guardada como enlace data:), usa
+    st.download_button con los bytes decodificados: varios navegadores
+    (Chrome incluido) bloquean abrir un enlace data: en una pestaña nueva
+    -que es como funciona st.link_button y las LinkColumn de una tabla- y la
+    pantalla queda en gris/blanco sin mostrar nada. Si por algún motivo el
+    enlace guardado no es una copia propia (la descarga original falló y
+    quedó el enlace temporal de Alegra), usa st.link_button como respaldo.
+    contenedor: st, o una columna devuelta por st.columns().
+    """
+    if not isinstance(url, str) or not url:
+        return
+    contenido = _bytes_desde_enlace_propio(url)
+    if contenido:
+        contenedor.download_button(
+            etiqueta, data=contenido, file_name=nombre_archivo,
+            mime=mime_type, use_container_width=True,
+        )
+    else:
+        contenedor.link_button(etiqueta, url, use_container_width=True)
 
 
 def refrescar_url_factura(uid, venta_id):

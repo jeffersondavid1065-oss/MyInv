@@ -19,7 +19,7 @@ from utils import aplicar_estilos, verificar_auth
 from tz_utils import hoy_bogota, ahora_bogota_naive
 from alegra_utils import (
     facturar_venta, anular_factura_venta, emitir_factura_dian_venta,
-    refrescar_url_factura, refrescar_url_nota_credito,
+    refrescar_url_factura, refrescar_url_nota_credito, mostrar_documento,
 )
 from iva_utils import calcular_desglose_iva, calcular_iva_desde_detalles, texto_tasa_iva
 
@@ -728,15 +728,12 @@ with tab_pos:
                         st.success(f"Factura electrónica emitida ante la DIAN (#{venta_factura[2]}).")
                         pdf_mostrar, xml_mostrar = refrescar_url_factura(user_id, vid)
                         col_fpdf, col_fxml = st.columns(2)
-                        if pdf_mostrar:
-                            col_fpdf.link_button("Ver PDF de la factura", pdf_mostrar, use_container_width=True)
-                        if xml_mostrar:
-                            col_fxml.link_button("Descargar XML (DIAN)", xml_mostrar, use_container_width=True)
+                        mostrar_documento(col_fpdf, "Ver PDF de la factura", pdf_mostrar, f"Factura_Venta_{vid}.pdf", "application/pdf")
+                        mostrar_documento(col_fxml, "Descargar XML (DIAN)", xml_mostrar, f"Factura_Venta_{vid}.xml", "application/xml")
                     elif venta_factura and venta_factura[1] == "abierta":
                         st.info(f"Factura creada (#{venta_factura[2]}) — todavía no se ha emitido ante la DIAN.")
                         pdf_mostrar_ab, _ = refrescar_url_factura(user_id, vid)
-                        if pdf_mostrar_ab:
-                            st.link_button("Ver PDF (borrador)", pdf_mostrar_ab, use_container_width=True)
+                        mostrar_documento(st, "Ver PDF (borrador)", pdf_mostrar_ab, f"Factura_Venta_{vid}.pdf", "application/pdf")
                         if st.button("📧 Emitir a correo/DIAN", use_container_width=True, type="primary"):
                             with st.spinner("Emitiendo ante la DIAN..."):
                                 ok_dian, msg_dian = emitir_factura_dian_venta(user_id, vid)
@@ -809,9 +806,7 @@ with tab_historial:
             cols_hoy += ['iva_tasa_texto', 'iva_valor']
             rename_hoy.update({'iva_tasa_texto': 'Impuesto', 'iva_valor': 'Valor Imp'})
             config_hoy["Valor Imp"] = st.column_config.NumberColumn("Valor Imp", format="$%,d")
-        cols_hoy += ['tipo_pago', 'estado', 'fe_texto', 'numero_factura_texto', 'factura_pdf_url', 'factura_xml_url', 'pedir']
-        config_hoy["Factura PDF"] = st.column_config.LinkColumn(display_text="Abrir")
-        config_hoy["Factura XML"] = st.column_config.LinkColumn(display_text="Abrir")
+        cols_hoy += ['tipo_pago', 'estado', 'fe_texto', 'numero_factura_texto', 'pedir']
 
         df_hoy_mostrar = df_hoy[cols_hoy].rename(columns=rename_hoy)
         df_hoy_editada = st.data_editor(
@@ -829,6 +824,18 @@ with tab_historial:
                         refrescar_url_factura(user_id, int(vid_sel))
                         refrescar_url_nota_credito(user_id, int(vid_sel))
                 st.rerun()
+
+        if not df_hoy.empty:
+            st.markdown("**Descargar factura de una venta específica:**")
+            dict_desc_hoy = {
+                f"Venta #{r['id']} — {formato_cop(r['total'])} — {r['cliente']}": i
+                for i, r in df_hoy.iterrows()
+            }
+            desc_sel_hoy_str = st.selectbox("Selecciona la venta", options=list(dict_desc_hoy.keys()), key="desc_sel_hoy")
+            fila_desc_hoy = df_hoy.loc[dict_desc_hoy[desc_sel_hoy_str]]
+            col_dh1, col_dh2 = st.columns(2)
+            mostrar_documento(col_dh1, "Descargar PDF", fila_desc_hoy['factura_pdf_url'], f"Factura_Venta_{fila_desc_hoy['id']}.pdf", "application/pdf")
+            mostrar_documento(col_dh2, "Descargar XML", fila_desc_hoy['factura_xml_url'], f"Factura_Venta_{fila_desc_hoy['id']}.xml", "application/xml")
 
         st.markdown("---")
         st.markdown("**Reimprimir ticket:**")
@@ -970,12 +977,11 @@ with tab_devolucion:
 
             df_dev_mostrar = df_devoluciones[[
                 'id', 'fecha', 'cliente', 'total', 'numero_factura_texto',
-                'nc_estado_texto', 'numero_nc_texto', 'nota_credito_pdf_url',
-                'nota_credito_xml_url', 'notas', 'pedir']].rename(columns={
+                'nc_estado_texto', 'numero_nc_texto',
+                'notas', 'pedir']].rename(columns={
                 'id': 'Venta #', 'fecha': 'Fecha', 'cliente': 'Cliente', 'total': 'Total',
                 'numero_factura_texto': 'N° Factura', 'nc_estado_texto': 'Nota Crédito',
                 'numero_nc_texto': 'N° Nota Crédito',
-                'nota_credito_pdf_url': 'N.C. PDF', 'nota_credito_xml_url': 'N.C. XML',
                 'notas': 'Motivo', 'pedir': 'Pedir',
             })
             df_dev_editada = st.data_editor(
@@ -985,8 +991,6 @@ with tab_devolucion:
                 key="editor_devoluciones",
                 column_config={
                     "Total": st.column_config.NumberColumn(format="$%,d"),
-                    "N.C. PDF": st.column_config.LinkColumn(display_text="Abrir"),
-                    "N.C. XML": st.column_config.LinkColumn(display_text="Abrir"),
                     "Pedir": st.column_config.CheckboxColumn(
                         "Pedir", help='Marca la(s) devolución(es) y pulsa el botón de abajo para guardar su nota crédito.'
                     ),
@@ -999,6 +1003,19 @@ with tab_devolucion:
                         for vid_sel in seleccionadas_dev['Venta #'].tolist():
                             refrescar_url_nota_credito(user_id, int(vid_sel))
                     st.rerun()
+
+            nc_con_documento = df_devoluciones[df_devoluciones['nota_credito_alegra_id'].notna()]
+            if not nc_con_documento.empty:
+                st.markdown("**Descargar nota crédito de una devolución específica:**")
+                dict_desc_nc = {
+                    f"Venta #{r['id']} — {formato_cop(r['total'])} — {r['cliente']}": i
+                    for i, r in nc_con_documento.iterrows()
+                }
+                desc_sel_nc_str = st.selectbox("Selecciona la devolución", options=list(dict_desc_nc.keys()), key="desc_sel_nc")
+                fila_desc_nc = nc_con_documento.loc[dict_desc_nc[desc_sel_nc_str]]
+                col_dn1, col_dn2 = st.columns(2)
+                mostrar_documento(col_dn1, "Descargar PDF", fila_desc_nc['nota_credito_pdf_url'], f"NotaCredito_Venta_{fila_desc_nc['id']}.pdf", "application/pdf")
+                mostrar_documento(col_dn2, "Descargar XML", fila_desc_nc['nota_credito_xml_url'], f"NotaCredito_Venta_{fila_desc_nc['id']}.xml", "application/xml")
 
             pendientes_nc = df_devoluciones[df_devoluciones['nc_estado_texto'] == 'Pendiente']
             if not pendientes_nc.empty:
@@ -1093,10 +1110,8 @@ with tab_devolucion:
                     )
                     pdf_mostrar_nc, xml_mostrar_nc = refrescar_url_nota_credito(user_id, vid_dev)
                     col_ncpdf, col_ncxml = st.columns(2)
-                    if pdf_mostrar_nc:
-                        col_ncpdf.link_button("Ver PDF de la Nota Crédito", pdf_mostrar_nc, use_container_width=True)
-                    if xml_mostrar_nc:
-                        col_ncxml.link_button("Descargar XML (DIAN)", xml_mostrar_nc, use_container_width=True)
+                    mostrar_documento(col_ncpdf, "Ver PDF de la Nota Crédito", pdf_mostrar_nc, f"NotaCredito_Venta_{vid_dev}.pdf", "application/pdf")
+                    mostrar_documento(col_ncxml, "Descargar XML (DIAN)", xml_mostrar_nc, f"NotaCredito_Venta_{vid_dev}.xml", "application/xml")
                 elif venta_dev[7]:
                     st.warning(
                         "Esta venta tenía factura electrónica emitida pero no se confirmó la nota crédito."
