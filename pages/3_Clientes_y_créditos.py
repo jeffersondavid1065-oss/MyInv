@@ -82,35 +82,37 @@ with tab_creditos:
         df_mostrar['factura_estado'] = df_mostrar['factura_estado'].fillna('Sin facturar').replace({
             'emitida': 'Facturada', 'abierta': 'Abierta (sin timbrar)', 'error': 'Error factura', 'anulada': 'Anulada (N.C.)'
         })
-        df_mostrar.insert(0, 'pedir_enlace', False)
+        # 'pedir': None en las ventas sin FE para que la casilla ni aparezca ahí.
+        df_mostrar['pedir'] = None
+        df_mostrar.loc[df_mostrar['factura_alegra_id'].notna(), 'pedir'] = False
         df_mostrar = df_mostrar[[
-            'pedir_enlace', 'venta_id', 'cliente', 'total', 'saldo_pendiente', 'fecha_limite', 'tipo_cuota',
+            'venta_id', 'cliente', 'total', 'saldo_pendiente', 'fecha_limite', 'tipo_cuota',
             'estado', 'vencido', 'factura_estado', 'numero_factura_texto',
-            'factura_pdf_url', 'factura_xml_url'
+            'factura_pdf_url', 'factura_xml_url', 'pedir'
         ]].rename(columns={
-            'pedir_enlace': 'Pedir enlace', 'venta_id': 'Venta #',
+            'venta_id': 'Venta #',
             'cliente': 'Cliente', 'total': 'Total Original', 'saldo_pendiente': 'Saldo Pendiente',
             'fecha_limite': 'Fecha Límite', 'tipo_cuota': 'Tipo Cuota', 'estado': 'Estado',
             'vencido': 'Vencido', 'factura_estado': 'Facturación', 'numero_factura_texto': 'N° Factura',
-            'factura_pdf_url': 'Factura PDF', 'factura_xml_url': 'Factura XML',
+            'factura_pdf_url': 'Factura PDF', 'factura_xml_url': 'Factura XML', 'pedir': 'Pedir',
         })
         df_creditos_editada = st.data_editor(
             df_mostrar,
             use_container_width=True,
             hide_index=True,
-            disabled=[c for c in df_mostrar.columns if c != 'Pedir enlace'],
+            disabled=[c for c in df_mostrar.columns if c != 'Pedir'],
             key="editor_cartera",
             column_config={
                 "Total Original": st.column_config.NumberColumn(format="$%,d"),
                 "Saldo Pendiente": st.column_config.NumberColumn(format="$%,d"),
                 "Factura PDF": st.column_config.LinkColumn(display_text="Abrir"),
                 "Factura XML": st.column_config.LinkColumn(display_text="Abrir"),
-                "Pedir enlace": st.column_config.CheckboxColumn(
-                    "🔄", help='Marca la(s) venta(s) y pulsa "Pedir enlaces" para traer un PDF fresco solo de esas.'
+                "Pedir": st.column_config.CheckboxColumn(
+                    "Pedir", help='Marca la(s) venta(s) y pulsa "Pedir enlaces" para traer un PDF fresco solo de esas.'
                 ),
             }
         )
-        seleccionadas_cartera = df_creditos_editada[df_creditos_editada['Pedir enlace'] == True]
+        seleccionadas_cartera = df_creditos_editada[df_creditos_editada['Pedir'] == True]
         if not seleccionadas_cartera.empty:
             if st.button(f"🔄 Pedir enlaces de {len(seleccionadas_cartera)} venta(s) marcada(s)", key="btn_pedir_cartera"):
                 with st.spinner("Pidiendo enlaces actualizados a Alegra..."):
@@ -340,22 +342,26 @@ with tab_estado_cuenta:
             df_compras_mostrar['fe_texto'] = df_compras_mostrar['factura_estado'].fillna('Sin facturar').replace({
                 'emitida': 'Emitida', 'abierta': 'Abierta (sin timbrar)', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
             })
-            df_compras_mostrar.insert(0, 'pedir_enlace', False)
+            # 'pedir': None en las ventas sin factura ni nota crédito para que la casilla ni aparezca ahí.
+            df_compras_mostrar['pedir'] = None
+            df_compras_mostrar.loc[
+                df_compras_mostrar['factura_alegra_id'].notna() | df_compras_mostrar['nota_credito_alegra_id'].notna(),
+                'pedir'
+            ] = False
             df_compras_display = df_compras_mostrar[[
-                'pedir_enlace', 'id', 'fecha', 'total', 'tipo_pago', 'estado', 'fe_texto', 'numero_factura_texto',
-                'factura_pdf_url', 'factura_xml_url', 'nota_credito_pdf_url', 'nota_credito_xml_url'
+                'id', 'fecha', 'total', 'tipo_pago', 'estado', 'fe_texto', 'numero_factura_texto',
+                'factura_pdf_url', 'factura_xml_url', 'nota_credito_pdf_url', 'nota_credito_xml_url', 'pedir'
             ]].rename(columns={
-                'pedir_enlace': 'Pedir enlace',
                 'id': 'Venta #', 'fecha': 'Fecha', 'total': 'Total',
                 'tipo_pago': 'Pago', 'estado': 'Estado',
                 'fe_texto': 'Factura Electrónica', 'numero_factura_texto': 'N° Factura',
                 'factura_pdf_url': 'Factura PDF', 'factura_xml_url': 'Factura XML',
-                'nota_credito_pdf_url': 'N.C. PDF', 'nota_credito_xml_url': 'N.C. XML',
+                'nota_credito_pdf_url': 'N.C. PDF', 'nota_credito_xml_url': 'N.C. XML', 'pedir': 'Pedir',
             })
             df_compras_editada = st.data_editor(
                 df_compras_display,
                 use_container_width=True, hide_index=True,
-                disabled=[c for c in df_compras_display.columns if c != 'Pedir enlace'],
+                disabled=[c for c in df_compras_display.columns if c != 'Pedir'],
                 key="editor_estado_cuenta",
                 column_config={
                     "Total": st.column_config.NumberColumn(format="$%,d"),
@@ -363,12 +369,12 @@ with tab_estado_cuenta:
                     "Factura XML": st.column_config.LinkColumn(display_text="Abrir"),
                     "N.C. PDF": st.column_config.LinkColumn(display_text="Abrir"),
                     "N.C. XML": st.column_config.LinkColumn(display_text="Abrir"),
-                    "Pedir enlace": st.column_config.CheckboxColumn(
-                        "🔄", help='Marca la(s) venta(s) y pulsa "Pedir enlaces" para traer un PDF/XML fresco solo de esas.'
+                    "Pedir": st.column_config.CheckboxColumn(
+                        "Pedir", help='Marca la(s) venta(s) y pulsa "Pedir enlaces" para traer un PDF/XML fresco solo de esas.'
                     ),
                 }
             )
-            seleccionadas_ec = df_compras_editada[df_compras_editada['Pedir enlace'] == True]
+            seleccionadas_ec = df_compras_editada[df_compras_editada['Pedir'] == True]
             if not seleccionadas_ec.empty:
                 if st.button(f"🔄 Pedir enlaces de {len(seleccionadas_ec)} venta(s) marcada(s)", key="btn_pedir_ec"):
                     with st.spinner("Pidiendo enlaces actualizados a Alegra..."):
