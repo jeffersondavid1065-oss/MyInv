@@ -14,7 +14,7 @@ from queries import (
 )
 from utils import aplicar_estilos, verificar_auth, bloquear_si_cajero
 from tz_utils import hoy_bogota
-from alegra_utils import registrar_abono_credito, refrescar_urls_dataframe
+from alegra_utils import registrar_abono_credito, refrescar_url_factura, refrescar_url_nota_credito
 
 st.set_page_config(page_title="Clientes y Créditos", layout="wide")
 aplicar_estilos()
@@ -82,30 +82,41 @@ with tab_creditos:
         df_mostrar['factura_estado'] = df_mostrar['factura_estado'].fillna('Sin facturar').replace({
             'emitida': 'Facturada', 'abierta': 'Abierta (sin timbrar)', 'error': 'Error factura', 'anulada': 'Anulada (N.C.)'
         })
-        if st.button("🔄 Actualizar enlaces PDF/XML", key="refrescar_urls_creditos"):
-            with st.spinner("Pidiendo enlaces actualizados a Alegra..."):
-                df_mostrar = refrescar_urls_dataframe(user_id, df_mostrar)
+        df_mostrar.insert(0, 'pedir_enlace', False)
         df_mostrar = df_mostrar[[
-            'cliente', 'total', 'saldo_pendiente', 'fecha_limite', 'tipo_cuota',
+            'pedir_enlace', 'venta_id', 'cliente', 'total', 'saldo_pendiente', 'fecha_limite', 'tipo_cuota',
             'estado', 'vencido', 'factura_estado', 'numero_factura_texto',
             'factura_pdf_url', 'factura_xml_url'
         ]].rename(columns={
+            'pedir_enlace': 'Pedir enlace', 'venta_id': 'Venta #',
             'cliente': 'Cliente', 'total': 'Total Original', 'saldo_pendiente': 'Saldo Pendiente',
             'fecha_limite': 'Fecha Límite', 'tipo_cuota': 'Tipo Cuota', 'estado': 'Estado',
             'vencido': 'Vencido', 'factura_estado': 'Facturación', 'numero_factura_texto': 'N° Factura',
             'factura_pdf_url': 'Factura PDF', 'factura_xml_url': 'Factura XML',
         })
-        st.dataframe(
+        df_creditos_editada = st.data_editor(
             df_mostrar,
             use_container_width=True,
             hide_index=True,
+            disabled=[c for c in df_mostrar.columns if c != 'Pedir enlace'],
+            key="editor_cartera",
             column_config={
                 "Total Original": st.column_config.NumberColumn(format="$%,d"),
                 "Saldo Pendiente": st.column_config.NumberColumn(format="$%,d"),
                 "Factura PDF": st.column_config.LinkColumn(display_text="Abrir"),
                 "Factura XML": st.column_config.LinkColumn(display_text="Abrir"),
+                "Pedir enlace": st.column_config.CheckboxColumn(
+                    "🔄", help='Marca la(s) venta(s) y pulsa "Pedir enlaces" para traer un PDF fresco solo de esas.'
+                ),
             }
         )
+        seleccionadas_cartera = df_creditos_editada[df_creditos_editada['Pedir enlace'] == True]
+        if not seleccionadas_cartera.empty:
+            if st.button(f"🔄 Pedir enlaces de {len(seleccionadas_cartera)} venta(s) marcada(s)", key="btn_pedir_cartera"):
+                with st.spinner("Pidiendo enlaces actualizados a Alegra..."):
+                    for vid_sel in seleccionadas_cartera['Venta #'].tolist():
+                        refrescar_url_factura(user_id, int(vid_sel))
+                st.rerun()
 
         st.markdown("---")
 
@@ -329,29 +340,42 @@ with tab_estado_cuenta:
             df_compras_mostrar['fe_texto'] = df_compras_mostrar['factura_estado'].fillna('Sin facturar').replace({
                 'emitida': 'Emitida', 'abierta': 'Abierta (sin timbrar)', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
             })
-            if st.button("🔄 Actualizar enlaces PDF/XML", key="refrescar_urls_estado_cuenta"):
-                with st.spinner("Pidiendo enlaces actualizados a Alegra..."):
-                    df_compras_mostrar = refrescar_urls_dataframe(user_id, df_compras_mostrar)
-            st.dataframe(
-                df_compras_mostrar[[
-                    'id', 'fecha', 'total', 'tipo_pago', 'estado', 'fe_texto', 'numero_factura_texto',
-                    'factura_pdf_url', 'factura_xml_url', 'nota_credito_pdf_url', 'nota_credito_xml_url'
-                ]].rename(columns={
-                    'id': 'Venta #', 'fecha': 'Fecha', 'total': 'Total',
-                    'tipo_pago': 'Pago', 'estado': 'Estado',
-                    'fe_texto': 'Factura Electrónica', 'numero_factura_texto': 'N° Factura',
-                    'factura_pdf_url': 'Factura PDF', 'factura_xml_url': 'Factura XML',
-                    'nota_credito_pdf_url': 'N.C. PDF', 'nota_credito_xml_url': 'N.C. XML',
-                }),
+            df_compras_mostrar.insert(0, 'pedir_enlace', False)
+            df_compras_display = df_compras_mostrar[[
+                'pedir_enlace', 'id', 'fecha', 'total', 'tipo_pago', 'estado', 'fe_texto', 'numero_factura_texto',
+                'factura_pdf_url', 'factura_xml_url', 'nota_credito_pdf_url', 'nota_credito_xml_url'
+            ]].rename(columns={
+                'pedir_enlace': 'Pedir enlace',
+                'id': 'Venta #', 'fecha': 'Fecha', 'total': 'Total',
+                'tipo_pago': 'Pago', 'estado': 'Estado',
+                'fe_texto': 'Factura Electrónica', 'numero_factura_texto': 'N° Factura',
+                'factura_pdf_url': 'Factura PDF', 'factura_xml_url': 'Factura XML',
+                'nota_credito_pdf_url': 'N.C. PDF', 'nota_credito_xml_url': 'N.C. XML',
+            })
+            df_compras_editada = st.data_editor(
+                df_compras_display,
                 use_container_width=True, hide_index=True,
+                disabled=[c for c in df_compras_display.columns if c != 'Pedir enlace'],
+                key="editor_estado_cuenta",
                 column_config={
                     "Total": st.column_config.NumberColumn(format="$%,d"),
                     "Factura PDF": st.column_config.LinkColumn(display_text="Abrir"),
                     "Factura XML": st.column_config.LinkColumn(display_text="Abrir"),
                     "N.C. PDF": st.column_config.LinkColumn(display_text="Abrir"),
                     "N.C. XML": st.column_config.LinkColumn(display_text="Abrir"),
+                    "Pedir enlace": st.column_config.CheckboxColumn(
+                        "🔄", help='Marca la(s) venta(s) y pulsa "Pedir enlaces" para traer un PDF/XML fresco solo de esas.'
+                    ),
                 }
             )
+            seleccionadas_ec = df_compras_editada[df_compras_editada['Pedir enlace'] == True]
+            if not seleccionadas_ec.empty:
+                if st.button(f"🔄 Pedir enlaces de {len(seleccionadas_ec)} venta(s) marcada(s)", key="btn_pedir_ec"):
+                    with st.spinner("Pidiendo enlaces actualizados a Alegra..."):
+                        for vid_sel in seleccionadas_ec['Venta #'].tolist():
+                            refrescar_url_factura(user_id, int(vid_sel))
+                            refrescar_url_nota_credito(user_id, int(vid_sel))
+                    st.rerun()
         else:
             st.caption("Este cliente todavía no tiene compras registradas.")
 

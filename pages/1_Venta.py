@@ -19,7 +19,7 @@ from utils import aplicar_estilos, verificar_auth
 from tz_utils import hoy_bogota, ahora_bogota_naive
 from alegra_utils import (
     facturar_venta, anular_factura_venta, emitir_factura_dian_venta,
-    refrescar_url_factura, refrescar_url_nota_credito, refrescar_urls_dataframe,
+    refrescar_url_factura, refrescar_url_nota_credito,
 )
 from iva_utils import calcular_desglose_iva, calcular_iva_desde_detalles, texto_tasa_iva
 
@@ -780,23 +780,27 @@ with tab_historial:
 
         st.markdown("---")
         df_hoy = df_hoy.copy()
-        if st.button("🔄 Actualizar enlaces PDF/XML", key="refrescar_urls_hoy"):
-            with st.spinner("Pidiendo enlaces actualizados a Alegra..."):
-                df_hoy = refrescar_urls_dataframe(user_id, df_hoy)
+        df_hoy.insert(0, 'pedir_enlace', False)
         df_hoy['numero_factura_texto'] = (
             df_hoy['factura_prefijo'].fillna('').astype(str) + df_hoy['factura_numero'].fillna('').astype(str)
         )
         df_hoy['fe_texto'] = df_hoy['factura_estado'].fillna('Sin facturar').replace({
             'emitida': 'Emitida', 'abierta': 'Abierta (sin timbrar)', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
         })
-        cols_hoy = ['id', 'fecha', 'cliente', 'total']
+        cols_hoy = ['pedir_enlace', 'id', 'fecha', 'cliente', 'total']
         rename_hoy = {
+            'pedir_enlace': 'Pedir enlace',
             'id': 'N°', 'fecha': 'Hora', 'cliente': 'Cliente', 'total': 'Total',
             'tipo_pago': 'Pago', 'estado': 'Estado',
             'fe_texto': 'Factura Electrónica', 'numero_factura_texto': 'N° Factura',
             'factura_pdf_url': 'Factura PDF', 'factura_xml_url': 'Factura XML',
         }
-        config_hoy = {"Total": st.column_config.NumberColumn("Total", format="$%,d")}
+        config_hoy = {
+            "Total": st.column_config.NumberColumn("Total", format="$%,d"),
+            "Pedir enlace": st.column_config.CheckboxColumn(
+                "🔄", help='Marca la(s) venta(s) y pulsa "Pedir enlaces" para traer un PDF/XML fresco solo de esas.'
+            ),
+        }
         if iva_activo:
             cols_hoy += ['iva_tasa_texto', 'iva_valor']
             rename_hoy.update({'iva_tasa_texto': 'Impuesto', 'iva_valor': 'Valor Imp'})
@@ -805,11 +809,22 @@ with tab_historial:
         config_hoy["Factura PDF"] = st.column_config.LinkColumn(display_text="Abrir")
         config_hoy["Factura XML"] = st.column_config.LinkColumn(display_text="Abrir")
 
-        st.dataframe(
-            df_hoy[cols_hoy].rename(columns=rename_hoy),
+        df_hoy_mostrar = df_hoy[cols_hoy].rename(columns=rename_hoy)
+        df_hoy_editada = st.data_editor(
+            df_hoy_mostrar,
             use_container_width=True, hide_index=True,
-            column_config=config_hoy
+            column_config=config_hoy,
+            disabled=[c for c in df_hoy_mostrar.columns if c != 'Pedir enlace'],
+            key="editor_ventas_hoy",
         )
+        seleccionadas_hoy = df_hoy_editada[df_hoy_editada['Pedir enlace'] == True]
+        if not seleccionadas_hoy.empty:
+            if st.button(f"🔄 Pedir enlaces de {len(seleccionadas_hoy)} venta(s) marcada(s)", key="btn_pedir_hoy"):
+                with st.spinner("Pidiendo enlaces actualizados a Alegra..."):
+                    for vid_sel in seleccionadas_hoy['N°'].tolist():
+                        refrescar_url_factura(user_id, int(vid_sel))
+                        refrescar_url_nota_credito(user_id, int(vid_sel))
+                st.rerun()
 
         st.markdown("---")
         st.markdown("**Reimprimir ticket:**")
@@ -920,9 +935,7 @@ with tab_devolucion:
 
         if not df_devoluciones.empty:
             df_devoluciones = df_devoluciones.copy()
-            if st.button("🔄 Actualizar enlaces PDF/XML", key="refrescar_urls_devoluciones"):
-                with st.spinner("Pidiendo enlaces actualizados a Alegra..."):
-                    df_devoluciones = refrescar_urls_dataframe(user_id, df_devoluciones)
+            df_devoluciones.insert(0, 'pedir_enlace', False)
             df_devoluciones['numero_factura_texto'] = (
                 df_devoluciones['factura_prefijo'].fillna('').astype(str)
                 + df_devoluciones['factura_numero'].fillna('').astype(str)
@@ -933,7 +946,7 @@ with tab_devolucion:
             )
 
             def _estado_nc(row):
-                if row['nota_credito_alegra_id']:
+                if pd.notna(row['nota_credito_alegra_id']):
                     return 'Emitida'
                 if row['factura_estado'] == 'emitida':
                     return 'Pendiente'
@@ -943,23 +956,38 @@ with tab_devolucion:
 
             df_devoluciones['nc_estado_texto'] = df_devoluciones.apply(_estado_nc, axis=1)
 
-            st.dataframe(
-                df_devoluciones[['id', 'fecha', 'cliente', 'total', 'numero_factura_texto',
-                                  'nc_estado_texto', 'numero_nc_texto', 'nota_credito_pdf_url',
-                                  'nota_credito_xml_url', 'notas']].rename(columns={
-                    'id': 'Venta #', 'fecha': 'Fecha', 'cliente': 'Cliente', 'total': 'Total',
-                    'numero_factura_texto': 'N° Factura', 'nc_estado_texto': 'Nota Crédito',
-                    'numero_nc_texto': 'N° Nota Crédito',
-                    'nota_credito_pdf_url': 'N.C. PDF', 'nota_credito_xml_url': 'N.C. XML',
-                    'notas': 'Motivo',
-                }),
+            df_dev_mostrar = df_devoluciones[[
+                'pedir_enlace', 'id', 'fecha', 'cliente', 'total', 'numero_factura_texto',
+                'nc_estado_texto', 'numero_nc_texto', 'nota_credito_pdf_url',
+                'nota_credito_xml_url', 'notas']].rename(columns={
+                'pedir_enlace': 'Pedir enlace',
+                'id': 'Venta #', 'fecha': 'Fecha', 'cliente': 'Cliente', 'total': 'Total',
+                'numero_factura_texto': 'N° Factura', 'nc_estado_texto': 'Nota Crédito',
+                'numero_nc_texto': 'N° Nota Crédito',
+                'nota_credito_pdf_url': 'N.C. PDF', 'nota_credito_xml_url': 'N.C. XML',
+                'notas': 'Motivo',
+            })
+            df_dev_editada = st.data_editor(
+                df_dev_mostrar,
                 use_container_width=True, hide_index=True,
+                disabled=[c for c in df_dev_mostrar.columns if c != 'Pedir enlace'],
+                key="editor_devoluciones",
                 column_config={
                     "Total": st.column_config.NumberColumn(format="$%,d"),
                     "N.C. PDF": st.column_config.LinkColumn(display_text="Abrir"),
                     "N.C. XML": st.column_config.LinkColumn(display_text="Abrir"),
+                    "Pedir enlace": st.column_config.CheckboxColumn(
+                        "🔄", help='Marca la(s) devolución(es) y pulsa "Pedir enlaces" para traer un PDF/XML fresco solo de esas.'
+                    ),
                 }
             )
+            seleccionadas_dev = df_dev_editada[df_dev_editada['Pedir enlace'] == True]
+            if not seleccionadas_dev.empty:
+                if st.button(f"🔄 Pedir enlaces de {len(seleccionadas_dev)} devolución(es) marcada(s)", key="btn_pedir_dev"):
+                    with st.spinner("Pidiendo enlaces actualizados a Alegra..."):
+                        for vid_sel in seleccionadas_dev['Venta #'].tolist():
+                            refrescar_url_nota_credito(user_id, int(vid_sel))
+                    st.rerun()
 
             pendientes_nc = df_devoluciones[df_devoluciones['nc_estado_texto'] == 'Pendiente']
             if not pendientes_nc.empty:

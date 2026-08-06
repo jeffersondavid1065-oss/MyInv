@@ -20,7 +20,7 @@ from utils import aplicar_estilos, verificar_auth, bloquear_si_cajero
 from tz_utils import hoy_bogota, ahora_bogota
 from alegra_utils import (
     facturar_venta, actualizar_pdf_cufe_venta,
-    emitir_factura_dian_venta, refrescar_urls_dataframe,
+    emitir_factura_dian_venta, refrescar_url_factura, refrescar_url_nota_credito,
 )
 
 st.set_page_config(page_title="Reportes", layout="wide")
@@ -575,32 +575,46 @@ with tab_facturas:
                 'emitida': 'Emitida', 'abierta': 'Abierta (sin timbrar)', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
             })
 
-            if st.button("🔄 Actualizar enlaces PDF/XML", key="refrescar_urls_reportes"):
-                with st.spinner("Pidiendo enlaces actualizados a Alegra (puede tardar según cuántas facturas se muestren)..."):
-                    df_mostrar_fe = refrescar_urls_dataframe(user_id, df_mostrar_fe)
-            st.caption("Los enlaces de Alegra vencen después de un rato. Si dan error (\"Request has expired\") al abrirlos, usa el botón de arriba para renovar los de la tabla filtrada.")
+            st.caption("Los enlaces de Alegra vencen después de un rato. Marca el 🔄 de la(s) fila(s) que necesitás y pulsa \"Pedir enlaces\" para traer un PDF/XML fresco solo de esas.")
 
-            st.dataframe(
-                df_mostrar_fe[['id', 'fecha', 'cliente', 'cliente_documento', 'total', 'estado_texto',
-                               'numero_factura_texto', 'factura_cufe',
-                               'factura_pdf_url', 'factura_xml_url',
-                               'nota_credito_pdf_url', 'nota_credito_xml_url']].rename(columns={
-                    'id': 'Venta #', 'fecha': 'Fecha', 'cliente': 'Cliente',
-                    'cliente_documento': 'NIT/Documento',
-                    'total': 'Total ($)', 'estado_texto': 'Estado',
-                    'numero_factura_texto': 'N° Factura', 'factura_cufe': 'CUFE',
-                    'factura_pdf_url': 'Factura PDF', 'factura_xml_url': 'Factura XML',
-                    'nota_credito_pdf_url': 'N.C. PDF', 'nota_credito_xml_url': 'N.C. XML',
-                }),
+            df_mostrar_fe.insert(0, 'pedir_enlace', False)
+            df_reportes_display = df_mostrar_fe[[
+                'pedir_enlace', 'id', 'fecha', 'cliente', 'cliente_documento', 'total', 'estado_texto',
+                'numero_factura_texto', 'factura_cufe',
+                'factura_pdf_url', 'factura_xml_url',
+                'nota_credito_pdf_url', 'nota_credito_xml_url']].rename(columns={
+                'pedir_enlace': 'Pedir enlace',
+                'id': 'Venta #', 'fecha': 'Fecha', 'cliente': 'Cliente',
+                'cliente_documento': 'NIT/Documento',
+                'total': 'Total ($)', 'estado_texto': 'Estado',
+                'numero_factura_texto': 'N° Factura', 'factura_cufe': 'CUFE',
+                'factura_pdf_url': 'Factura PDF', 'factura_xml_url': 'Factura XML',
+                'nota_credito_pdf_url': 'N.C. PDF', 'nota_credito_xml_url': 'N.C. XML',
+            })
+            df_reportes_editada = st.data_editor(
+                df_reportes_display,
                 use_container_width=True, hide_index=True,
+                disabled=[c for c in df_reportes_display.columns if c != 'Pedir enlace'],
+                key="editor_reportes_fe",
                 column_config={
                     "Total ($)": st.column_config.NumberColumn(format="$%,d"),
                     "Factura PDF": st.column_config.LinkColumn(display_text="Abrir"),
                     "Factura XML": st.column_config.LinkColumn(display_text="Abrir"),
                     "N.C. PDF": st.column_config.LinkColumn(display_text="Abrir"),
                     "N.C. XML": st.column_config.LinkColumn(display_text="Abrir"),
+                    "Pedir enlace": st.column_config.CheckboxColumn(
+                        "🔄", help='Marca la(s) venta(s) y pulsa "Pedir enlaces" para traer un PDF/XML fresco solo de esas.'
+                    ),
                 }
             )
+            seleccionadas_reportes = df_reportes_editada[df_reportes_editada['Pedir enlace'] == True]
+            if not seleccionadas_reportes.empty:
+                if st.button(f"🔄 Pedir enlaces de {len(seleccionadas_reportes)} venta(s) marcada(s)", key="btn_pedir_reportes"):
+                    with st.spinner("Pidiendo enlaces actualizados a Alegra..."):
+                        for vid_sel in seleccionadas_reportes['Venta #'].tolist():
+                            refrescar_url_factura(user_id, int(vid_sel))
+                            refrescar_url_nota_credito(user_id, int(vid_sel))
+                    st.rerun()
 
             pendientes_pdf = df_facturas[
                 # Solo facturas YA emitidas: las 'abierta' no tienen CUFE/XML a
