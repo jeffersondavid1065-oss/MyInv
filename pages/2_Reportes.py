@@ -575,14 +575,20 @@ with tab_facturas:
                 'emitida': 'Emitida', 'abierta': 'Abierta (sin timbrar)', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
             })
 
-            st.caption('Los enlaces de Alegra vencen después de un rato. Marca "Pedir" en la(s) fila(s) que necesitás y pulsa el botón para traer un PDF/XML fresco solo de esas.')
+            st.caption('Si el PDF o el XML de una venta no abre, marca "Pedir" en esa fila y pulsa el botón de abajo para guardarlo.')
 
-            # 'pedir': None en las ventas sin factura ni nota crédito para que la casilla ni aparezca ahí.
+            # 'pedir': None cuando no hace falta pedir nada (sin factura ni
+            # nota crédito, o ya tienen su copia guardada).
             df_mostrar_fe['pedir'] = None
-            df_mostrar_fe.loc[
-                df_mostrar_fe['factura_alegra_id'].notna() | df_mostrar_fe['nota_credito_alegra_id'].notna(),
-                'pedir'
-            ] = False
+            falta_factura = (
+                df_mostrar_fe['factura_alegra_id'].notna()
+                & ~df_mostrar_fe['factura_pdf_url'].fillna('').str.startswith('data:')
+            )
+            falta_nc = (
+                df_mostrar_fe['nota_credito_alegra_id'].notna()
+                & ~df_mostrar_fe['nota_credito_pdf_url'].fillna('').str.startswith('data:')
+            )
+            df_mostrar_fe.loc[falta_factura | falta_nc, 'pedir'] = False
             df_reportes_display = df_mostrar_fe[[
                 'id', 'fecha', 'cliente', 'cliente_documento', 'total', 'estado_texto',
                 'numero_factura_texto', 'factura_cufe',
@@ -607,14 +613,14 @@ with tab_facturas:
                     "N.C. PDF": st.column_config.LinkColumn(display_text="Abrir"),
                     "N.C. XML": st.column_config.LinkColumn(display_text="Abrir"),
                     "Pedir": st.column_config.CheckboxColumn(
-                        "Pedir", help='Marca la(s) venta(s) y pulsa "Pedir enlaces" para traer un PDF/XML fresco solo de esas.'
+                        "Pedir", help='Marca la(s) venta(s) y pulsa el botón de abajo para guardar su factura o nota crédito.'
                     ),
                 }
             )
             seleccionadas_reportes = df_reportes_editada[df_reportes_editada['Pedir'] == True]
             if not seleccionadas_reportes.empty:
-                if st.button(f"🔄 Pedir enlaces de {len(seleccionadas_reportes)} venta(s) marcada(s)", key="btn_pedir_reportes"):
-                    with st.spinner("Pidiendo enlaces actualizados a Alegra..."):
+                if st.button(f"Guardar documentos de {len(seleccionadas_reportes)} venta(s) marcada(s)", key="btn_pedir_reportes"):
+                    with st.spinner("Guardando..."):
                         for vid_sel in seleccionadas_reportes['Venta #'].tolist():
                             refrescar_url_factura(user_id, int(vid_sel))
                             refrescar_url_nota_credito(user_id, int(vid_sel))

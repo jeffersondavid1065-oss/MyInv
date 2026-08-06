@@ -35,6 +35,33 @@ def _mensaje_error(resp):
     return resp.text
 
 
+def _descargar_bytes(url):
+    """Descarga el contenido de un enlace de Alegra (el PDF o el XML) para
+    guardar una copia propia. Ese enlace vence a los pocos minutos u horas -
+    esta es la única oportunidad de traer el archivo mientras todavía sirve."""
+    if not url:
+        return None
+    try:
+        resp = requests.get(url, timeout=20)
+        if resp.status_code == 200:
+            return resp.content
+        return None
+    except requests.RequestException:
+        return None
+
+
+def _guardar_como_enlace_propio(url, tipo_mime):
+    """Convierte un enlace temporal de Alegra en uno que contiene el archivo
+    completo adentro (no un link a Alegra, sino el documento mismo, codificado).
+    Ese enlace nunca vence porque no depende de que Alegra lo siga teniendo.
+    Si no se pudo descargar, devuelve el enlace original tal cual (sigue
+    sirviendo mientras esté vigente)."""
+    contenido = _descargar_bytes(url)
+    if not contenido:
+        return url
+    return f"data:{tipo_mime};base64,{base64.b64encode(contenido).decode()}"
+
+
 def probar_conexion(email, token):
     """Verifica que un par email/token funcione contra la API de Alegra."""
     try:
@@ -552,6 +579,10 @@ def facturar_venta(uid, venta_id):
         if factura_completa:
             pdf_url = factura_completa.get("pdf") if isinstance(factura_completa.get("pdf"), str) else None
 
+    # Se guarda una copia propia del PDF (no solo el enlace de Alegra, que
+    # vence a los pocos minutos u horas) para que "Abrir" funcione siempre.
+    pdf_url = _guardar_como_enlace_propio(pdf_url, "application/pdf")
+
     queries.guardar_resultado_factura(
         venta_id,
         alegra_id=factura.get("id"),
@@ -599,6 +630,11 @@ def emitir_factura_dian_venta(uid, venta_id):
         number_template = factura_completa.get("numberTemplate") if isinstance(factura_completa.get("numberTemplate"), dict) else {}
         prefijo = number_template.get("prefix")
         numero = str(number_template["number"]) if number_template.get("number") is not None else None
+
+    # Copia propia del PDF y del XML timbrado - así no dependen de que el
+    # enlace de Alegra siga vivo cuando alguien quiera verlos después.
+    pdf_url = _guardar_como_enlace_propio(pdf_url, "application/pdf")
+    xml_url = _guardar_como_enlace_propio(xml_url, "application/xml")
 
     queries.guardar_resultado_factura(
         venta_id, alegra_id=venta.factura_alegra_id, cufe=cufe, pdf_url=pdf_url, xml_url=xml_url,
@@ -673,6 +709,11 @@ def anular_factura_venta(uid, venta_id):
             if not number_template_nc and isinstance(nota_completa.get("numberTemplate"), dict):
                 number_template_nc = nota_completa["numberTemplate"]
 
+    # Copia propia del PDF y del XML de la nota crédito - mismo motivo que en
+    # la factura: el enlace de Alegra vence, esta copia no.
+    pdf_url_nc = _guardar_como_enlace_propio(pdf_url_nc, "application/pdf")
+    xml_url_nc = _guardar_como_enlace_propio(xml_url_nc, "application/xml")
+
     queries.guardar_nota_credito(
         venta_id, nota.get("id"), pdf_url=pdf_url_nc, xml_url=xml_url_nc,
         prefijo=number_template_nc.get("prefix"),
@@ -712,6 +753,8 @@ def actualizar_pdf_cufe_venta(uid, venta_id):
             xml_url = factura.get("xml") if isinstance(factura.get("xml"), str) else None
             number_template = factura.get("numberTemplate") if isinstance(factura.get("numberTemplate"), dict) else {}
             if cufe or pdf_url or xml_url:
+                pdf_url = _guardar_como_enlace_propio(pdf_url, "application/pdf") if pdf_url else pdf_url
+                xml_url = _guardar_como_enlace_propio(xml_url, "application/xml") if xml_url else xml_url
                 queries.actualizar_datos_factura(
                     venta_id, cufe=cufe, pdf_url=pdf_url, xml_url=xml_url,
                     prefijo=number_template.get("prefix"),
@@ -728,6 +771,8 @@ def actualizar_pdf_cufe_venta(uid, venta_id):
             xml_url_nc = nota.get("xml") if isinstance(nota.get("xml"), str) else None
             number_template_nc = nota.get("numberTemplate") if isinstance(nota.get("numberTemplate"), dict) else {}
             if pdf_url_nc or xml_url_nc or number_template_nc:
+                pdf_url_nc = _guardar_como_enlace_propio(pdf_url_nc, "application/pdf") if pdf_url_nc else pdf_url_nc
+                xml_url_nc = _guardar_como_enlace_propio(xml_url_nc, "application/xml") if xml_url_nc else xml_url_nc
                 queries.actualizar_pdf_nota_credito(
                     venta_id, pdf_url_nc, xml_url=xml_url_nc,
                     prefijo=number_template_nc.get("prefix"),
@@ -752,33 +797,42 @@ def _nota_credito_cache(email, token, nota_id):
     return obtener_nota_credito(email, token, nota_id)
 
 
+def _es_copia_propia(url):
+    """True si el enlace ya contiene el archivo adentro (no depende de que
+    Alegra lo siga teniendo) - no hace falta pedir nada más para ese caso."""
+    return bool(url) and url.startswith("data:")
+
+
 def refrescar_url_factura(uid, venta_id):
     """
-    Pide a Alegra (con caché de 5 min) un enlace fresco del PDF/XML de la
-    factura de esta venta. Los enlaces que Alegra entrega son URLs firmadas de
-    S3 con vencimiento (minutos/horas) - la que se guardó al crear/emitir la
-    factura deja de servir después de un rato, por eso se pide una nueva cada
-    vez que se va a mostrar. Solo escribe en la base de datos si el enlace
-    cambió, para no invalidar la caché de consultas en cada render.
-    Devuelve (pdf_url, xml_url) - el más fresco disponible, o el que ya había
-    guardado si Alegra no respondió esta vez. (None, None) si no hay factura.
+    Devuelve el enlace para abrir el PDF y el XML de la factura de esta venta.
+    Si ya se guardó una copia propia (lo normal desde que se creó/emitió la
+    factura, ver facturar_venta), la devuelve directamente sin pedirle nada a
+    Alegra. Si es una factura de antes de este cambio y todavía no tiene copia
+    guardada, la pide a Alegra una vez (con caché de 5 min) y la deja guardada
+    para que la próxima vez ya no haga falta.
+    Devuelve (pdf_url, xml_url), o (None, None) si no hay factura.
     """
     import queries
 
     venta = queries.obtener_venta_para_facturar(uid, venta_id)
     if not venta or not venta.factura_alegra_id:
         return None, None
+    if _es_copia_propia(venta.factura_pdf_url):
+        return venta.factura_pdf_url, venta.factura_xml_url
     email, token = obtener_credenciales(uid)
     if not email or not token:
         return venta.factura_pdf_url, venta.factura_xml_url
     factura = _factura_cache(email, token, venta.factura_alegra_id)
     if not factura:
         return venta.factura_pdf_url, venta.factura_xml_url
-    pdf_url = factura.get("pdf") if isinstance(factura.get("pdf"), str) else None
-    xml_url = factura.get("xml") if isinstance(factura.get("xml"), str) else None
-    if (pdf_url and pdf_url != venta.factura_pdf_url) or (xml_url and xml_url != venta.factura_xml_url):
+    pdf_raw = factura.get("pdf") if isinstance(factura.get("pdf"), str) else None
+    xml_raw = factura.get("xml") if isinstance(factura.get("xml"), str) else None
+    pdf_url = _guardar_como_enlace_propio(pdf_raw, "application/pdf") if pdf_raw else venta.factura_pdf_url
+    xml_url = _guardar_como_enlace_propio(xml_raw, "application/xml") if xml_raw else venta.factura_xml_url
+    if pdf_url != venta.factura_pdf_url or xml_url != venta.factura_xml_url:
         queries.actualizar_datos_factura(venta_id, pdf_url=pdf_url, xml_url=xml_url)
-    return pdf_url or venta.factura_pdf_url, xml_url or venta.factura_xml_url
+    return pdf_url, xml_url
 
 
 def refrescar_url_nota_credito(uid, venta_id):
@@ -788,18 +842,49 @@ def refrescar_url_nota_credito(uid, venta_id):
     venta = queries.obtener_venta_para_facturar(uid, venta_id)
     if not venta or not venta.nota_credito_alegra_id:
         return None, None
+    if _es_copia_propia(venta.nota_credito_pdf_url):
+        return venta.nota_credito_pdf_url, venta.nota_credito_xml_url
     email, token = obtener_credenciales(uid)
     if not email or not token:
         return venta.nota_credito_pdf_url, venta.nota_credito_xml_url
     nota = _nota_credito_cache(email, token, venta.nota_credito_alegra_id)
     if not nota:
         return venta.nota_credito_pdf_url, venta.nota_credito_xml_url
-    pdf_url = nota.get("pdf") if isinstance(nota.get("pdf"), str) else None
-    xml_url = nota.get("xml") if isinstance(nota.get("xml"), str) else None
-    if (pdf_url and pdf_url != venta.nota_credito_pdf_url) or (xml_url and xml_url != venta.nota_credito_xml_url):
+    pdf_raw = nota.get("pdf") if isinstance(nota.get("pdf"), str) else None
+    xml_raw = nota.get("xml") if isinstance(nota.get("xml"), str) else None
+    pdf_url = _guardar_como_enlace_propio(pdf_raw, "application/pdf") if pdf_raw else venta.nota_credito_pdf_url
+    xml_url = _guardar_como_enlace_propio(xml_raw, "application/xml") if xml_raw else venta.nota_credito_xml_url
+    if pdf_url != venta.nota_credito_pdf_url or xml_url != venta.nota_credito_xml_url:
         queries.actualizar_pdf_nota_credito(venta_id, pdf_url, xml_url=xml_url)
-    return pdf_url or venta.nota_credito_pdf_url, xml_url or venta.nota_credito_xml_url
+    return pdf_url, xml_url
 
+
+def guardar_documentos_pendientes(uid, avance=None):
+    """
+    Recorre todas las ventas de este negocio que todavía no tienen guardada
+    su propia copia del PDF/XML (facturas y notas crédito de antes de este
+    cambio) y las trae de Alegra una por una. Es seguro correr esto más de
+    una vez: las que ya quedaron guardadas se saltan solas.
+    avance: función opcional que se llama después de cada venta procesada,
+    con (procesadas, total) - para mostrar una barra de progreso.
+    Devuelve (guardadas, no_guardadas).
+    """
+    import queries
+
+    pendientes = queries.obtener_ventas_con_documentos_pendientes(uid)
+    total = len(pendientes)
+    guardadas = 0
+    no_guardadas = 0
+    for i, venta_id in enumerate(pendientes, start=1):
+        pdf_f, _ = refrescar_url_factura(uid, venta_id)
+        pdf_nc, _ = refrescar_url_nota_credito(uid, venta_id)
+        if _es_copia_propia(pdf_f) or _es_copia_propia(pdf_nc):
+            guardadas += 1
+        else:
+            no_guardadas += 1
+        if avance:
+            avance(i, total)
+    return guardadas, no_guardadas
 
 
 def registrar_abono_credito(uid, venta_id, monto, metodo_pago="Efectivo"):

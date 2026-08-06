@@ -791,6 +791,23 @@ def obtener_venta_para_facturar(uid, venta_id):
         """), {"vid": venta_id, "uid": uid}).fetchone()
 
 
+def obtener_ventas_con_documentos_pendientes(uid):
+    """IDs de ventas que tienen factura y/o nota crédito en Alegra pero
+    todavía no tienen guardada su propia copia del PDF/XML (facturas de antes
+    de que MyInv empezara a guardarlas). Para el respaldo masivo desde Solo Admin."""
+    engine = obtener_conexion()
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT id FROM Ventas
+            WHERE usuario_id = :uid
+            AND (
+                (factura_alegra_id IS NOT NULL AND (factura_pdf_url IS NULL OR factura_pdf_url NOT LIKE 'data:%'))
+                OR (nota_credito_alegra_id IS NOT NULL AND (nota_credito_pdf_url IS NULL OR nota_credito_pdf_url NOT LIKE 'data:%'))
+            )
+        """), {"uid": uid}).fetchall()
+    return [r[0] for r in rows]
+
+
 def obtener_credito_de_venta(venta_id):
     """Términos de crédito (fecha límite, periodicidad) ligados a una venta a crédito."""
     engine = obtener_conexion()

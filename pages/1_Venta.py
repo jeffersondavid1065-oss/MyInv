@@ -786,10 +786,11 @@ with tab_historial:
         df_hoy['fe_texto'] = df_hoy['factura_estado'].fillna('Sin facturar').replace({
             'emitida': 'Emitida', 'abierta': 'Abierta (sin timbrar)', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
         })
-        # 'pedir': None en las ventas sin FE para que la casilla ni aparezca ahí
-        # (solo tiene sentido pedir un enlace si hay factura electrónica que consultar).
+        # 'pedir': None cuando no hace falta pedir nada (sin factura electrónica,
+        # o ya tiene su copia guardada) para que la casilla ni aparezca ahí.
         df_hoy['pedir'] = None
-        df_hoy.loc[df_hoy['factura_alegra_id'].notna(), 'pedir'] = False
+        falta_copia = df_hoy['factura_alegra_id'].notna() & ~df_hoy['factura_pdf_url'].fillna('').str.startswith('data:')
+        df_hoy.loc[falta_copia, 'pedir'] = False
         cols_hoy = ['id', 'fecha', 'cliente', 'total']
         rename_hoy = {
             'id': 'N°', 'fecha': 'Hora', 'cliente': 'Cliente', 'total': 'Total',
@@ -801,7 +802,7 @@ with tab_historial:
         config_hoy = {
             "Total": st.column_config.NumberColumn("Total", format="$%,d"),
             "Pedir": st.column_config.CheckboxColumn(
-                "Pedir", help='Marca la(s) venta(s) y pulsa "Pedir enlaces" para traer un PDF/XML fresco solo de esas.'
+                "Pedir", help='Marca la(s) venta(s) y pulsa el botón de abajo para guardar su factura.'
             ),
         }
         if iva_activo:
@@ -822,8 +823,8 @@ with tab_historial:
         )
         seleccionadas_hoy = df_hoy_editada[df_hoy_editada['Pedir'] == True]
         if not seleccionadas_hoy.empty:
-            if st.button(f"🔄 Pedir enlaces de {len(seleccionadas_hoy)} venta(s) marcada(s)", key="btn_pedir_hoy"):
-                with st.spinner("Pidiendo enlaces actualizados a Alegra..."):
+            if st.button(f"Guardar factura de {len(seleccionadas_hoy)} venta(s) marcada(s)", key="btn_pedir_hoy"):
+                with st.spinner("Guardando..."):
                     for vid_sel in seleccionadas_hoy['N°'].tolist():
                         refrescar_url_factura(user_id, int(vid_sel))
                         refrescar_url_nota_credito(user_id, int(vid_sel))
@@ -938,10 +939,15 @@ with tab_devolucion:
 
         if not df_devoluciones.empty:
             df_devoluciones = df_devoluciones.copy()
-            # 'pedir': None en las devoluciones sin nota crédito confirmada para que
-            # la casilla ni aparezca ahí - no hay documento que pedir todavía.
+            # 'pedir': None cuando no hace falta pedir nada (sin nota crédito
+            # confirmada, o ya tiene su copia guardada) para que la casilla ni
+            # aparezca ahí.
             df_devoluciones['pedir'] = None
-            df_devoluciones.loc[df_devoluciones['nota_credito_alegra_id'].notna(), 'pedir'] = False
+            falta_copia_nc = (
+                df_devoluciones['nota_credito_alegra_id'].notna()
+                & ~df_devoluciones['nota_credito_pdf_url'].fillna('').str.startswith('data:')
+            )
+            df_devoluciones.loc[falta_copia_nc, 'pedir'] = False
             df_devoluciones['numero_factura_texto'] = (
                 df_devoluciones['factura_prefijo'].fillna('').astype(str)
                 + df_devoluciones['factura_numero'].fillna('').astype(str)
@@ -982,14 +988,14 @@ with tab_devolucion:
                     "N.C. PDF": st.column_config.LinkColumn(display_text="Abrir"),
                     "N.C. XML": st.column_config.LinkColumn(display_text="Abrir"),
                     "Pedir": st.column_config.CheckboxColumn(
-                        "Pedir", help='Marca la(s) devolución(es) y pulsa "Pedir enlaces" para traer un PDF/XML fresco solo de esas.'
+                        "Pedir", help='Marca la(s) devolución(es) y pulsa el botón de abajo para guardar su nota crédito.'
                     ),
                 }
             )
             seleccionadas_dev = df_dev_editada[df_dev_editada['Pedir'] == True]
             if not seleccionadas_dev.empty:
-                if st.button(f"🔄 Pedir enlaces de {len(seleccionadas_dev)} devolución(es) marcada(s)", key="btn_pedir_dev"):
-                    with st.spinner("Pidiendo enlaces actualizados a Alegra..."):
+                if st.button(f"Guardar nota crédito de {len(seleccionadas_dev)} devolución(es) marcada(s)", key="btn_pedir_dev"):
+                    with st.spinner("Guardando..."):
                         for vid_sel in seleccionadas_dev['Venta #'].tolist():
                             refrescar_url_nota_credito(user_id, int(vid_sel))
                     st.rerun()
