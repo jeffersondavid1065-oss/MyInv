@@ -18,11 +18,7 @@ from queries import (
 )
 from utils import aplicar_estilos, verificar_auth, bloquear_si_cajero
 from tz_utils import hoy_bogota, ahora_bogota
-from alegra_utils import (
-    facturar_venta, actualizar_pdf_cufe_venta,
-    emitir_factura_dian_venta, refrescar_url_factura, refrescar_url_nota_credito,
-    mostrar_documento,
-)
+from factus_utils import facturar_venta, mostrar_documento
 
 st.set_page_config(page_title="Reportes", layout="wide")
 aplicar_estilos()
@@ -492,22 +488,18 @@ with tab_facturas:
 
         if not df_facturas.empty:
             emitidas = (df_facturas['factura_estado'] == 'emitida').sum()
-            abiertas = (df_facturas['factura_estado'] == 'abierta').sum()
             con_error = (df_facturas['factura_estado'] == 'error').sum()
             anuladas_nc = (df_facturas['factura_estado'] == 'anulada').sum()
             sin_facturar = df_facturas['factura_estado'].isna().sum()
 
-            col_e1, col_e2, col_e3, col_e4, col_e5, col_e6 = st.columns(6)
+            col_e1, col_e2, col_e3, col_e4, col_e5 = st.columns(5)
             col_e1.metric("Ventas del período", len(df_facturas))
             col_e2.metric("Emitidas (DIAN)", int(emitidas))
-            col_e3.metric("Abiertas sin timbrar", int(abiertas),
-                          delta="Emitir" if abiertas > 0 else None,
-                          delta_color="inverse")
-            col_e4.metric("Con error", int(con_error),
+            col_e3.metric("Con error", int(con_error),
                           delta="Revisar" if con_error > 0 else None,
                           delta_color="inverse")
-            col_e5.metric("Anuladas (N.C.)", int(anuladas_nc))
-            col_e6.metric("Sin facturar", int(sin_facturar))
+            col_e4.metric("Anuladas (N.C.)", int(anuladas_nc))
+            col_e5.metric("Sin facturar", int(sin_facturar))
 
             st.markdown("---")
 
@@ -521,7 +513,7 @@ with tab_facturas:
             with col_s3:
                 filtro_estado = st.selectbox(
                     "Filtrar por estado",
-                    ["Todas", "Emitidas (DIAN)", "Abiertas sin timbrar", "Con error", "Anuladas (N.C.)", "Sin facturar"],
+                    ["Todas", "Emitidas (DIAN)", "Con error", "Anuladas (N.C.)", "Sin facturar"],
                     key="filtro_estado_factura"
                 )
 
@@ -536,8 +528,6 @@ with tab_facturas:
             df_mostrar_fe = df_facturas.copy()
             if filtro_estado == "Emitidas (DIAN)":
                 df_mostrar_fe = df_mostrar_fe[df_mostrar_fe['factura_estado'] == 'emitida']
-            elif filtro_estado == "Abiertas sin timbrar":
-                df_mostrar_fe = df_mostrar_fe[df_mostrar_fe['factura_estado'] == 'abierta']
             elif filtro_estado == "Con error":
                 df_mostrar_fe = df_mostrar_fe[df_mostrar_fe['factura_estado'] == 'error']
             elif filtro_estado == "Anuladas (N.C.)":
@@ -573,51 +563,22 @@ with tab_facturas:
                 ]
 
             df_mostrar_fe['estado_texto'] = df_mostrar_fe['factura_estado'].fillna('Sin facturar').replace({
-                'emitida': 'Emitida', 'abierta': 'Abierta (sin timbrar)', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
+                'emitida': 'Emitida', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
             })
 
-            st.caption('Si el PDF o el XML de una venta no abre, marca "Pedir" en esa fila y pulsa el botón de abajo para guardarlo.')
-
-            # 'pedir': None cuando no hace falta pedir nada (sin factura ni
-            # nota crédito, o ya tienen su copia guardada).
-            df_mostrar_fe['pedir'] = None
-            falta_factura = (
-                df_mostrar_fe['factura_alegra_id'].notna()
-                & ~df_mostrar_fe['factura_pdf_url'].fillna('').str.startswith('data:')
-            )
-            falta_nc = (
-                df_mostrar_fe['nota_credito_alegra_id'].notna()
-                & ~df_mostrar_fe['nota_credito_pdf_url'].fillna('').str.startswith('data:')
-            )
-            df_mostrar_fe.loc[falta_factura | falta_nc, 'pedir'] = False
             df_reportes_display = df_mostrar_fe[[
                 'id', 'fecha', 'cliente', 'cliente_documento', 'total', 'estado_texto',
-                'numero_factura_texto', 'factura_cufe', 'pedir']].rename(columns={
+                'numero_factura_texto', 'factura_cufe']].rename(columns={
                 'id': 'Venta #', 'fecha': 'Fecha', 'cliente': 'Cliente',
                 'cliente_documento': 'NIT/Documento',
                 'total': 'Total ($)', 'estado_texto': 'Estado',
-                'numero_factura_texto': 'N° Factura', 'factura_cufe': 'CUFE', 'pedir': 'Pedir',
+                'numero_factura_texto': 'N° Factura', 'factura_cufe': 'CUFE',
             })
-            df_reportes_editada = st.data_editor(
+            st.dataframe(
                 df_reportes_display,
                 use_container_width=True, hide_index=True,
-                disabled=[c for c in df_reportes_display.columns if c != 'Pedir'],
-                key="editor_reportes_fe",
-                column_config={
-                    "Total ($)": st.column_config.NumberColumn(format="$%,d"),
-                    "Pedir": st.column_config.CheckboxColumn(
-                        "Pedir", help='Marca la(s) venta(s) y pulsa el botón de abajo para guardar su factura o nota crédito.'
-                    ),
-                }
+                column_config={"Total ($)": st.column_config.NumberColumn(format="$%,d")},
             )
-            seleccionadas_reportes = df_reportes_editada[df_reportes_editada['Pedir'] == True]
-            if not seleccionadas_reportes.empty:
-                if st.button(f"Guardar documentos de {len(seleccionadas_reportes)} venta(s) marcada(s)", key="btn_pedir_reportes"):
-                    with st.spinner("Guardando..."):
-                        for vid_sel in seleccionadas_reportes['Venta #'].tolist():
-                            refrescar_url_factura(user_id, int(vid_sel))
-                            refrescar_url_nota_credito(user_id, int(vid_sel))
-                    st.rerun()
 
             con_documento = df_mostrar_fe[
                 df_mostrar_fe['factura_alegra_id'].notna() | df_mostrar_fe['nota_credito_alegra_id'].notna()
@@ -635,71 +596,6 @@ with tab_facturas:
                 mostrar_documento(col_dr2, "Factura XML", fila_desc_rep['factura_xml_url'], f"Factura_Venta_{fila_desc_rep['id']}.xml", "application/xml")
                 mostrar_documento(col_dr3, "N.C. PDF", fila_desc_rep['nota_credito_pdf_url'], f"NotaCredito_Venta_{fila_desc_rep['id']}.pdf", "application/pdf")
                 mostrar_documento(col_dr4, "N.C. XML", fila_desc_rep['nota_credito_xml_url'], f"NotaCredito_Venta_{fila_desc_rep['id']}.xml", "application/xml")
-
-            pendientes_pdf = df_facturas[
-                # Solo facturas YA emitidas: las 'abierta' no tienen CUFE/XML a
-                # propósito hasta que se emitan a la DIAN con el botón de abajo.
-                ((df_facturas['factura_estado'] == 'emitida')
-                 & (df_facturas['factura_cufe'].isna() | df_facturas['factura_pdf_url'].isna()
-                    | df_facturas['factura_xml_url'].isna()))
-                | (df_facturas['nota_credito_alegra_id'].notna()
-                   & (df_facturas['nota_credito_pdf_url'].isna() | df_facturas['nota_credito_xml_url'].isna()))
-            ]
-            facturas_abiertas = df_facturas[df_facturas['factura_estado'] == 'abierta']
-            if not facturas_abiertas.empty:
-                st.markdown("---")
-                st.warning(f"{len(facturas_abiertas)} factura(s) creada(s) pero sin emitir ante la DIAN.")
-
-                df_abiertas_sel = facturas_abiertas[['id', 'cliente', 'total']].copy()
-                df_abiertas_sel.insert(0, 'Emitir', True)
-                df_abiertas_sel = df_abiertas_sel.rename(columns={
-                    'id': 'Venta #', 'cliente': 'Cliente', 'total': 'Total ($)'
-                })
-                df_abiertas_editada = st.data_editor(
-                    df_abiertas_sel,
-                    use_container_width=True, hide_index=True, key="editor_emitir_dian",
-                    disabled=['Venta #', 'Cliente', 'Total ($)'],
-                    column_config={
-                        "Total ($)": st.column_config.NumberColumn(format="$%,d"),
-                    }
-                )
-                ids_seleccionados = df_abiertas_editada[df_abiertas_editada['Emitir']]['Venta #'].tolist()
-
-                if st.button(
-                    f"Emitir {len(ids_seleccionados)} factura(s) a la DIAN" if ids_seleccionados else "Emitir a la DIAN",
-                    use_container_width=True, key="btn_emitir_dian", disabled=not ids_seleccionados,
-                    type="primary",
-                ):
-                    exitosas, fallidas = [], []
-                    with st.spinner(f"Emitiendo {len(ids_seleccionados)} factura(s) ante la DIAN..."):
-                        for vid_emitir in ids_seleccionados:
-                            ok_dian, msg_dian = emitir_factura_dian_venta(user_id, int(vid_emitir))
-                            (exitosas if ok_dian else fallidas).append((vid_emitir, msg_dian))
-                    if exitosas:
-                        st.success(f"Emitidas: {', '.join(f'#{v}' for v, _ in exitosas)}.")
-                    if fallidas:
-                        for vid_f, msg_f in fallidas:
-                            st.error(f"Venta #{vid_f}: {msg_f}")
-                    if exitosas:
-                        st.rerun()
-
-            if not pendientes_pdf.empty:
-                st.markdown("---")
-                st.caption(
-                    f"{len(pendientes_pdf)} venta(s) sin CUFE, PDF o XML confirmado todavía — "
-                    "el sistema puede tardar unos minutos en validarlas ante la DIAN."
-                )
-                if st.button("Actualizar CUFE/PDF/XML pendientes", use_container_width=True):
-                    with st.spinner("Consultando..."):
-                        actualizadas = sum(
-                            actualizar_pdf_cufe_venta(user_id, int(r['id']))
-                            for _, r in pendientes_pdf.iterrows()
-                        )
-                    if actualizadas:
-                        st.success(f"Se completaron datos de {actualizadas} venta(s).")
-                    else:
-                        st.info("Todavía no hay novedades para estas facturas/notas crédito.")
-                    st.rerun()
 
             facturas_con_error = df_facturas[df_facturas['factura_estado'] == 'error']
             if not facturas_con_error.empty:

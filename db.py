@@ -80,7 +80,12 @@ def init_db():
                     alegra_email TEXT,
                     alegra_token TEXT,
                     fe_habilitada BOOLEAN DEFAULT 0,
-                    declara_iva BOOLEAN DEFAULT 0
+                    declara_iva BOOLEAN DEFAULT 0,
+                    factus_client_id TEXT,
+                    factus_client_secret TEXT,
+                    factus_username TEXT,
+                    factus_password TEXT,
+                    municipio_code_taller TEXT
                 )
             '''))
             conn.execute(text('''
@@ -118,6 +123,8 @@ def init_db():
                     activo BOOLEAN DEFAULT 1,
                     fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     alegra_contact_id TEXT,
+                    regimen TEXT DEFAULT 'SIMPLIFIED_REGIME',
+                    digito_verificacion TEXT,
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE
                 )
             '''))
@@ -150,6 +157,8 @@ def init_db():
                     cambio REAL DEFAULT 0,
                     estado TEXT CHECK(estado IN ('Pagada','Credito','Anulada')) DEFAULT 'Pagada',
                     notas TEXT,
+                    -- factura_alegra_id / nota_credito_alegra_id: pese al nombre heredado
+                    -- de Alegra, ahora guardan el reference_code que le asigna Factus.
                     factura_alegra_id TEXT,
                     factura_cufe TEXT,
                     factura_pdf_url TEXT,
@@ -291,7 +300,12 @@ def init_db():
                     alegra_email TEXT,
                     alegra_token TEXT,
                     fe_habilitada BOOLEAN DEFAULT FALSE,
-                    declara_iva BOOLEAN DEFAULT FALSE
+                    declara_iva BOOLEAN DEFAULT FALSE,
+                    factus_client_id TEXT,
+                    factus_client_secret TEXT,
+                    factus_username TEXT,
+                    factus_password TEXT,
+                    municipio_code_taller TEXT
                 )
             '''))
             conn.execute(text('''
@@ -342,6 +356,8 @@ def init_db():
                     activo BOOLEAN DEFAULT TRUE,
                     fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     alegra_contact_id TEXT,
+                    regimen TEXT DEFAULT 'SIMPLIFIED_REGIME',
+                    digito_verificacion TEXT,
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE
                 )
             '''))
@@ -374,6 +390,8 @@ def init_db():
                     cambio NUMERIC(12,2) DEFAULT 0,
                     estado VARCHAR(20) CHECK(estado IN ('Pagada','Credito','Anulada')) DEFAULT 'Pagada',
                     notas TEXT,
+                    -- factura_alegra_id / nota_credito_alegra_id: pese al nombre heredado
+                    -- de Alegra, ahora guardan el reference_code que le asigna Factus.
                     factura_alegra_id TEXT,
                     factura_cufe TEXT,
                     factura_pdf_url TEXT,
@@ -584,6 +602,20 @@ def init_db():
                     conn.execute(text("ALTER TABLE Productos ADD COLUMN iva_porcentaje REAL DEFAULT 0"))
                 if 'iva_porcentaje' not in cols_dv:
                     conn.execute(text("ALTER TABLE Detalles_Venta ADD COLUMN iva_porcentaje REAL DEFAULT 0"))
+                if 'factus_client_id' not in cols:
+                    conn.execute(text("ALTER TABLE Usuarios ADD COLUMN factus_client_id TEXT"))
+                if 'factus_client_secret' not in cols:
+                    conn.execute(text("ALTER TABLE Usuarios ADD COLUMN factus_client_secret TEXT"))
+                if 'factus_username' not in cols:
+                    conn.execute(text("ALTER TABLE Usuarios ADD COLUMN factus_username TEXT"))
+                if 'factus_password' not in cols:
+                    conn.execute(text("ALTER TABLE Usuarios ADD COLUMN factus_password TEXT"))
+                if 'municipio_code_taller' not in cols:
+                    conn.execute(text("ALTER TABLE Usuarios ADD COLUMN municipio_code_taller TEXT"))
+                if 'regimen' not in cols_cli:
+                    conn.execute(text("ALTER TABLE Clientes ADD COLUMN regimen TEXT DEFAULT 'SIMPLIFIED_REGIME'"))
+                if 'digito_verificacion' not in cols_cli:
+                    conn.execute(text("ALTER TABLE Clientes ADD COLUMN digito_verificacion TEXT"))
             else:
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS token_sesion VARCHAR(255)"))
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS logo_path TEXT"))
@@ -620,6 +652,13 @@ def init_db():
                 conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS nota_credito_numero TEXT"))
                 conn.execute(text("ALTER TABLE Productos ADD COLUMN IF NOT EXISTS iva_porcentaje NUMERIC(5,2) DEFAULT 0"))
                 conn.execute(text("ALTER TABLE Detalles_Venta ADD COLUMN IF NOT EXISTS iva_porcentaje NUMERIC(5,2) DEFAULT 0"))
+                conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS factus_client_id TEXT"))
+                conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS factus_client_secret TEXT"))
+                conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS factus_username TEXT"))
+                conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS factus_password TEXT"))
+                conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS municipio_code_taller TEXT"))
+                conn.execute(text("ALTER TABLE Clientes ADD COLUMN IF NOT EXISTS regimen TEXT DEFAULT 'SIMPLIFIED_REGIME'"))
+                conn.execute(text("ALTER TABLE Clientes ADD COLUMN IF NOT EXISTS digito_verificacion TEXT"))
         except Exception as e:
             # No se debe tumbar el arranque de la app por una migración que
             # falle, pero silenciarla del todo (como antes) hace invisibles

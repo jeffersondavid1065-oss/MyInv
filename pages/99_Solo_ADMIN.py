@@ -4,8 +4,7 @@ from datetime import date, timedelta
 from sqlalchemy import text
 from db import obtener_conexion
 from utils import aplicar_estilos
-from queries import establecer_fe_habilitada, obtener_ventas_con_documentos_pendientes
-from alegra_utils import guardar_documentos_pendientes
+from queries import establecer_fe_habilitada
 from tz_utils import hoy_bogota
 
 st.set_page_config(page_title="Administración - MyAlmacén", layout="wide")
@@ -201,35 +200,5 @@ if not df_almacenes.empty:
                 st.warning(f"Facturación Electrónica deshabilitada para '{row['nombre_negocio']}'.")
                 st.rerun()
 
-        st.markdown("---")
-        st.markdown("### Copia de facturas y notas crédito antiguas")
-        st.caption(
-            "Antes de este cambio, MyInv solo guardaba un enlace prestado de Alegra para ver "
-            "el PDF y el XML de cada factura o nota crédito, y ese enlace deja de servir "
-            "después de un tiempo. Esta acción trae y guarda una copia propia de cada "
-            "documento de este almacén que todavía no la tenga, para que el botón Abrir "
-            "funcione siempre. Se puede ejecutar varias veces sin problema: lo que ya tiene "
-            "copia guardada se salta solo."
-        )
-        pendientes_docs = obtener_ventas_con_documentos_pendientes(almacen_id)
-        if pendientes_docs:
-            st.write(f"Facturas o notas crédito sin copia guardada: {len(pendientes_docs)}")
-            if st.button("Guardar copias ahora", use_container_width=True, key="btn_guardar_docs"):
-                barra = st.progress(0.0, text="Guardando documentos...")
-
-                def _avance(i, total):
-                    barra.progress(i / total, text=f"Guardando documento {i} de {total}...")
-
-                guardadas, no_guardadas = guardar_documentos_pendientes(almacen_id, avance=_avance)
-                barra.empty()
-                if no_guardadas:
-                    st.warning(
-                        f"Se guardaron {guardadas} documento(s). {no_guardadas} no se pudieron "
-                        "traer todavía (se puede volver a intentar más tarde con el mismo botón)."
-                    )
-                else:
-                    st.success(f"Se guardaron los {guardadas} documento(s) pendientes.")
-        else:
-            st.success("Todas las facturas y notas crédito de este almacén ya tienen su copia guardada.")
 else:
     st.info("No hay almacenes registrados todavía.")

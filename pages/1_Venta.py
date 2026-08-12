@@ -17,8 +17,8 @@ from queries import (
 )
 from utils import aplicar_estilos, verificar_auth
 from tz_utils import hoy_bogota, ahora_bogota_naive
-from alegra_utils import (
-    facturar_venta, anular_factura_venta, emitir_factura_dian_venta,
+from factus_utils import (
+    facturar_venta, anular_factura_venta,
     refrescar_url_factura, refrescar_url_nota_credito, mostrar_documento,
 )
 from iva_utils import calcular_desglose_iva, calcular_iva_desde_detalles, texto_tasa_iva
@@ -110,11 +110,6 @@ tab_pos, tab_historial, tab_devolucion = st.tabs([
 # TAB 1: NUEVA VENTA
 # ==========================================
 with tab_pos:
-    _msg_post = st.session_state.pop("_msg_post_venta", None)
-    if _msg_post:
-        _nivel, _texto = _msg_post
-        getattr(st, _nivel)(_texto)
-
     col_izq, col_der = st.columns([3, 2])
 
     with col_izq:
@@ -456,42 +451,20 @@ with tab_pos:
 
             st.markdown("---")
 
-            emitir_dian_inmediato = False
-
             if fe_activa:
-                if st.session_state.get("fe_pendiente_decision"):
-                    st.info("Venta lista. ¿Qué quieres hacer con la factura electrónica?")
-                    col_fe1, col_fe2, col_fe3 = st.columns([2, 2, 1])
-                    emitir_ahora = tipo_pago and col_fe1.button(
-                        "📧 Emitir a correo/DIAN", type="primary", use_container_width=True
-                    )
-                    guardar_abierta = tipo_pago and col_fe2.button(
-                        "💾 Guardar (dejar abierta)", use_container_width=True
-                    )
-                    if col_fe3.button("Cancelar", use_container_width=True):
-                        st.session_state.fe_pendiente_decision = False
-                        st.rerun()
-                    confirmar_venta = False
-                    confirmar_venta_factura = emitir_ahora or guardar_abierta
-                    emitir_dian_inmediato = emitir_ahora
-                else:
-                    col_venta1, col_venta2 = st.columns(2)
-                    confirmar_venta = tipo_pago and col_venta1.button(
-                        "Registrar Venta", type="primary", use_container_width=True
-                    )
-                    pedir_decision_fe = tipo_pago and col_venta2.button(
-                        "Registrar Venta con Factura Electrónica", use_container_width=True
+                col_venta1, col_venta2 = st.columns(2)
+                confirmar_venta = tipo_pago and col_venta1.button(
+                    "Registrar Venta", type="primary", use_container_width=True
+                )
+                confirmar_venta_factura = tipo_pago and col_venta2.button(
+                    "Registrar Venta con Factura Electrónica", use_container_width=True
+                )
+                if confirmar_venta_factura and not cliente_id:
+                    st.warning(
+                        "Selecciona un cliente registrado (con documento) en 'Cliente' "
+                        "para poder facturar electrónicamente."
                     )
                     confirmar_venta_factura = False
-                    if pedir_decision_fe:
-                        if cliente_id:
-                            st.session_state.fe_pendiente_decision = True
-                            st.rerun()
-                        else:
-                            st.warning(
-                                "Selecciona un cliente registrado (con documento) en 'Cliente' "
-                                "para poder facturar electrónicamente."
-                            )
             else:
                 confirmar_venta = tipo_pago and st.button(
                     "Registrar Venta", type="primary", use_container_width=True
@@ -602,24 +575,15 @@ with tab_pos:
                     st.session_state.ultima_venta_tipo = tipo_pago
 
                     limpiar_carrito()
-                    st.session_state.fe_pendiente_decision = False
                     st.success(f"Venta #{venta_id} registrada.")
                     if cambio > 0:
                         st.info(f"Cambio: {formato_cop(cambio)}")
 
                     if confirmar_venta_factura:
-                        with st.spinner("Creando factura electrónica..."):
+                        with st.spinner("Emitiendo factura electrónica ante la DIAN..."):
                             ok_f, msg_f = facturar_venta(user_id, venta_id)
                         if ok_f:
-                            if emitir_dian_inmediato:
-                                with st.spinner("Emitiendo ante la DIAN..."):
-                                    ok_dian, msg_dian = emitir_factura_dian_venta(user_id, venta_id)
-                                if ok_dian:
-                                    st.success(msg_dian)
-                                else:
-                                    st.warning(f"La factura se creó pero no se pudo emitir: {msg_dian}")
-                            else:
-                                st.info(f"{msg_f} Queda pendiente — puedes emitirla luego desde Reportes → Facturación Electrónica.")
+                            st.success(msg_f)
                         else:
                             st.warning(msg_f)
 
@@ -730,16 +694,6 @@ with tab_pos:
                         col_fpdf, col_fxml = st.columns(2)
                         mostrar_documento(col_fpdf, "Ver PDF de la factura", pdf_mostrar, f"Factura_Venta_{vid}.pdf", "application/pdf")
                         mostrar_documento(col_fxml, "Descargar XML (DIAN)", xml_mostrar, f"Factura_Venta_{vid}.xml", "application/xml")
-                    elif venta_factura and venta_factura[1] == "abierta":
-                        st.info(f"Factura creada (#{venta_factura[2]}) — todavía no se ha emitido ante la DIAN.")
-                        pdf_mostrar_ab, _ = refrescar_url_factura(user_id, vid)
-                        mostrar_documento(st, "Ver PDF (borrador)", pdf_mostrar_ab, f"Factura_Venta_{vid}.pdf", "application/pdf")
-                        if st.button("📧 Emitir a correo/DIAN", use_container_width=True, type="primary"):
-                            with st.spinner("Emitiendo ante la DIAN..."):
-                                ok_dian, msg_dian = emitir_factura_dian_venta(user_id, vid)
-                            st.session_state._msg_post_venta = ("success" if ok_dian else "warning", msg_dian)
-                            st.session_state.ultima_venta_id = None
-                            st.rerun()
                     elif not venta_factura or not venta_factura[0]:
                         st.caption("Esta venta no tiene cliente asociado — no se puede facturar electrónicamente.")
                     else:
@@ -781,49 +735,30 @@ with tab_historial:
             df_hoy['factura_prefijo'].fillna('').astype(str) + df_hoy['factura_numero'].fillna('').astype(str)
         )
         df_hoy['fe_texto'] = df_hoy['factura_estado'].fillna('Sin facturar').replace({
-            'emitida': 'Emitida', 'abierta': 'Abierta (sin timbrar)', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
+            'emitida': 'Emitida', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
         })
-        # 'pedir': None cuando no hace falta pedir nada (sin factura electrónica,
-        # o ya tiene su copia guardada) para que la casilla ni aparezca ahí.
-        df_hoy['pedir'] = None
-        falta_copia = df_hoy['factura_alegra_id'].notna() & ~df_hoy['factura_pdf_url'].fillna('').str.startswith('data:')
-        df_hoy.loc[falta_copia, 'pedir'] = False
         cols_hoy = ['id', 'fecha', 'cliente', 'total']
         rename_hoy = {
             'id': 'N°', 'fecha': 'Hora', 'cliente': 'Cliente', 'total': 'Total',
             'tipo_pago': 'Pago', 'estado': 'Estado',
             'fe_texto': 'Factura Electrónica', 'numero_factura_texto': 'N° Factura',
             'factura_pdf_url': 'Factura PDF', 'factura_xml_url': 'Factura XML',
-            'pedir': 'Pedir',
         }
         config_hoy = {
             "Total": st.column_config.NumberColumn("Total", format="$%,d"),
-            "Pedir": st.column_config.CheckboxColumn(
-                "Pedir", help='Marca la(s) venta(s) y pulsa el botón de abajo para guardar su factura.'
-            ),
         }
         if iva_activo:
             cols_hoy += ['iva_tasa_texto', 'iva_valor']
             rename_hoy.update({'iva_tasa_texto': 'Impuesto', 'iva_valor': 'Valor Imp'})
             config_hoy["Valor Imp"] = st.column_config.NumberColumn("Valor Imp", format="$%,d")
-        cols_hoy += ['tipo_pago', 'estado', 'fe_texto', 'numero_factura_texto', 'pedir']
+        cols_hoy += ['tipo_pago', 'estado', 'fe_texto', 'numero_factura_texto']
 
         df_hoy_mostrar = df_hoy[cols_hoy].rename(columns=rename_hoy)
-        df_hoy_editada = st.data_editor(
+        st.dataframe(
             df_hoy_mostrar,
             use_container_width=True, hide_index=True,
             column_config=config_hoy,
-            disabled=[c for c in df_hoy_mostrar.columns if c != 'Pedir'],
-            key="editor_ventas_hoy",
         )
-        seleccionadas_hoy = df_hoy_editada[df_hoy_editada['Pedir'] == True]
-        if not seleccionadas_hoy.empty:
-            if st.button(f"Guardar factura de {len(seleccionadas_hoy)} venta(s) marcada(s)", key="btn_pedir_hoy"):
-                with st.spinner("Guardando..."):
-                    for vid_sel in seleccionadas_hoy['N°'].tolist():
-                        refrescar_url_factura(user_id, int(vid_sel))
-                        refrescar_url_nota_credito(user_id, int(vid_sel))
-                st.rerun()
 
         if not df_hoy.empty:
             st.markdown("**Descargar factura de una venta específica:**")
@@ -946,15 +881,6 @@ with tab_devolucion:
 
         if not df_devoluciones.empty:
             df_devoluciones = df_devoluciones.copy()
-            # 'pedir': None cuando no hace falta pedir nada (sin nota crédito
-            # confirmada, o ya tiene su copia guardada) para que la casilla ni
-            # aparezca ahí.
-            df_devoluciones['pedir'] = None
-            falta_copia_nc = (
-                df_devoluciones['nota_credito_alegra_id'].notna()
-                & ~df_devoluciones['nota_credito_pdf_url'].fillna('').str.startswith('data:')
-            )
-            df_devoluciones.loc[falta_copia_nc, 'pedir'] = False
             df_devoluciones['numero_factura_texto'] = (
                 df_devoluciones['factura_prefijo'].fillna('').astype(str)
                 + df_devoluciones['factura_numero'].fillna('').astype(str)
@@ -969,8 +895,6 @@ with tab_devolucion:
                     return 'Emitida'
                 if row['factura_estado'] == 'emitida':
                     return 'Pendiente'
-                if row['factura_estado'] == 'abierta':
-                    return 'No aplica (factura nunca se emitió a la DIAN)'
                 return 'No aplica (sin FE)'
 
             df_devoluciones['nc_estado_texto'] = df_devoluciones.apply(_estado_nc, axis=1)
@@ -978,31 +902,17 @@ with tab_devolucion:
             df_dev_mostrar = df_devoluciones[[
                 'id', 'fecha', 'cliente', 'total', 'numero_factura_texto',
                 'nc_estado_texto', 'numero_nc_texto',
-                'notas', 'pedir']].rename(columns={
+                'notas']].rename(columns={
                 'id': 'Venta #', 'fecha': 'Fecha', 'cliente': 'Cliente', 'total': 'Total',
                 'numero_factura_texto': 'N° Factura', 'nc_estado_texto': 'Nota Crédito',
                 'numero_nc_texto': 'N° Nota Crédito',
-                'notas': 'Motivo', 'pedir': 'Pedir',
+                'notas': 'Motivo',
             })
-            df_dev_editada = st.data_editor(
+            st.dataframe(
                 df_dev_mostrar,
                 use_container_width=True, hide_index=True,
-                disabled=[c for c in df_dev_mostrar.columns if c != 'Pedir'],
-                key="editor_devoluciones",
-                column_config={
-                    "Total": st.column_config.NumberColumn(format="$%,d"),
-                    "Pedir": st.column_config.CheckboxColumn(
-                        "Pedir", help='Marca la(s) devolución(es) y pulsa el botón de abajo para guardar su nota crédito.'
-                    ),
-                }
+                column_config={"Total": st.column_config.NumberColumn(format="$%,d")},
             )
-            seleccionadas_dev = df_dev_editada[df_dev_editada['Pedir'] == True]
-            if not seleccionadas_dev.empty:
-                if st.button(f"Guardar nota crédito de {len(seleccionadas_dev)} devolución(es) marcada(s)", key="btn_pedir_dev"):
-                    with st.spinner("Guardando..."):
-                        for vid_sel in seleccionadas_dev['Venta #'].tolist():
-                            refrescar_url_nota_credito(user_id, int(vid_sel))
-                    st.rerun()
 
             nc_con_documento = df_devoluciones[df_devoluciones['nota_credito_alegra_id'].notna()]
             if not nc_con_documento.empty:
