@@ -136,27 +136,6 @@ def buscar_producto_por_codigo(uid, codigo):
     return resultado
 
 
-def obtener_datos_facturacion_producto(uid, producto_id):
-    """Datos del producto necesarios para facturar electrónicamente (sin cache, siempre al día)."""
-    engine = obtener_conexion()
-    with engine.connect() as conn:
-        return conn.execute(text("""
-            SELECT id, nombre, precio_venta, alegra_item_id, unidad_medida
-            FROM Productos
-            WHERE usuario_id = :uid AND id = :producto_id
-        """), {"uid": uid, "producto_id": producto_id}).fetchone()
-
-
-def guardar_alegra_item_id(producto_id, alegra_item_id):
-    """Guarda el id de ítem en Alegra la primera vez que se crea, para reutilizarlo después."""
-    engine = obtener_conexion()
-    with engine.begin() as conn:
-        conn.execute(text("""
-            UPDATE Productos SET alegra_item_id = :alegra_id WHERE id = :producto_id
-        """), {"alegra_id": alegra_item_id, "producto_id": producto_id})
-    invalidar_cache_productos()
-
-
 @st.cache_data(ttl=60)
 def obtener_metricas_inventario(uid):
     """Métricas agregadas del inventario en una sola query."""
@@ -196,20 +175,10 @@ def obtener_datos_facturacion_cliente(uid, cliente_id):
     engine = obtener_conexion()
     with engine.connect() as conn:
         return conn.execute(text("""
-            SELECT id, nombre, documento, tipo_documento, email, alegra_contact_id
+            SELECT id, nombre, documento, tipo_documento, email, regimen, digito_verificacion
             FROM Clientes
             WHERE usuario_id = :uid AND id = :cliente_id
         """), {"uid": uid, "cliente_id": cliente_id}).fetchone()
-
-
-def guardar_alegra_contact_id(cliente_id, alegra_contact_id):
-    """Guarda el id de contacto en Alegra la primera vez que se crea, para reutilizarlo después."""
-    engine = obtener_conexion()
-    with engine.begin() as conn:
-        conn.execute(text("""
-            UPDATE Clientes SET alegra_contact_id = :alegra_id WHERE id = :cliente_id
-        """), {"alegra_id": alegra_contact_id, "cliente_id": cliente_id})
-    invalidar_cache_clientes()
 
 
 @st.cache_data(ttl=30)
@@ -588,32 +557,57 @@ def obtener_ganancia_acumulada(uid):
 # ==========================================
 # FACTURACIÓN ELECTRÓNICA
 # ==========================================
-def obtener_credenciales_alegra(uid):
-    """Credenciales de Alegra configuradas por este negocio (o None si no ha configurado nada)."""
+def obtener_credenciales_factus(uid):
+    """Credenciales de Factus configuradas por este negocio (o None si no ha configurado nada)."""
     engine = obtener_conexion()
     with engine.connect() as conn:
         return conn.execute(text("""
-            SELECT alegra_email, alegra_token
+            SELECT factus_client_id, factus_client_secret, factus_username, factus_password
             FROM Usuarios WHERE id = :uid
         """), {"uid": uid}).fetchone()
 
 
-def guardar_credenciales_alegra(uid, email, token):
-    """Guarda (o actualiza) las credenciales de Alegra de este negocio."""
+def guardar_credenciales_factus(uid, client_id, client_secret, username, password):
+    """Guarda (o actualiza) las credenciales de Factus de este negocio."""
     engine = obtener_conexion()
     with engine.begin() as conn:
         conn.execute(text("""
-            UPDATE Usuarios SET alegra_email = :email, alegra_token = :token WHERE id = :uid
-        """), {"email": email, "token": token, "uid": uid})
+            UPDATE Usuarios
+            SET factus_client_id = :cid, factus_client_secret = :csecret,
+                factus_username = :user, factus_password = :pwd
+            WHERE id = :uid
+        """), {"cid": client_id, "csecret": client_secret, "user": username, "pwd": password, "uid": uid})
 
 
-def eliminar_credenciales_alegra(uid):
-    """Desconecta la cuenta de Alegra de este negocio."""
+def eliminar_credenciales_factus(uid):
+    """Desconecta la cuenta de Factus de este negocio."""
     engine = obtener_conexion()
     with engine.begin() as conn:
         conn.execute(text("""
-            UPDATE Usuarios SET alegra_email = NULL, alegra_token = NULL WHERE id = :uid
+            UPDATE Usuarios
+            SET factus_client_id = NULL, factus_client_secret = NULL,
+                factus_username = NULL, factus_password = NULL
+            WHERE id = :uid
         """), {"uid": uid})
+
+
+def obtener_municipio_taller(uid):
+    """Código DIVIPOLA del municipio configurado para este negocio (o None)."""
+    engine = obtener_conexion()
+    with engine.connect() as conn:
+        return conn.execute(
+            text("SELECT municipio_code_taller FROM Usuarios WHERE id = :uid"), {"uid": uid}
+        ).scalar()
+
+
+def guardar_municipio_taller(uid, municipio_code):
+    """Guarda el código DIVIPOLA del municipio de este negocio, usado en la factura electrónica."""
+    engine = obtener_conexion()
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE Usuarios SET municipio_code_taller = :code WHERE id = :uid"),
+            {"code": municipio_code, "uid": uid}
+        )
 
 
 @st.cache_data(ttl=60)
@@ -781,31 +775,14 @@ def obtener_venta_para_facturar(uid, venta_id):
     engine = obtener_conexion()
     with engine.connect() as conn:
         return conn.execute(text("""
-            SELECT id, cliente_id, total, tipo_pago, factura_alegra_id,
-                   factura_estado, nota_credito_alegra_id,
+            SELECT id, cliente_id, total, tipo_pago, notas, factura_alegra_id,
+                   factura_estado, factura_numero, nota_credito_alegra_id,
                    factura_cufe, factura_pdf_url, factura_xml_url,
                    nota_credito_pdf_url, nota_credito_xml_url,
                    nota_credito_prefijo, nota_credito_numero
             FROM Ventas
             WHERE id = :vid AND usuario_id = :uid
         """), {"vid": venta_id, "uid": uid}).fetchone()
-
-
-def obtener_ventas_con_documentos_pendientes(uid):
-    """IDs de ventas que tienen factura y/o nota crédito en Alegra pero
-    todavía no tienen guardada su propia copia del PDF/XML (facturas de antes
-    de que MyInv empezara a guardarlas). Para el respaldo masivo desde Solo Admin."""
-    engine = obtener_conexion()
-    with engine.connect() as conn:
-        rows = conn.execute(text("""
-            SELECT id FROM Ventas
-            WHERE usuario_id = :uid
-            AND (
-                (factura_alegra_id IS NOT NULL AND (factura_pdf_url IS NULL OR factura_pdf_url NOT LIKE 'data:%'))
-                OR (nota_credito_alegra_id IS NOT NULL AND (nota_credito_pdf_url IS NULL OR nota_credito_pdf_url NOT LIKE 'data:%'))
-            )
-        """), {"uid": uid}).fetchall()
-    return [r[0] for r in rows]
 
 
 def obtener_credito_de_venta(venta_id):
@@ -819,9 +796,9 @@ def obtener_credito_de_venta(venta_id):
         """), {"vid": venta_id}).fetchone()
 
 
-def guardar_nota_credito(venta_id, nota_credito_alegra_id, pdf_url=None, xml_url=None, prefijo=None, numero=None):
-    """Guarda el id, número (prefijo+consecutivo) y PDF/XML de la nota crédito
-    emitida en Alegra para una venta anulada."""
+def guardar_nota_credito(venta_id, reference_code, pdf_url=None, xml_url=None, prefijo=None, numero=None):
+    """Guarda el reference_code, número (prefijo+consecutivo) y PDF/XML de la
+    nota crédito emitida en Factus para una venta anulada."""
     engine = obtener_conexion()
     with engine.begin() as conn:
         conn.execute(text("""
@@ -830,7 +807,7 @@ def guardar_nota_credito(venta_id, nota_credito_alegra_id, pdf_url=None, xml_url
                    nota_credito_numero = :numero, factura_estado = 'anulada'
             WHERE id = :vid
         """), {
-            "ncid": nota_credito_alegra_id, "pdf_url": pdf_url, "xml_url": xml_url,
+            "ncid": reference_code, "pdf_url": pdf_url, "xml_url": xml_url,
             "prefijo": prefijo, "numero": numero, "vid": venta_id
         })
     invalidar_cache_ventas()
@@ -848,19 +825,19 @@ def obtener_items_venta(venta_id):
         """), {"vid": venta_id}).fetchall()
 
 
-def guardar_resultado_factura(venta_id, alegra_id=None, cufe=None, pdf_url=None, xml_url=None,
+def guardar_resultado_factura(venta_id, reference_code=None, cufe=None, pdf_url=None, xml_url=None,
                                estado="emitida", prefijo=None, numero=None):
     """Guarda el resultado de emitir (o intentar emitir) la factura electrónica de una venta."""
     engine = obtener_conexion()
     with engine.begin() as conn:
         conn.execute(text("""
             UPDATE Ventas
-            SET factura_alegra_id = :alegra_id, factura_cufe = :cufe,
+            SET factura_alegra_id = :reference_code, factura_cufe = :cufe,
                 factura_pdf_url = :pdf_url, factura_xml_url = :xml_url, factura_estado = :estado,
                 factura_prefijo = :prefijo, factura_numero = :numero
             WHERE id = :vid
         """), {
-            "alegra_id": alegra_id, "cufe": cufe, "pdf_url": pdf_url, "xml_url": xml_url,
+            "reference_code": reference_code, "cufe": cufe, "pdf_url": pdf_url, "xml_url": xml_url,
             "estado": estado, "prefijo": prefijo, "numero": numero, "vid": venta_id
         })
     invalidar_cache_ventas()

@@ -4,10 +4,10 @@ from sqlalchemy import text
 from db import obtener_conexion
 from utils import aplicar_estilos, verificar_auth, bloquear_si_cajero
 from queries import (
-    obtener_credenciales_alegra, guardar_credenciales_alegra, eliminar_credenciales_alegra, tiene_fe_habilitada,
-    tiene_iva_habilitado, establecer_declara_iva,
+    obtener_credenciales_factus, guardar_credenciales_factus, eliminar_credenciales_factus, tiene_fe_habilitada,
+    tiene_iva_habilitado, establecer_declara_iva, obtener_municipio_taller, guardar_municipio_taller,
 )
-import alegra_utils
+import factus_utils
 
 st.set_page_config(page_title="Configuración", layout="wide")
 aplicar_estilos()
@@ -38,7 +38,7 @@ tel_actual      = datos[4] if datos else ""
 dir_actual      = datos[5] if datos else ""
 logo_actual     = datos[6] if datos else None
 
-tab_datos, tab_iva, tab_logo, tab_alegra = st.tabs(["Datos del Negocio", "Impuestos", "Logotipo", "Facturación Electrónica"])
+tab_datos, tab_iva, tab_logo, tab_factus = st.tabs(["Datos del Negocio", "Impuestos", "Logotipo", "Facturación Electrónica"])
 
 # ==========================================
 # TAB 1: DATOS DEL NEGOCIO
@@ -211,7 +211,7 @@ with tab_logo:
 # ==========================================
 # TAB 3: FACTURACIÓN ELECTRÓNICA
 # ==========================================
-with tab_alegra:
+with tab_factus:
     st.subheader("Facturación Electrónica")
 
     if not tiene_fe_habilitada(user_id):
@@ -227,50 +227,72 @@ with tab_alegra:
         "factura sale a nombre de tu NIT, no del nuestro."
     )
 
-    creds = obtener_credenciales_alegra(user_id)
-    conectado = bool(creds and creds.alegra_email and creds.alegra_token)
+    creds = obtener_credenciales_factus(user_id)
+    conectado = bool(creds and creds.factus_client_id and creds.factus_client_secret)
 
     if conectado:
-        st.success(f"Cuenta conectada: **{creds.alegra_email}**")
+        st.success(f"Cuenta conectada: **{creds.factus_username or creds.factus_client_id}**")
 
         col_a1, col_a2 = st.columns(2)
         with col_a1:
             if st.button("Probar conexión", use_container_width=True):
                 with st.spinner("Probando..."):
-                    ok, msg = alegra_utils.probar_conexion(creds.alegra_email, creds.alegra_token)
+                    ok, msg = factus_utils.probar_conexion(
+                        creds.factus_client_id, creds.factus_client_secret,
+                        creds.factus_username, creds.factus_password,
+                    )
                 if ok:
                     st.success(msg)
                 else:
                     st.error(msg)
         with col_a2:
             if st.button("Desconectar cuenta", use_container_width=True):
-                eliminar_credenciales_alegra(user_id)
+                eliminar_credenciales_factus(user_id)
                 st.success("Cuenta desconectada.")
                 st.rerun()
 
         st.markdown("---")
         st.markdown("**Cambiar de cuenta:**")
 
-    with st.form("form_alegra"):
+    with st.form("form_factus"):
         st.caption(
-            "Consigue estos datos en tu cuenta de Alegra: "
-            "Configuración → \"API - Integraciones con otros sistemas\"."
+            "Consigue estos datos en tu cuenta de Factus: "
+            "Configuración → \"Credenciales de autenticación\"."
         )
-        email_alegra_input = st.text_input("Email de tu cuenta Alegra", placeholder="tucorreo@ejemplo.com")
-        token_alegra_input = st.text_input("Token de Alegra", type="password")
+        client_id_input = st.text_input("Client ID")
+        client_secret_input = st.text_input("Client Secret", type="password")
+        username_input = st.text_input("Usuario (correo)", placeholder="tucorreo@ejemplo.com")
+        password_input = st.text_input("Contraseña", type="password")
 
         if st.form_submit_button("Guardar y probar conexión", type="primary"):
-            if not email_alegra_input or not token_alegra_input:
-                st.warning("Completa ambos campos.")
+            if not client_id_input or not client_secret_input or not username_input or not password_input:
+                st.warning("Completa los cuatro campos.")
             else:
                 with st.spinner("Validando credenciales..."):
-                    ok, msg = alegra_utils.probar_conexion(email_alegra_input, token_alegra_input)
+                    ok, msg = factus_utils.probar_conexion(
+                        client_id_input, client_secret_input, username_input, password_input
+                    )
                 if ok:
-                    guardar_credenciales_alegra(user_id, email_alegra_input, token_alegra_input)
+                    guardar_credenciales_factus(user_id, client_id_input, client_secret_input, username_input, password_input)
                     st.success("Credenciales válidas y guardadas. Ya puedes facturar electrónicamente.")
                     st.rerun()
                 else:
                     st.error(f"No se guardó: {msg}")
+
+    st.markdown("---")
+    st.markdown("**Municipio del negocio (DIVIPOLA):**")
+    st.caption(
+        "Código DIVIPOLA de tu ciudad, requerido por algunas cuentas de Factus para timbrar "
+        "la factura ante la DIAN (ej. 20001 para Valledupar). Se usa para todos tus clientes."
+    )
+    municipio_actual = obtener_municipio_taller(user_id)
+    municipio_input = st.text_input(
+        "Código DIVIPOLA", value=municipio_actual or "", placeholder="Ej: 20001", key="municipio_code_taller_input"
+    )
+    if st.button("Guardar municipio", key="btn_guardar_municipio"):
+        guardar_municipio_taller(user_id, municipio_input.strip() or None)
+        st.success("Municipio guardado.")
+        st.rerun()
 
 st.markdown("---")
 st.caption("Después de configurar tu logo y datos, descarga una factura de prueba desde el **Punto de Venta** para verificar cómo queda.")

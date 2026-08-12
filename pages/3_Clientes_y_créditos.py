@@ -14,7 +14,7 @@ from queries import (
 )
 from utils import aplicar_estilos, verificar_auth, bloquear_si_cajero
 from tz_utils import hoy_bogota
-from alegra_utils import registrar_abono_credito, refrescar_url_factura, refrescar_url_nota_credito, mostrar_documento
+from factus_utils import refrescar_url_factura, refrescar_url_nota_credito, mostrar_documento
 
 st.set_page_config(page_title="Clientes y Créditos", layout="wide")
 aplicar_estilos()
@@ -80,44 +80,27 @@ with tab_creditos:
             df_mostrar['factura_prefijo'].fillna('').astype(str) + df_mostrar['factura_numero'].fillna('').astype(str)
         )
         df_mostrar['factura_estado'] = df_mostrar['factura_estado'].fillna('Sin facturar').replace({
-            'emitida': 'Facturada', 'abierta': 'Abierta (sin timbrar)', 'error': 'Error factura', 'anulada': 'Anulada (N.C.)'
+            'emitida': 'Facturada', 'error': 'Error factura', 'anulada': 'Anulada (N.C.)'
         })
-        # 'pedir': None cuando no hace falta pedir nada (sin FE, o ya tiene su
-        # copia guardada) para que la casilla ni aparezca ahí.
-        df_mostrar['pedir'] = None
-        falta_copia = df_mostrar['factura_alegra_id'].notna() & ~df_mostrar['factura_pdf_url'].fillna('').str.startswith('data:')
-        df_mostrar.loc[falta_copia, 'pedir'] = False
         df_mostrar = df_mostrar[[
             'venta_id', 'cliente', 'total', 'saldo_pendiente', 'fecha_limite', 'tipo_cuota',
-            'estado', 'vencido', 'factura_estado', 'numero_factura_texto', 'pedir'
+            'estado', 'vencido', 'factura_estado', 'numero_factura_texto'
         ]].rename(columns={
             'venta_id': 'Venta #',
             'cliente': 'Cliente', 'total': 'Total Original', 'saldo_pendiente': 'Saldo Pendiente',
             'fecha_limite': 'Fecha Límite', 'tipo_cuota': 'Tipo Cuota', 'estado': 'Estado',
-            'vencido': 'Vencido', 'factura_estado': 'Facturación', 'numero_factura_texto': 'N° Factura', 'pedir': 'Pedir',
+            'vencido': 'Vencido', 'factura_estado': 'Facturación', 'numero_factura_texto': 'N° Factura',
         })
-        df_creditos_editada = st.data_editor(
+        st.dataframe(
             df_mostrar,
             use_container_width=True,
             hide_index=True,
-            disabled=[c for c in df_mostrar.columns if c != 'Pedir'],
-            key="editor_cartera",
             column_config={
                 "Total Original": st.column_config.NumberColumn(format="$%,d"),
                 "Saldo Pendiente": st.column_config.NumberColumn(format="$%,d"),
-                "Pedir": st.column_config.CheckboxColumn(
-                    "Pedir", help='Marca la(s) venta(s) y pulsa el botón de abajo para guardar su factura.'
-                ),
             }
         )
         st.caption("Para descargar la factura de una venta específica, selecciónala abajo en \"Registrar Abono\".")
-        seleccionadas_cartera = df_creditos_editada[df_creditos_editada['Pedir'] == True]
-        if not seleccionadas_cartera.empty:
-            if st.button(f"Guardar factura de {len(seleccionadas_cartera)} venta(s) marcada(s)", key="btn_pedir_cartera"):
-                with st.spinner("Guardando..."):
-                    for vid_sel in seleccionadas_cartera['Venta #'].tolist():
-                        refrescar_url_factura(user_id, int(vid_sel))
-                st.rerun()
 
         st.markdown("---")
 
@@ -167,12 +150,12 @@ with tab_creditos:
                 tiene_factura = fila_credito.get('factura_estado') == 'emitida'
 
                 if tiene_factura:
-                    st.caption("🧾 Esta venta tiene factura electrónica emitida — el abono se sincronizará automáticamente.")
+                    st.caption("🧾 Esta venta tiene factura electrónica emitida.")
                     col_fd1, col_fd2 = st.columns(2)
                     mostrar_documento(col_fd1, "Factura PDF", fila_credito.get('factura_pdf_url'), f"Factura_Venta_{venta_id_credito}.pdf", "application/pdf")
                     mostrar_documento(col_fd2, "Factura XML", fila_credito.get('factura_xml_url'), f"Factura_Venta_{venta_id_credito}.xml", "application/xml")
 
-                col_ab1, col_ab2, col_ab3 = st.columns(3)
+                col_ab1, col_ab2 = st.columns(2)
                 with col_ab1:
                     min_abono = min(1000.0, float(saldo_actual))
                     monto_abono = st.number_input(
@@ -183,8 +166,6 @@ with tab_creditos:
                         step=min_abono
                     )
                 with col_ab2:
-                    metodo_abono = st.radio("Método", ["Efectivo", "Transferencia"], horizontal=True)
-                with col_ab3:
                     notas_abono = st.text_input("Notas (opcional)")
 
                 nuevo_saldo = float(saldo_actual) - float(monto_abono)
@@ -220,12 +201,6 @@ with tab_creditos:
                             st.success(f"Abono registrado. ¡Crédito #{credito_id_abono} pagado completamente!")
                         else:
                             st.success(f"Abono de {formato_cop(monto_abono)} registrado. Saldo pendiente: {formato_cop(nuevo_saldo)}")
-
-                        if tiene_factura:
-                            with st.spinner("Sincronizando abono..."):
-                                ok_al, msg_al = registrar_abono_credito(user_id, venta_id_credito, monto_abono, metodo_abono)
-                            if not ok_al:
-                                st.warning(f"El abono quedó registrado en MyInv, pero: {msg_al}")
 
                         st.rerun()
                     except Exception as e:
@@ -342,47 +317,20 @@ with tab_estado_cuenta:
                 + df_compras_mostrar['factura_numero'].fillna('').astype(str)
             )
             df_compras_mostrar['fe_texto'] = df_compras_mostrar['factura_estado'].fillna('Sin facturar').replace({
-                'emitida': 'Emitida', 'abierta': 'Abierta (sin timbrar)', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
+                'emitida': 'Emitida', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
             })
-            # 'pedir': None cuando no hace falta pedir nada (sin factura ni
-            # nota crédito, o ya tienen su copia guardada).
-            df_compras_mostrar['pedir'] = None
-            falta_factura = (
-                df_compras_mostrar['factura_alegra_id'].notna()
-                & ~df_compras_mostrar['factura_pdf_url'].fillna('').str.startswith('data:')
-            )
-            falta_nc = (
-                df_compras_mostrar['nota_credito_alegra_id'].notna()
-                & ~df_compras_mostrar['nota_credito_pdf_url'].fillna('').str.startswith('data:')
-            )
-            df_compras_mostrar.loc[falta_factura | falta_nc, 'pedir'] = False
             df_compras_display = df_compras_mostrar[[
-                'id', 'fecha', 'total', 'tipo_pago', 'estado', 'fe_texto', 'numero_factura_texto', 'pedir'
+                'id', 'fecha', 'total', 'tipo_pago', 'estado', 'fe_texto', 'numero_factura_texto'
             ]].rename(columns={
                 'id': 'Venta #', 'fecha': 'Fecha', 'total': 'Total',
                 'tipo_pago': 'Pago', 'estado': 'Estado',
-                'fe_texto': 'Factura Electrónica', 'numero_factura_texto': 'N° Factura', 'pedir': 'Pedir',
+                'fe_texto': 'Factura Electrónica', 'numero_factura_texto': 'N° Factura',
             })
-            df_compras_editada = st.data_editor(
+            st.dataframe(
                 df_compras_display,
                 use_container_width=True, hide_index=True,
-                disabled=[c for c in df_compras_display.columns if c != 'Pedir'],
-                key="editor_estado_cuenta",
-                column_config={
-                    "Total": st.column_config.NumberColumn(format="$%,d"),
-                    "Pedir": st.column_config.CheckboxColumn(
-                        "Pedir", help='Marca la(s) venta(s) y pulsa el botón de abajo para guardar su factura o nota crédito.'
-                    ),
-                }
+                column_config={"Total": st.column_config.NumberColumn(format="$%,d")},
             )
-            seleccionadas_ec = df_compras_editada[df_compras_editada['Pedir'] == True]
-            if not seleccionadas_ec.empty:
-                if st.button(f"Guardar documentos de {len(seleccionadas_ec)} venta(s) marcada(s)", key="btn_pedir_ec"):
-                    with st.spinner("Guardando..."):
-                        for vid_sel in seleccionadas_ec['Venta #'].tolist():
-                            refrescar_url_factura(user_id, int(vid_sel))
-                            refrescar_url_nota_credito(user_id, int(vid_sel))
-                    st.rerun()
 
             con_documento_ec = df_compras_mostrar[
                 df_compras_mostrar['factura_alegra_id'].notna() | df_compras_mostrar['nota_credito_alegra_id'].notna()
