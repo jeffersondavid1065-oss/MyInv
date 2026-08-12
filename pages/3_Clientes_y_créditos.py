@@ -286,83 +286,88 @@ with tab_estado_cuenta:
     else:
         dict_clientes_ec = {c[1]: c[0] for c in clientes_ec}
         cliente_ec_sel = st.selectbox(
-            "Selecciona el cliente", options=list(dict_clientes_ec.keys()), key="cliente_estado_cuenta_sel"
+            "Selecciona el cliente", options=list(dict_clientes_ec.keys()),
+            index=None, placeholder="Selecciona un cliente...", key="cliente_estado_cuenta_sel"
         )
-        cliente_id_ec = dict_clientes_ec[cliente_ec_sel]
 
-        df_compras = obtener_historial_ventas_cliente(user_id, cliente_id_ec)
-        df_abonos_ec = obtener_historial_abonos_cliente(user_id, cliente_id_ec)
-
-        df_compras_activas = df_compras[df_compras['estado'] != 'Anulada']
-        total_comprado = df_compras_activas['total'].sum()
-        total_pagado = df_abonos_ec['monto'].sum() if not df_abonos_ec.empty else 0
-        with engine.connect() as conn:
-            saldo_pendiente_cliente = conn.execute(text("""
-                SELECT COALESCE(SUM(saldo_pendiente), 0) FROM Creditos
-                WHERE usuario_id = :uid AND cliente_id = :cid AND estado = 'Activo'
-            """), {"uid": user_id, "cid": cliente_id_ec}).scalar()
-
-        col_ec1, col_ec2, col_ec3, col_ec4 = st.columns(4)
-        col_ec1.metric("Total comprado", formato_cop(total_comprado))
-        col_ec2.metric("Total pagado (abonos)", formato_cop(total_pagado))
-        col_ec3.metric("Saldo pendiente", formato_cop(saldo_pendiente_cliente))
-        col_ec4.metric("N° de compras", len(df_compras_activas))
-
-        st.markdown("---")
-        st.markdown("**Historial de compras:**")
-        if not df_compras.empty:
-            df_compras_mostrar = df_compras.copy()
-            df_compras_mostrar['numero_factura_texto'] = (
-                df_compras_mostrar['factura_prefijo'].fillna('').astype(str)
-                + df_compras_mostrar['factura_numero'].fillna('').astype(str)
-            )
-            df_compras_mostrar['fe_texto'] = df_compras_mostrar['factura_estado'].fillna('Sin facturar').replace({
-                'emitida': 'Emitida', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
-            })
-            df_compras_display = df_compras_mostrar[[
-                'id', 'fecha', 'total', 'tipo_pago', 'estado', 'fe_texto', 'numero_factura_texto'
-            ]].rename(columns={
-                'id': 'Venta #', 'fecha': 'Fecha', 'total': 'Total',
-                'tipo_pago': 'Pago', 'estado': 'Estado',
-                'fe_texto': 'Factura Electrónica', 'numero_factura_texto': 'N° Factura',
-            })
-            st.dataframe(
-                df_compras_display,
-                use_container_width=True, hide_index=True,
-                column_config={"Total": st.column_config.NumberColumn(format="$%,d")},
-            )
-
-            con_documento_ec = df_compras_mostrar[
-                df_compras_mostrar['factura_alegra_id'].notna() | df_compras_mostrar['nota_credito_alegra_id'].notna()
-            ]
-            if not con_documento_ec.empty:
-                st.markdown("**Descargar factura o nota crédito de una compra específica:**")
-                dict_desc_ec = {
-                    f"Venta #{r['id']} — {formato_cop(r['total'])} — {r['fecha']}": i
-                    for i, r in con_documento_ec.iterrows()
-                }
-                desc_sel_ec_str = st.selectbox("Selecciona la compra", options=list(dict_desc_ec.keys()), key="desc_sel_ec")
-                fila_desc_ec = con_documento_ec.loc[dict_desc_ec[desc_sel_ec_str]]
-                col_de1, col_de2, col_de3, col_de4 = st.columns(4)
-                mostrar_documento(col_de1, "Factura PDF", fila_desc_ec['factura_pdf_url'], f"Factura_Venta_{fila_desc_ec['id']}.pdf", "application/pdf")
-                mostrar_documento(col_de2, "Factura XML", fila_desc_ec['factura_xml_url'], f"Factura_Venta_{fila_desc_ec['id']}.xml", "application/xml")
-                mostrar_documento(col_de3, "N.C. PDF", fila_desc_ec['nota_credito_pdf_url'], f"NotaCredito_Venta_{fila_desc_ec['id']}.pdf", "application/pdf")
-                mostrar_documento(col_de4, "N.C. XML", fila_desc_ec['nota_credito_xml_url'], f"NotaCredito_Venta_{fila_desc_ec['id']}.xml", "application/xml")
+        if not cliente_ec_sel:
+            st.info("Selecciona un cliente para ver su estado de cuenta.")
         else:
-            st.caption("Este cliente todavía no tiene compras registradas.")
+            cliente_id_ec = dict_clientes_ec[cliente_ec_sel]
 
-        st.markdown("---")
-        st.markdown("**Historial de pagos (abonos):**")
-        if not df_abonos_ec.empty:
-            st.dataframe(
-                df_abonos_ec[['fecha', 'monto', 'venta_id', 'notas']].rename(columns={
-                    'fecha': 'Fecha', 'monto': 'Monto', 'venta_id': 'Venta #', 'notas': 'Notas'
-                }),
-                use_container_width=True, hide_index=True,
-                column_config={"Monto": st.column_config.NumberColumn(format="$%,d")}
-            )
-        else:
-            st.caption("Este cliente todavía no ha hecho abonos.")
+            df_compras = obtener_historial_ventas_cliente(user_id, cliente_id_ec)
+            df_abonos_ec = obtener_historial_abonos_cliente(user_id, cliente_id_ec)
+
+            df_compras_activas = df_compras[df_compras['estado'] != 'Anulada']
+            total_comprado = df_compras_activas['total'].sum()
+            total_pagado = df_abonos_ec['monto'].sum() if not df_abonos_ec.empty else 0
+            with engine.connect() as conn:
+                saldo_pendiente_cliente = conn.execute(text("""
+                    SELECT COALESCE(SUM(saldo_pendiente), 0) FROM Creditos
+                    WHERE usuario_id = :uid AND cliente_id = :cid AND estado = 'Activo'
+                """), {"uid": user_id, "cid": cliente_id_ec}).scalar()
+
+            col_ec1, col_ec2, col_ec3, col_ec4 = st.columns(4)
+            col_ec1.metric("Total comprado", formato_cop(total_comprado))
+            col_ec2.metric("Total pagado (abonos)", formato_cop(total_pagado))
+            col_ec3.metric("Saldo pendiente", formato_cop(saldo_pendiente_cliente))
+            col_ec4.metric("N° de compras", len(df_compras_activas))
+
+            st.markdown("---")
+            st.markdown("**Historial de compras:**")
+            if not df_compras.empty:
+                df_compras_mostrar = df_compras.copy()
+                df_compras_mostrar['numero_factura_texto'] = (
+                    df_compras_mostrar['factura_prefijo'].fillna('').astype(str)
+                    + df_compras_mostrar['factura_numero'].fillna('').astype(str)
+                )
+                df_compras_mostrar['fe_texto'] = df_compras_mostrar['factura_estado'].fillna('Sin facturar').replace({
+                    'emitida': 'Emitida', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
+                })
+                df_compras_display = df_compras_mostrar[[
+                    'id', 'fecha', 'total', 'tipo_pago', 'estado', 'fe_texto', 'numero_factura_texto'
+                ]].rename(columns={
+                    'id': 'Venta #', 'fecha': 'Fecha', 'total': 'Total',
+                    'tipo_pago': 'Pago', 'estado': 'Estado',
+                    'fe_texto': 'Factura Electrónica', 'numero_factura_texto': 'N° Factura',
+                })
+                st.dataframe(
+                    df_compras_display,
+                    use_container_width=True, hide_index=True,
+                    column_config={"Total": st.column_config.NumberColumn(format="$%,d")},
+                )
+
+                con_documento_ec = df_compras_mostrar[
+                    df_compras_mostrar['factura_alegra_id'].notna() | df_compras_mostrar['nota_credito_alegra_id'].notna()
+                ]
+                if not con_documento_ec.empty:
+                    st.markdown("**Descargar factura o nota crédito de una compra específica:**")
+                    dict_desc_ec = {
+                        f"Venta #{r['id']} — {formato_cop(r['total'])} — {r['fecha']}": i
+                        for i, r in con_documento_ec.iterrows()
+                    }
+                    desc_sel_ec_str = st.selectbox("Selecciona la compra", options=list(dict_desc_ec.keys()), key="desc_sel_ec")
+                    fila_desc_ec = con_documento_ec.loc[dict_desc_ec[desc_sel_ec_str]]
+                    col_de1, col_de2, col_de3, col_de4 = st.columns(4)
+                    mostrar_documento(col_de1, "Factura PDF", fila_desc_ec['factura_pdf_url'], f"Factura_Venta_{fila_desc_ec['id']}.pdf", "application/pdf")
+                    mostrar_documento(col_de2, "Factura XML", fila_desc_ec['factura_xml_url'], f"Factura_Venta_{fila_desc_ec['id']}.xml", "application/xml")
+                    mostrar_documento(col_de3, "N.C. PDF", fila_desc_ec['nota_credito_pdf_url'], f"NotaCredito_Venta_{fila_desc_ec['id']}.pdf", "application/pdf")
+                    mostrar_documento(col_de4, "N.C. XML", fila_desc_ec['nota_credito_xml_url'], f"NotaCredito_Venta_{fila_desc_ec['id']}.xml", "application/xml")
+            else:
+                st.caption("Este cliente todavía no tiene compras registradas.")
+
+            st.markdown("---")
+            st.markdown("**Historial de pagos (abonos):**")
+            if not df_abonos_ec.empty:
+                st.dataframe(
+                    df_abonos_ec[['fecha', 'monto', 'venta_id', 'notas']].rename(columns={
+                        'fecha': 'Fecha', 'monto': 'Monto', 'venta_id': 'Venta #', 'notas': 'Notas'
+                    }),
+                    use_container_width=True, hide_index=True,
+                    column_config={"Monto": st.column_config.NumberColumn(format="$%,d")}
+                )
+            else:
+                st.caption("Este cliente todavía no ha hecho abonos.")
 
 # ==========================================
 # TAB 4: REGISTRAR CLIENTE NUEVO
