@@ -380,20 +380,61 @@ with tab_estado_cuenta:
 with tab_nuevo:
     st.subheader("Registrar Nuevo Cliente")
 
+    st.caption("Sube el PDF del RUT y la IA rellena NIT, dígito de verificación, régimen y dirección — o llena el formulario a mano.")
+    rut_pdf = st.file_uploader("PDF del RUT (opcional)", type=["pdf"], key="rut_uploader")
+    if rut_pdf and st.button("Leer RUT con IA", key="btn_leer_rut"):
+        with st.spinner("Gemini está leyendo el RUT..."):
+            try:
+                from gemini_utils import leer_rut_pdf
+                datos_rut = leer_rut_pdf(rut_pdf.read())
+                if datos_rut:
+                    st.session_state.rut_nombre = datos_rut.get("nombre") or ""
+                    st.session_state.rut_tipo_doc = datos_rut.get("tipo_documento") or "NIT"
+                    st.session_state.rut_documento = datos_rut.get("documento") or ""
+                    st.session_state.rut_dv = datos_rut.get("digito_verificacion") or ""
+                    st.session_state.rut_regimen = datos_rut.get("regimen") or "SIMPLIFIED_REGIME"
+                    st.session_state.rut_direccion = datos_rut.get("direccion") or ""
+                    st.session_state.rut_email = datos_rut.get("email") or ""
+                    st.session_state.rut_telefono = datos_rut.get("telefono") or ""
+                    st.success("Datos del RUT leídos. Revisa y ajusta los campos abajo antes de guardar.")
+                    st.rerun()
+                else:
+                    st.error("No se pudieron leer datos del RUT. Completa el formulario manualmente.")
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+    st.markdown("---")
+
+    REGIMENES_CLIENTE = {"No responsable de IVA": "SIMPLIFIED_REGIME", "Responsable de IVA": "COMMON_REGIME"}
+    TIPOS_DOC_CLIENTE = ["CC", "NIT", "CE", "PAS", "TI"]
+
     with st.form("form_nuevo_cliente", clear_on_submit=True):
         col_c1, col_c2 = st.columns(2)
         with col_c1:
-            nombre_c = st.text_input("Nombre completo *")
-            telefono_c = st.text_input("Teléfono")
-            email_c = st.text_input("Email (opcional)")
+            nombre_c = st.text_input("Nombre completo *", value=st.session_state.get("rut_nombre", ""))
+            telefono_c = st.text_input("Teléfono", value=st.session_state.get("rut_telefono", ""))
+            email_c = st.text_input("Email (opcional)", value=st.session_state.get("rut_email", ""))
         with col_c2:
-            doc_c = st.text_input("CC / NIT")
+            doc_c = st.text_input("CC / NIT", value=st.session_state.get("rut_documento", ""))
+            tipo_doc_rut = st.session_state.get("rut_tipo_doc", "CC")
             tipo_doc_c = st.selectbox(
                 "Tipo de documento",
-                options=["CC", "NIT", "CE", "PAS", "TI"],
+                options=TIPOS_DOC_CLIENTE,
+                index=TIPOS_DOC_CLIENTE.index(tipo_doc_rut) if tipo_doc_rut in TIPOS_DOC_CLIENTE else 0,
                 help="Necesario para poder facturar electrónicamente a este cliente"
             )
-            dir_c = st.text_input("Dirección")
+            dv_c = st.text_input(
+                "Dígito de verificación", value=st.session_state.get("rut_dv", ""),
+                help="Solo aplica para NIT — lo trae el RUT (casilla DV)"
+            )
+            regimen_labels = list(REGIMENES_CLIENTE.keys())
+            regimen_rut = st.session_state.get("rut_regimen", "SIMPLIFIED_REGIME")
+            regimen_idx = list(REGIMENES_CLIENTE.values()).index(regimen_rut) if regimen_rut in REGIMENES_CLIENTE.values() else 0
+            regimen_sel = st.selectbox(
+                "Régimen tributario", options=regimen_labels, index=regimen_idx,
+                help="Lo trae el RUT — controla si se le cobra IVA en la factura electrónica"
+            )
+            dir_c = st.text_input("Dirección", value=st.session_state.get("rut_direccion", ""))
             cupo_c = st.number_input(
                 "Cupo de crédito ($)",
                 min_value=0.0, step=50000.0,
@@ -407,8 +448,8 @@ with tab_nuevo:
                     with engine.begin() as conn:
                         conn.execute(text("""
                             INSERT INTO Clientes
-                            (usuario_id, nombre, telefono, email, documento, tipo_documento, direccion, cupo_credito)
-                            VALUES (:uid, :nom, :tel, :email, :doc, :tipo_doc, :dir, :cupo)
+                            (usuario_id, nombre, telefono, email, documento, tipo_documento, direccion, cupo_credito, regimen, digito_verificacion)
+                            VALUES (:uid, :nom, :tel, :email, :doc, :tipo_doc, :dir, :cupo, :regimen, :dv)
                         """), {
                             "uid": user_id, "nom": nombre_c,
                             "tel": telefono_c or None,
@@ -416,9 +457,14 @@ with tab_nuevo:
                             "doc": doc_c or None,
                             "tipo_doc": tipo_doc_c,
                             "dir": dir_c or None,
-                            "cupo": float(cupo_c)
+                            "cupo": float(cupo_c),
+                            "regimen": REGIMENES_CLIENTE[regimen_sel],
+                            "dv": dv_c or None,
                         })
                     invalidar_cache_clientes()
+                    for k in ("rut_nombre", "rut_tipo_doc", "rut_documento", "rut_dv",
+                              "rut_regimen", "rut_direccion", "rut_email", "rut_telefono"):
+                        st.session_state.pop(k, None)
                     st.success(f"Cliente '{nombre_c}' registrado exitosamente.")
                     st.rerun()
                 except Exception as e:

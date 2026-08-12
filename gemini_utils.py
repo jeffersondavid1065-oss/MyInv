@@ -90,6 +90,65 @@ def leer_factura_imagen(imagen_bytes):
         return None
 
 
+PROMPT_RUT = """
+Analiza este RUT (Registro Único Tributario) de la DIAN, Colombia, y extrae los datos del contribuyente.
+
+Devuelve ÚNICAMENTE un JSON válido con este formato exacto, sin texto adicional ni markdown:
+{
+    "nombre": "razón social (persona jurídica) o nombre completo (persona natural)",
+    "tipo_documento": "NIT o CC",
+    "documento": "número de identificación, sin puntos ni el dígito de verificación",
+    "digito_verificacion": "dígito de verificación (casilla DV, solo si tipo_documento es NIT) o null",
+    "regimen": "COMMON_REGIME o SIMPLIFIED_REGIME",
+    "direccion": "dirección principal registrada o null",
+    "email": "correo electrónico registrado o null",
+    "telefono": "teléfono registrado o null"
+}
+
+Reglas importantes:
+- El NIT está en la casilla 5 (número de identificación) y el dígito de verificación en la casilla 6 (DV).
+- Para "regimen": revisa la sección "Responsabilidades, Calidades y Atributos". Si aparece el código 48
+  (Impuesto sobre las ventas - IVA) o dice explícitamente "Responsable de IVA", usa COMMON_REGIME.
+  Si dice "No responsable de IVA" o ese código no aparece, usa SIMPLIFIED_REGIME.
+- Si no encuentras un dato, usa null (no inventes valores).
+- NO incluyas ```json ni ningún markdown, solo el JSON puro
+"""
+
+
+def leer_rut_pdf(pdf_bytes):
+    """Lee un PDF del RUT (DIAN) y extrae los datos del contribuyente usando Gemini,
+    para prellenar el formulario de registro de clientes."""
+    client = configurar_cliente()
+    if not client:
+        return None
+
+    try:
+        from google.genai import types
+
+        response = client.models.generate_content(
+            model="gemini-3.1-flash-lite",
+            contents=[
+                types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
+                PROMPT_RUT
+            ]
+        )
+
+        texto = response.text.strip()
+        texto = re.sub(r'```json\s*', '', texto)
+        texto = re.sub(r'```\s*', '', texto)
+        texto = texto.strip()
+
+        datos = json.loads(texto)
+        return datos
+
+    except json.JSONDecodeError:
+        st.error("Gemini no pudo leer el RUT en formato correcto. Intenta con un PDF más claro.")
+        return None
+    except Exception as e:
+        st.error(f"Error al procesar el RUT: {e}")
+        return None
+
+
 def leer_factura_pdf(pdf_bytes):
     """Lee un PDF de factura y extrae los productos usando Gemini."""
     client = configurar_cliente()
