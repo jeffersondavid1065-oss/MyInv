@@ -115,115 +115,120 @@ with tab_creditos:
             cliente_abono = st.selectbox(
                 "Selecciona el cliente",
                 options=list(dict_clientes.keys()),
+                index=None, placeholder="Selecciona un cliente...",
                 key="cliente_abono_sel"
             )
-            cliente_id_abono = dict_clientes[cliente_abono]
 
-            df_cred_cliente = obtener_creditos_cliente(user_id, cliente_id_abono)
-            creditos_activos = df_cred_cliente[df_cred_cliente['estado'] == 'Activo'] if not df_cred_cliente.empty else pd.DataFrame()
-
-            if not creditos_activos.empty:
-                # Mostrar deudas del cliente
-                st.markdown(f"**Deudas activas de {cliente_abono}:**")
-                for _, cred in creditos_activos.iterrows():
-                    factura_txt = " 🧾" if cred.get('factura_estado') == 'emitida' else ""
-                    st.write(
-                        f"• Crédito #{cred['id']} — "
-                        f"Total: {formato_cop(cred['total'])} — "
-                        f"Saldo: {formato_cop(cred['saldo_pendiente'])} — "
-                        f"Vence: {cred['fecha_limite']}{factura_txt}"
-                    )
-
-                # Seleccionar crédito a abonar
-                dict_creditos = {
-                    f"Crédito #{r['id']} — Saldo: {formato_cop(r['saldo_pendiente'])}": r['id']
-                    for _, r in creditos_activos.iterrows()
-                }
-                credito_sel = st.selectbox(
-                    "Selecciona el crédito a abonar",
-                    options=list(dict_creditos.keys())
-                )
-                credito_id_abono = dict_creditos[credito_sel]
-                fila_credito = creditos_activos[creditos_activos['id'] == credito_id_abono].iloc[0]
-                saldo_actual = fila_credito['saldo_pendiente']
-                venta_id_credito = int(fila_credito['venta_id'])
-                tiene_factura = fila_credito.get('factura_estado') == 'emitida'
-
-                if tiene_factura:
-                    st.caption("🧾 Esta venta tiene factura electrónica emitida.")
-                    col_fd1, col_fd2 = st.columns(2)
-                    mostrar_documento(col_fd1, "Factura PDF", fila_credito.get('factura_pdf_url'), f"Factura_Venta_{venta_id_credito}.pdf", "application/pdf")
-                    mostrar_documento(col_fd2, "Factura XML", fila_credito.get('factura_xml_url'), f"Factura_Venta_{venta_id_credito}.xml", "application/xml")
-
-                col_ab1, col_ab2 = st.columns(2)
-                with col_ab1:
-                    min_abono = min(1000.0, float(saldo_actual))
-                    monto_abono = st.number_input(
-                        "Monto del abono ($)",
-                        min_value=min_abono,
-                        max_value=float(saldo_actual),
-                        value=min_abono,
-                        step=min_abono
-                    )
-                with col_ab2:
-                    notas_abono = st.text_input("Notas (opcional)")
-
-                nuevo_saldo = float(saldo_actual) - float(monto_abono)
-                st.info(f"Saldo actual: {formato_cop(saldo_actual)} → Nuevo saldo: {formato_cop(nuevo_saldo)}")
-
-                if st.button("Registrar Abono", type="primary", use_container_width=True):
-                    try:
-                        with engine.begin() as conn:
-                            conn.execute(text("""
-                                INSERT INTO Abonos (credito_id, usuario_id, monto, notas)
-                                VALUES (:cid, :uid, :monto, :notas)
-                            """), {
-                                "cid": int(credito_id_abono),
-                                "uid": user_id,
-                                "monto": float(monto_abono),
-                                "notas": notas_abono or None
-                            })
-
-                            nuevo_estado = "Pagado" if nuevo_saldo <= 0 else "Activo"
-                            conn.execute(text("""
-                                UPDATE Creditos
-                                SET saldo_pendiente = :saldo, estado = :estado
-                                WHERE id = :cid AND usuario_id = :uid
-                            """), {
-                                "saldo": float(max(0, nuevo_saldo)),
-                                "estado": nuevo_estado,
-                                "cid": int(credito_id_abono),
-                                "uid": user_id
-                            })
-
-                        invalidar_cache_creditos()
-                        if nuevo_estado == "Pagado":
-                            st.success(f"Abono registrado. ¡Crédito #{credito_id_abono} pagado completamente!")
-                        else:
-                            st.success(f"Abono de {formato_cop(monto_abono)} registrado. Saldo pendiente: {formato_cop(nuevo_saldo)}")
-
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error al registrar abono: {e}")
-
-                # Historial de abonos
-                with st.expander("Ver historial de abonos de este crédito"):
-                    with engine.connect() as conn:
-                        df_abonos = pd.read_sql_query(text("""
-                            SELECT monto, fecha, notas
-                            FROM Abonos
-                            WHERE credito_id = :cid
-                            ORDER BY fecha DESC
-                        """), con=conn, params={"cid": credito_id_abono})
-
-                    if not df_abonos.empty:
-                        df_abonos['monto'] = df_abonos['monto'].apply(formato_cop)
-                        df_abonos.columns = ['Monto', 'Fecha', 'Notas']
-                        st.dataframe(df_abonos, hide_index=True, use_container_width=True)
-                    else:
-                        st.info("Sin abonos registrados para este crédito.")
+            if not cliente_abono:
+                st.info("Selecciona un cliente para registrar un abono.")
             else:
-                st.success(f"{cliente_abono} no tiene créditos activos. ¡Está al día!")
+                cliente_id_abono = dict_clientes[cliente_abono]
+
+                df_cred_cliente = obtener_creditos_cliente(user_id, cliente_id_abono)
+                creditos_activos = df_cred_cliente[df_cred_cliente['estado'] == 'Activo'] if not df_cred_cliente.empty else pd.DataFrame()
+
+                if not creditos_activos.empty:
+                    # Mostrar deudas del cliente
+                    st.markdown(f"**Deudas activas de {cliente_abono}:**")
+                    for _, cred in creditos_activos.iterrows():
+                        factura_txt = " 🧾" if cred.get('factura_estado') == 'emitida' else ""
+                        st.write(
+                            f"• Crédito #{cred['id']} — "
+                            f"Total: {formato_cop(cred['total'])} — "
+                            f"Saldo: {formato_cop(cred['saldo_pendiente'])} — "
+                            f"Vence: {cred['fecha_limite']}{factura_txt}"
+                        )
+
+                    # Seleccionar crédito a abonar
+                    dict_creditos = {
+                        f"Crédito #{r['id']} — Saldo: {formato_cop(r['saldo_pendiente'])}": r['id']
+                        for _, r in creditos_activos.iterrows()
+                    }
+                    credito_sel = st.selectbox(
+                        "Selecciona el crédito a abonar",
+                        options=list(dict_creditos.keys())
+                    )
+                    credito_id_abono = dict_creditos[credito_sel]
+                    fila_credito = creditos_activos[creditos_activos['id'] == credito_id_abono].iloc[0]
+                    saldo_actual = fila_credito['saldo_pendiente']
+                    venta_id_credito = int(fila_credito['venta_id'])
+                    tiene_factura = fila_credito.get('factura_estado') == 'emitida'
+
+                    if tiene_factura:
+                        st.caption("🧾 Esta venta tiene factura electrónica emitida.")
+                        col_fd1, col_fd2 = st.columns(2)
+                        mostrar_documento(col_fd1, "Factura PDF", fila_credito.get('factura_pdf_url'), f"Factura_Venta_{venta_id_credito}.pdf", "application/pdf")
+                        mostrar_documento(col_fd2, "Factura XML", fila_credito.get('factura_xml_url'), f"Factura_Venta_{venta_id_credito}.xml", "application/xml")
+
+                    col_ab1, col_ab2 = st.columns(2)
+                    with col_ab1:
+                        min_abono = min(1000.0, float(saldo_actual))
+                        monto_abono = st.number_input(
+                            "Monto del abono ($)",
+                            min_value=min_abono,
+                            max_value=float(saldo_actual),
+                            value=min_abono,
+                            step=min_abono
+                        )
+                    with col_ab2:
+                        notas_abono = st.text_input("Notas (opcional)")
+
+                    nuevo_saldo = float(saldo_actual) - float(monto_abono)
+                    st.info(f"Saldo actual: {formato_cop(saldo_actual)} → Nuevo saldo: {formato_cop(nuevo_saldo)}")
+
+                    if st.button("Registrar Abono", type="primary", use_container_width=True):
+                        try:
+                            with engine.begin() as conn:
+                                conn.execute(text("""
+                                    INSERT INTO Abonos (credito_id, usuario_id, monto, notas)
+                                    VALUES (:cid, :uid, :monto, :notas)
+                                """), {
+                                    "cid": int(credito_id_abono),
+                                    "uid": user_id,
+                                    "monto": float(monto_abono),
+                                    "notas": notas_abono or None
+                                })
+
+                                nuevo_estado = "Pagado" if nuevo_saldo <= 0 else "Activo"
+                                conn.execute(text("""
+                                    UPDATE Creditos
+                                    SET saldo_pendiente = :saldo, estado = :estado
+                                    WHERE id = :cid AND usuario_id = :uid
+                                """), {
+                                    "saldo": float(max(0, nuevo_saldo)),
+                                    "estado": nuevo_estado,
+                                    "cid": int(credito_id_abono),
+                                    "uid": user_id
+                                })
+
+                            invalidar_cache_creditos()
+                            if nuevo_estado == "Pagado":
+                                st.success(f"Abono registrado. ¡Crédito #{credito_id_abono} pagado completamente!")
+                            else:
+                                st.success(f"Abono de {formato_cop(monto_abono)} registrado. Saldo pendiente: {formato_cop(nuevo_saldo)}")
+
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al registrar abono: {e}")
+
+                    # Historial de abonos
+                    with st.expander("Ver historial de abonos de este crédito"):
+                        with engine.connect() as conn:
+                            df_abonos = pd.read_sql_query(text("""
+                                SELECT monto, fecha, notas
+                                FROM Abonos
+                                WHERE credito_id = :cid
+                                ORDER BY fecha DESC
+                            """), con=conn, params={"cid": credito_id_abono})
+
+                        if not df_abonos.empty:
+                            df_abonos['monto'] = df_abonos['monto'].apply(formato_cop)
+                            df_abonos.columns = ['Monto', 'Fecha', 'Notas']
+                            st.dataframe(df_abonos, hide_index=True, use_container_width=True)
+                        else:
+                            st.info("Sin abonos registrados para este crédito.")
+                else:
+                    st.success(f"{cliente_abono} no tiene créditos activos. ¡Está al día!")
     else:
         st.success("No hay créditos activos. ¡Cartera limpia!")
 
