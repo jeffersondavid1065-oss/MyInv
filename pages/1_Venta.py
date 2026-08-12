@@ -766,11 +766,15 @@ with tab_historial:
                 f"Venta #{r['id']} — {formato_cop(r['total'])} — {r['cliente']}": i
                 for i, r in df_hoy.iterrows()
             }
-            desc_sel_hoy_str = st.selectbox("Selecciona la venta", options=list(dict_desc_hoy.keys()), key="desc_sel_hoy")
-            fila_desc_hoy = df_hoy.loc[dict_desc_hoy[desc_sel_hoy_str]]
-            col_dh1, col_dh2 = st.columns(2)
-            mostrar_documento(col_dh1, "Descargar PDF", fila_desc_hoy['factura_pdf_url'], f"Factura_Venta_{fila_desc_hoy['id']}.pdf", "application/pdf")
-            mostrar_documento(col_dh2, "Descargar XML", fila_desc_hoy['factura_xml_url'], f"Factura_Venta_{fila_desc_hoy['id']}.xml", "application/xml")
+            desc_sel_hoy_str = st.selectbox(
+                "Selecciona la venta", options=list(dict_desc_hoy.keys()),
+                index=None, placeholder="Selecciona una venta...", key="desc_sel_hoy"
+            )
+            if desc_sel_hoy_str:
+                fila_desc_hoy = df_hoy.loc[dict_desc_hoy[desc_sel_hoy_str]]
+                col_dh1, col_dh2 = st.columns(2)
+                mostrar_documento(col_dh1, "Descargar PDF", fila_desc_hoy['factura_pdf_url'], f"Factura_Venta_{fila_desc_hoy['id']}.pdf", "application/pdf")
+                mostrar_documento(col_dh2, "Descargar XML", fila_desc_hoy['factura_xml_url'], f"Factura_Venta_{fila_desc_hoy['id']}.xml", "application/xml")
 
         st.markdown("---")
         st.markdown("**Reimprimir ticket:**")
@@ -778,82 +782,87 @@ with tab_historial:
             f"Venta #{r['id']} — {formato_cop(r['total'])} — {r['cliente']}": r['id']
             for _, r in df_hoy.iterrows()
         }
-        venta_reimp = st.selectbox("Selecciona la venta", options=list(dict_ventas.keys()))
-        venta_id_reimp = dict_ventas[venta_reimp]
+        venta_reimp = st.selectbox(
+            "Selecciona la venta", options=list(dict_ventas.keys()),
+            index=None, placeholder="Selecciona una venta..."
+        )
 
-        with engine.connect() as conn:
-            detalles_reimp = pd.read_sql_query(text("""
-                SELECT nombre_producto, cantidad, precio_unitario, descuento, subtotal, iva_porcentaje
-                FROM Detalles_Venta WHERE venta_id = :vid
-            """), con=conn, params={"vid": venta_id_reimp})
-            info_reimp = conn.execute(text("""
-                SELECT subtotal, descuento, total, tipo_pago,
-                       monto_efectivo, cambio, fecha
-                FROM Ventas WHERE id = :vid
-            """), {"vid": venta_id_reimp}).fetchone()
+        if venta_reimp:
+            venta_id_reimp = dict_ventas[venta_reimp]
 
-        if not detalles_reimp.empty:
-            detalles_reimp_mostrar = detalles_reimp if iva_activo else detalles_reimp.drop(columns=["iva_porcentaje"])
-            config_reimp = {
-                "Precio": st.column_config.NumberColumn("Precio", format="$%,d"),
-                "Descuento": st.column_config.NumberColumn("Descuento", format="$%,d"),
-                "Subtotal": st.column_config.NumberColumn("Subtotal", format="$%,d"),
-            }
-            if iva_activo:
-                config_reimp["IVA%"] = st.column_config.NumberColumn("IVA%", format="%.0f%%")
-            st.dataframe(detalles_reimp_mostrar.rename(columns={
-                "nombre_producto": "Producto", "cantidad": "Cant.",
-                "precio_unitario": "Precio", "descuento": "Descuento", "subtotal": "Subtotal",
-                "iva_porcentaje": "IVA%",
-            }), hide_index=True, use_container_width=True,
-            column_config=config_reimp)
-        if info_reimp and float(info_reimp[1] or 0) > 0:
-            st.caption(f"Descuento total aplicado: {formato_cop(info_reimp[1])}")
-        _, iva_reimp = calcular_iva_desde_detalles(detalles_reimp, float(info_reimp[2]) if info_reimp else 0)
-        if iva_reimp > 1:
-            st.caption(f"IVA incluido ({texto_tasa_iva(detalles_reimp)}): {formato_cop(iva_reimp)}")
+            with engine.connect() as conn:
+                detalles_reimp = pd.read_sql_query(text("""
+                    SELECT nombre_producto, cantidad, precio_unitario, descuento, subtotal, iva_porcentaje
+                    FROM Detalles_Venta WHERE venta_id = :vid
+                """), con=conn, params={"vid": venta_id_reimp})
+                info_reimp = conn.execute(text("""
+                    SELECT subtotal, descuento, total, tipo_pago,
+                           monto_efectivo, cambio, fecha
+                    FROM Ventas WHERE id = :vid
+                """), {"vid": venta_id_reimp}).fetchone()
 
-        try:
-            from pdf_utils import generar_ticket_venta
-            cfg = st.session_state.get("taller_config", {})
-            logo_path = cfg.get("logo_path")
-            if not logo_path:
-                with engine.connect() as conn_logo:
-                    lr = conn_logo.execute(
-                        text("SELECT logo_path, nit, telefono, direccion FROM Usuarios WHERE id = :uid"),
-                        {"uid": user_id}
-                    ).fetchone()
-                    if lr:
-                        logo_path = lr[0]
-                        cfg = {"logo_path": lr[0], "nit": lr[1] or "", "telefono": lr[2] or "", "direccion": lr[3] or ""}
+            if not detalles_reimp.empty:
+                detalles_reimp_mostrar = detalles_reimp if iva_activo else detalles_reimp.drop(columns=["iva_porcentaje"])
+                config_reimp = {
+                    "Precio": st.column_config.NumberColumn("Precio", format="$%,d"),
+                    "Descuento": st.column_config.NumberColumn("Descuento", format="$%,d"),
+                    "Subtotal": st.column_config.NumberColumn("Subtotal", format="$%,d"),
+                }
+                if iva_activo:
+                    config_reimp["IVA%"] = st.column_config.NumberColumn("IVA%", format="%.0f%%")
+                st.dataframe(detalles_reimp_mostrar.rename(columns={
+                    "nombre_producto": "Producto", "cantidad": "Cant.",
+                    "precio_unitario": "Precio", "descuento": "Descuento", "subtotal": "Subtotal",
+                    "iva_porcentaje": "IVA%",
+                }), hide_index=True, use_container_width=True,
+                column_config=config_reimp)
+            if info_reimp and float(info_reimp[1] or 0) > 0:
+                st.caption(f"Descuento total aplicado: {formato_cop(info_reimp[1])}")
+            _, iva_reimp = calcular_iva_desde_detalles(detalles_reimp, float(info_reimp[2]) if info_reimp else 0)
+            if iva_reimp > 1:
+                st.caption(f"IVA incluido ({texto_tasa_iva(detalles_reimp)}): {formato_cop(iva_reimp)}")
 
-            pdf_reimp = generar_ticket_venta(
-                negocio_nombre=nombre_negocio,
-                negocio_nit=cfg.get("nit", ""),
-                negocio_telefono=cfg.get("telefono", ""),
-                negocio_direccion=cfg.get("direccion", ""),
-                negocio_logo_path=logo_path,
-                venta_id=venta_id_reimp,
-                fecha=info_reimp[6] if info_reimp else "",
-                cliente="",
-                tipo_pago=info_reimp[3] if info_reimp else "",
-                monto_efectivo=float(info_reimp[4] or 0) if info_reimp else 0,
-                cambio=float(info_reimp[5] or 0) if info_reimp else 0,
-                df_items=detalles_reimp,
-                subtotal=float(info_reimp[0] or 0) if info_reimp else 0,
-                descuento=float(info_reimp[1] or 0) if info_reimp else 0,
-                total=float(info_reimp[2] or 0) if info_reimp else 0,
-                total_iva=iva_reimp,
-            )
-            st.download_button(
-                label="Reimprimir Ticket PDF",
-                data=pdf_reimp,
-                file_name=f"Ticket_{venta_id_reimp}.pdf",
-                mime="application/pdf",
-                use_container_width=True
-            )
-        except Exception as e:
-            st.caption(f"PDF no disponible: {e}")
+            try:
+                from pdf_utils import generar_ticket_venta
+                cfg = st.session_state.get("taller_config", {})
+                logo_path = cfg.get("logo_path")
+                if not logo_path:
+                    with engine.connect() as conn_logo:
+                        lr = conn_logo.execute(
+                            text("SELECT logo_path, nit, telefono, direccion FROM Usuarios WHERE id = :uid"),
+                            {"uid": user_id}
+                        ).fetchone()
+                        if lr:
+                            logo_path = lr[0]
+                            cfg = {"logo_path": lr[0], "nit": lr[1] or "", "telefono": lr[2] or "", "direccion": lr[3] or ""}
+
+                pdf_reimp = generar_ticket_venta(
+                    negocio_nombre=nombre_negocio,
+                    negocio_nit=cfg.get("nit", ""),
+                    negocio_telefono=cfg.get("telefono", ""),
+                    negocio_direccion=cfg.get("direccion", ""),
+                    negocio_logo_path=logo_path,
+                    venta_id=venta_id_reimp,
+                    fecha=info_reimp[6] if info_reimp else "",
+                    cliente="",
+                    tipo_pago=info_reimp[3] if info_reimp else "",
+                    monto_efectivo=float(info_reimp[4] or 0) if info_reimp else 0,
+                    cambio=float(info_reimp[5] or 0) if info_reimp else 0,
+                    df_items=detalles_reimp,
+                    subtotal=float(info_reimp[0] or 0) if info_reimp else 0,
+                    descuento=float(info_reimp[1] or 0) if info_reimp else 0,
+                    total=float(info_reimp[2] or 0) if info_reimp else 0,
+                    total_iva=iva_reimp,
+                )
+                st.download_button(
+                    label="Reimprimir Ticket PDF",
+                    data=pdf_reimp,
+                    file_name=f"Ticket_{venta_id_reimp}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+            except Exception as e:
+                st.caption(f"PDF no disponible: {e}")
     else:
         st.info("No hay ventas registradas hoy todavía.")
 
