@@ -203,33 +203,36 @@ with tab_historial:
             }
             entrada_sel = st.selectbox(
                 "Selecciona la entrada",
-                options=list(dict_entradas.keys())
+                options=list(dict_entradas.keys()),
+                index=None, placeholder="Selecciona una entrada..."
             )
-            entrada_id_sel = dict_entradas[entrada_sel]
 
-            with engine.connect() as conn:
-                df_detalle = pd.read_sql_query(text("""
-                    SELECT pr.nombre as producto, de.cantidad,
-                           de.costo_unitario, de.subtotal
-                    FROM Detalles_Entrada de
-                    JOIN Productos pr ON de.producto_id = pr.id
-                    WHERE de.entrada_id = :eid
-                """), con=conn, params={"eid": entrada_id_sel})
+            if entrada_sel:
+                entrada_id_sel = dict_entradas[entrada_sel]
 
-            if not df_detalle.empty:
-                st.dataframe(
-                    df_detalle.rename(columns={
-                        'producto': 'Producto',
-                        'cantidad': 'Cantidad',
-                        'costo_unitario': 'Costo Unitario ($)',
-                        'subtotal': 'Subtotal ($)'
-                    }),
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "Costo Unitario ($)": st.column_config.NumberColumn("Costo Unitario ($)", format="$%,d"),
-                        "Subtotal ($)": st.column_config.NumberColumn("Subtotal ($)", format="$%,d"),
-                    }
-                )
+                with engine.connect() as conn:
+                    df_detalle = pd.read_sql_query(text("""
+                        SELECT pr.nombre as producto, de.cantidad,
+                               de.costo_unitario, de.subtotal
+                        FROM Detalles_Entrada de
+                        JOIN Productos pr ON de.producto_id = pr.id
+                        WHERE de.entrada_id = :eid
+                    """), con=conn, params={"eid": entrada_id_sel})
+
+                if not df_detalle.empty:
+                    st.dataframe(
+                        df_detalle.rename(columns={
+                            'producto': 'Producto',
+                            'cantidad': 'Cantidad',
+                            'costo_unitario': 'Costo Unitario ($)',
+                            'subtotal': 'Subtotal ($)'
+                        }),
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Costo Unitario ($)": st.column_config.NumberColumn("Costo Unitario ($)", format="$%,d"),
+                            "Subtotal ($)": st.column_config.NumberColumn("Subtotal ($)", format="$%,d"),
+                        }
+                    )
         else:
             st.info("No hay entradas en este período.")
