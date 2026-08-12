@@ -351,13 +351,17 @@ with tab_estado_cuenta:
                         f"Venta #{r['id']} — {formato_cop(r['total'])} — {r['fecha']}": i
                         for i, r in con_documento_ec.iterrows()
                     }
-                    desc_sel_ec_str = st.selectbox("Selecciona la compra", options=list(dict_desc_ec.keys()), key="desc_sel_ec")
-                    fila_desc_ec = con_documento_ec.loc[dict_desc_ec[desc_sel_ec_str]]
-                    col_de1, col_de2, col_de3, col_de4 = st.columns(4)
-                    mostrar_documento(col_de1, "Factura PDF", fila_desc_ec['factura_pdf_url'], f"Factura_Venta_{fila_desc_ec['id']}.pdf", "application/pdf")
-                    mostrar_documento(col_de2, "Factura XML", fila_desc_ec['factura_xml_url'], f"Factura_Venta_{fila_desc_ec['id']}.xml", "application/xml")
-                    mostrar_documento(col_de3, "N.C. PDF", fila_desc_ec['nota_credito_pdf_url'], f"NotaCredito_Venta_{fila_desc_ec['id']}.pdf", "application/pdf")
-                    mostrar_documento(col_de4, "N.C. XML", fila_desc_ec['nota_credito_xml_url'], f"NotaCredito_Venta_{fila_desc_ec['id']}.xml", "application/xml")
+                    desc_sel_ec_str = st.selectbox(
+                        "Selecciona la compra", options=list(dict_desc_ec.keys()),
+                        index=None, placeholder="Selecciona una compra...", key="desc_sel_ec"
+                    )
+                    if desc_sel_ec_str:
+                        fila_desc_ec = con_documento_ec.loc[dict_desc_ec[desc_sel_ec_str]]
+                        col_de1, col_de2, col_de3, col_de4 = st.columns(4)
+                        mostrar_documento(col_de1, "Factura PDF", fila_desc_ec['factura_pdf_url'], f"Factura_Venta_{fila_desc_ec['id']}.pdf", "application/pdf")
+                        mostrar_documento(col_de2, "Factura XML", fila_desc_ec['factura_xml_url'], f"Factura_Venta_{fila_desc_ec['id']}.xml", "application/xml")
+                        mostrar_documento(col_de3, "N.C. PDF", fila_desc_ec['nota_credito_pdf_url'], f"NotaCredito_Venta_{fila_desc_ec['id']}.pdf", "application/pdf")
+                        mostrar_documento(col_de4, "N.C. XML", fila_desc_ec['nota_credito_xml_url'], f"NotaCredito_Venta_{fila_desc_ec['id']}.xml", "application/xml")
             else:
                 st.caption("Este cliente todavía no tiene compras registradas.")
 
