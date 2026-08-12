@@ -930,11 +930,15 @@ with tab_devolucion:
                     f"Venta #{r['id']} — {formato_cop(r['total'])} — {r['cliente']}": i
                     for i, r in nc_con_documento.iterrows()
                 }
-                desc_sel_nc_str = st.selectbox("Selecciona la devolución", options=list(dict_desc_nc.keys()), key="desc_sel_nc")
-                fila_desc_nc = nc_con_documento.loc[dict_desc_nc[desc_sel_nc_str]]
-                col_dn1, col_dn2 = st.columns(2)
-                mostrar_documento(col_dn1, "Descargar PDF", fila_desc_nc['nota_credito_pdf_url'], f"NotaCredito_Venta_{fila_desc_nc['id']}.pdf", "application/pdf")
-                mostrar_documento(col_dn2, "Descargar XML", fila_desc_nc['nota_credito_xml_url'], f"NotaCredito_Venta_{fila_desc_nc['id']}.xml", "application/xml")
+                desc_sel_nc_str = st.selectbox(
+                    "Selecciona la devolución", options=list(dict_desc_nc.keys()),
+                    index=None, placeholder="Selecciona una devolución...", key="desc_sel_nc"
+                )
+                if desc_sel_nc_str:
+                    fila_desc_nc = nc_con_documento.loc[dict_desc_nc[desc_sel_nc_str]]
+                    col_dn1, col_dn2 = st.columns(2)
+                    mostrar_documento(col_dn1, "Descargar PDF", fila_desc_nc['nota_credito_pdf_url'], f"NotaCredito_Venta_{fila_desc_nc['id']}.pdf", "application/pdf")
+                    mostrar_documento(col_dn2, "Descargar XML", fila_desc_nc['nota_credito_xml_url'], f"NotaCredito_Venta_{fila_desc_nc['id']}.xml", "application/xml")
 
             pendientes_nc = df_devoluciones[df_devoluciones['nc_estado_texto'] == 'Pendiente']
             if not pendientes_nc.empty:
@@ -945,9 +949,9 @@ with tab_devolucion:
                 }
                 reintento_nc_sel = st.selectbox(
                     "Reintentar nota crédito de una devolución", options=list(dict_reintento_nc.keys()),
-                    key="reintento_nc_historial_sel"
+                    index=None, placeholder="Selecciona una devolución...", key="reintento_nc_historial_sel"
                 )
-                if st.button("Reintentar nota crédito", use_container_width=True, key="btn_reintento_nc_historial"):
+                if st.button("Reintentar nota crédito", use_container_width=True, key="btn_reintento_nc_historial", disabled=not reintento_nc_sel):
                     with st.spinner("Emitiendo nota crédito..."):
                         ok_nc_h, msg_nc_h = anular_factura_venta(user_id, dict_reintento_nc[reintento_nc_sel])
                     if ok_nc_h:
