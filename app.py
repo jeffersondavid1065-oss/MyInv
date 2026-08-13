@@ -401,17 +401,26 @@ else:
     # Fila 3: Margen del mes y ganancia acumulada
     hoy = ahora_bogota()
     from queries import obtener_metricas_mes, obtener_ganancia_acumulada
-    ingresos_mes, costos_mes, margen_mes, iva_mes = obtener_metricas_mes(user_id, hoy.year, hoy.month)
+    ingresos_mes, costos_mes, margen_mes, iva_mes, gastos_mes, utilidad_neta_mes = obtener_metricas_mes(
+        user_id, hoy.year, hoy.month
+    )
     ganancia_acumulada = obtener_ganancia_acumulada(user_id)
 
-    col9, col10, col11, col12, col13 = st.columns(5)
+    col9, col10, col11, col12 = st.columns(4)
     col9.metric("Ingresos del Mes (con IVA)", formato_cop(ingresos_mes))
     col10.metric("IVA Recaudado del Mes", formato_cop(iva_mes))
     col11.metric("Costo de Ventas", formato_cop(costos_mes))
     col12.metric("Margen Bruto del Mes", formato_cop(margen_mes),
                  delta_color="inverse" if margen_mes < 0 else "normal",
                  help="Ingresos netos de IVA menos costo de ventas. El IVA recaudado no es utilidad del negocio.")
-    col13.metric("Ganancia Acumulada", formato_cop(ganancia_acumulada),
+
+    col13, col14, col15 = st.columns(3)
+    col13.metric("Gastos del Mes", formato_cop(gastos_mes),
+                 help="Gastos operativos registrados en Gastos (arriendo, servicios, nómina, etc.).")
+    col14.metric("Utilidad Neta del Mes", formato_cop(utilidad_neta_mes),
+                 delta_color="inverse" if utilidad_neta_mes < 0 else "normal",
+                 help="Margen Bruto del Mes menos los gastos operativos del mes.")
+    col15.metric("Utilidad Neta Acumulada", formato_cop(ganancia_acumulada),
                  delta_color="inverse" if ganancia_acumulada < 0 else "normal")
 
     st.markdown("---")
@@ -442,6 +451,7 @@ else:
             st.write("• **Punto de Venta** — registrar ventas al mostrador")
             st.write("• **Inventario** — agregar productos y entradas de mercancía")
             st.write("• **Clientes y Créditos** — gestionar deudas y abonos")
+            st.write("• **Gastos** — registrar arriendo, servicios, nómina y demás egresos")
             st.write("• **Reportes** — ventas del día, semana o mes en Excel")
 
     with col_a2:
@@ -450,8 +460,9 @@ else:
             st.write(f"**Fecha:** {hoy.strftime('%d/%m/%Y')}")
             st.write(f"**Negocio:** {nombre_negocio}")
             st.write(f"**Ventas hoy:** {metricas['ventas_hoy']} transacciones")
-            st.write(f"**Margen del mes:** {formato_cop(margen_mes)}")
-            st.write(f"**Ganancia acumulada:** {formato_cop(ganancia_acumulada)}")
+            st.write(f"**Margen bruto del mes:** {formato_cop(margen_mes)}")
+            st.write(f"**Utilidad neta del mes:** {formato_cop(utilidad_neta_mes)}")
+            st.write(f"**Utilidad neta acumulada:** {formato_cop(ganancia_acumulada)}")
 
     st.markdown("")
     if st.button("Cerrar Sesión"):

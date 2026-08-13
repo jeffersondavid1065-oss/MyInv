@@ -15,6 +15,7 @@ from queries import (
     obtener_iva_periodo,
     obtener_iva_por_tasa_periodo,
     tiene_iva_habilitado,
+    obtener_gastos_periodo,
 )
 from utils import aplicar_estilos, verificar_auth, bloquear_si_cajero
 from tz_utils import hoy_bogota, ahora_bogota
@@ -33,7 +34,7 @@ def formato_cop(numero):
     return f"${float(numero):,.0f}".replace(",", ".")
 
 
-def generar_excel_ventas(df_ventas, fecha_ini, fecha_fin, ingresos, costos, margen, nombre_negocio, iva=0, mostrar_iva=True):
+def generar_excel_ventas(df_ventas, fecha_ini, fecha_fin, ingresos, costos, margen, nombre_negocio, iva=0, mostrar_iva=True, gastos=0, utilidad_neta=None):
     """Genera reporte Excel de ventas del período."""
     wb = Workbook()
     ws = wb.active
@@ -49,6 +50,8 @@ def generar_excel_ventas(df_ventas, fecha_ini, fecha_fin, ingresos, costos, marg
 
     descuentos = float(df_ventas['descuento'].sum()) if not df_ventas.empty else 0
     ingresos_netos = ingresos - iva
+    if utilidad_neta is None:
+        utilidad_neta = margen - gastos
 
     # Título
     ws.merge_cells("A1:H1")
@@ -74,6 +77,8 @@ def generar_excel_ventas(df_ventas, fecha_ini, fecha_fin, ingresos, costos, marg
         ws.append(["Costo de Ventas", f"${costos:,.0f}".replace(",", ".")])
         ws.append(["Descuentos Totales", f"${descuentos:,.0f}".replace(",", ".")])
         ws.append(["Margen Bruto (Ingresos Netos - Costos)", f"${margen:,.0f}".replace(",", ".")])
+        ws.append(["Gastos Operativos del Período", f"${gastos:,.0f}".replace(",", ".")])
+        ws.append(["Utilidad Neta (Margen Bruto - Gastos)", f"${utilidad_neta:,.0f}".replace(",", ".")])
         ws.append([])
         ws.append(["Nota: el IVA recaudado no es utilidad del negocio — es dinero cobrado a nombre de la DIAN que se debe declarar y remitir."])
         ws.cell(row=ws.max_row, column=1).font = Font(italic=True, size=9, color="888888")
@@ -83,6 +88,8 @@ def generar_excel_ventas(df_ventas, fecha_ini, fecha_fin, ingresos, costos, marg
         ws.append(["Costo de Ventas", f"${costos:,.0f}".replace(",", ".")])
         ws.append(["Descuentos Totales", f"${descuentos:,.0f}".replace(",", ".")])
         ws.append(["Margen Bruto", f"${margen:,.0f}".replace(",", ".")])
+        ws.append(["Gastos Operativos del Período", f"${gastos:,.0f}".replace(",", ".")])
+        ws.append(["Utilidad Neta (Margen Bruto - Gastos)", f"${utilidad_neta:,.0f}".replace(",", ".")])
         ws.append([])
 
     # Headers de tabla
@@ -297,6 +304,10 @@ with tab_periodo:
     ingresos_netos_rep = ingresos_rep - iva_rep
     margen_rep = ingresos_netos_rep - costos_rep
 
+    df_gastos_rep = obtener_gastos_periodo(user_id, fecha_ini_rep, fecha_fin_rep)
+    gastos_rep = float(df_gastos_rep['monto'].sum()) if not df_gastos_rep.empty else 0.0
+    utilidad_neta_rep = margen_rep - gastos_rep
+
     if iva_activo:
         col_r1, col_r2, col_r3, col_r4, col_r5, col_r6 = st.columns(6)
         col_r1.metric("Ingresos (con IVA)", formato_cop(ingresos_rep))
@@ -315,6 +326,13 @@ with tab_periodo:
         col_r4.metric("Descuentos", formato_cop(descuentos_rep))
         col_r5.metric("Margen Bruto", formato_cop(margen_rep),
                       delta_color="inverse" if margen_rep < 0 else "normal")
+
+    col_ur1, col_ur2 = st.columns(2)
+    col_ur1.metric("Gastos Operativos del Período", formato_cop(gastos_rep),
+                   help="Registrados en Gastos — arriendo, servicios, nómina, etc.")
+    col_ur2.metric("Utilidad Neta del Período", formato_cop(utilidad_neta_rep),
+                   delta_color="inverse" if utilidad_neta_rep < 0 else "normal",
+                   help="Margen Bruto menos los gastos operativos del período.")
 
     st.markdown("---")
 
@@ -337,7 +355,8 @@ with tab_periodo:
         st.markdown("---")
         excel_buf = generar_excel_ventas(
             df_periodo, fecha_ini_rep, fecha_fin_rep,
-            ingresos_rep, costos_rep, margen_rep, nombre_negocio, iva_rep, mostrar_iva=iva_activo
+            ingresos_rep, costos_rep, margen_rep, nombre_negocio, iva_rep, mostrar_iva=iva_activo,
+            gastos=gastos_rep, utilidad_neta=utilidad_neta_rep
         )
         st.download_button(
             label="Descargar Reporte en Excel (para DIAN)",

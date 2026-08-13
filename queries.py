@@ -442,8 +442,10 @@ def obtener_top_productos(uid, fecha_inicio, fecha_fin, limite=10):
 
 @st.cache_data(ttl=60)
 def obtener_metricas_mes(uid, año, mes):
-    """Ingresos (con IVA), costos y margen del mes. El margen se calcula sobre
-    ingresos netos de IVA - el IVA recaudado no es utilidad del negocio."""
+    """Ingresos (con IVA), costos, gastos operativos, margen bruto y utilidad
+    neta del mes. El margen bruto se calcula sobre ingresos netos de IVA menos
+    costo de mercancía vendida - el IVA recaudado no es utilidad del negocio.
+    La utilidad neta resta además los gastos operativos del período (Gastos)."""
     engine = obtener_conexion()
     f_ini = date(año, mes, 1).strftime('%Y-%m-%d')
     f_fin = date(año, mes, calendar.monthrange(año, mes)[1]).strftime('%Y-%m-%d')
@@ -465,17 +467,25 @@ def obtener_metricas_mes(uid, año, mes):
             AND DATE(v.fecha) >= :f_ini AND DATE(v.fecha) <= :f_fin
         """), {"uid": uid, "f_ini": f_ini, "f_fin": f_fin}).scalar()
 
+        gastos = conn.execute(text("""
+            SELECT COALESCE(SUM(monto), 0) FROM Gastos
+            WHERE usuario_id = :uid AND DATE(fecha) >= :f_ini AND DATE(fecha) <= :f_fin
+        """), {"uid": uid, "f_ini": f_ini, "f_fin": f_fin}).scalar()
+
     ingresos = float(ingresos) if ingresos else 0
     costos = float(costos) if costos else 0
+    gastos = float(gastos) if gastos else 0
     iva = _iva_recaudado_rango(uid, f_ini, f_fin)
     margen = (ingresos - iva) - costos
-    return ingresos, costos, margen, iva
+    utilidad_neta = margen - gastos
+    return ingresos, costos, margen, iva, gastos, utilidad_neta
 
 
 @st.cache_data(ttl=60)
 def obtener_ganancia_dia(uid, fecha):
-    """Ingresos (con IVA), costos y ganancia de un día específico (para Cierre
-    de Caja). La ganancia se calcula sobre ingresos netos de IVA."""
+    """Ingresos (con IVA), costos, gastos, ganancia bruta y utilidad neta de un
+    día específico (para Cierre de Caja). La ganancia bruta se calcula sobre
+    ingresos netos de IVA; la utilidad neta le resta además los gastos del día."""
     engine = obtener_conexion()
     with engine.connect() as conn:
         ingresos = conn.execute(text("""
@@ -495,11 +505,18 @@ def obtener_ganancia_dia(uid, fecha):
             AND DATE(v.fecha) = :fecha
         """), {"uid": uid, "fecha": fecha}).scalar()
 
+        gastos = conn.execute(text("""
+            SELECT COALESCE(SUM(monto), 0) FROM Gastos
+            WHERE usuario_id = :uid AND DATE(fecha) = :fecha
+        """), {"uid": uid, "fecha": fecha}).scalar()
+
     ingresos = float(ingresos) if ingresos else 0
     costos = float(costos) if costos else 0
+    gastos = float(gastos) if gastos else 0
     iva = _iva_recaudado_rango(uid, fecha, fecha)
     ganancia = (ingresos - iva) - costos
-    return ingresos, costos, ganancia, iva
+    utilidad_neta = ganancia - gastos
+    return ingresos, costos, ganancia, iva, gastos, utilidad_neta
 
 
 @st.cache_data(ttl=60)
@@ -531,8 +548,9 @@ def obtener_ganancia_por_producto_dia(uid, fecha):
 
 @st.cache_data(ttl=120)
 def obtener_ganancia_acumulada(uid):
-    """Ganancia bruta acumulada histórica: ingresos netos de IVA - costos, de
-    todas las ventas no anuladas. El IVA recaudado no es utilidad del negocio."""
+    """Utilidad neta acumulada histórica: ingresos netos de IVA - costos -
+    gastos operativos, de todas las ventas no anuladas y todos los gastos
+    registrados. El IVA recaudado no es utilidad del negocio."""
     engine = obtener_conexion()
     with engine.connect() as conn:
         ingresos = conn.execute(text("""
@@ -548,10 +566,15 @@ def obtener_ganancia_acumulada(uid):
             WHERE v.usuario_id = :uid AND v.estado != 'Anulada'
         """), {"uid": uid}).scalar()
 
+        gastos = conn.execute(text("""
+            SELECT COALESCE(SUM(monto), 0) FROM Gastos WHERE usuario_id = :uid
+        """), {"uid": uid}).scalar()
+
     ingresos = float(ingresos) if ingresos else 0
     costos = float(costos) if costos else 0
+    gastos = float(gastos) if gastos else 0
     iva = _iva_recaudado_rango(uid)
-    return (ingresos - iva) - costos
+    return (ingresos - iva) - costos - gastos
 
 
 # ==========================================
@@ -1112,6 +1135,177 @@ def eliminar_cotizacion(uid, cotizacion_id):
 def invalidar_cache_cotizaciones():
     """Llamar tras crear, convertir o eliminar una cotización."""
     obtener_cotizaciones.clear()
+
+
+# ==========================================
+# GASTOS (egresos operativos del negocio - arriendo, servicios, nómina, etc.)
+# ==========================================
+# A propósito NO incluye compra de mercancía para revender - eso se registra
+# en Entradas_Inventario y ya reduce la utilidad vía Detalles_Venta.costo_unitario
+# cuando se vende. Si también se contara aquí, se restaría dos veces.
+CATEGORIAS_GASTO = [
+    "Arriendo", "Servicios públicos", "Nómina y prestaciones",
+    "Transporte y domicilios", "Mantenimiento y reparaciones",
+    "Papelería y aseo", "Publicidad y marketing", "Tecnología y software",
+    "Impuestos y tasas", "Comisiones y gastos bancarios",
+    "Honorarios profesionales", "Otro",
+]
+
+
+def crear_gasto(uid, fecha, categoria, descripcion, beneficiario, monto,
+                 tipo_pago, comprobante_path=None, notas=None):
+    """Registra un gasto operativo del negocio. Retorna el id del gasto."""
+    engine = obtener_conexion()
+    params = {
+        "uid": uid, "fecha": fecha, "cat": categoria, "desc": descripcion,
+        "benef": beneficiario or None, "monto": monto, "tipo": tipo_pago,
+        "comp": comprobante_path, "notas": notas or None,
+    }
+    with engine.begin() as conn:
+        is_sqlite = "sqlite" in str(engine.url)
+        if is_sqlite:
+            cur = conn.execute(text('''
+                INSERT INTO Gastos
+                (usuario_id, fecha, categoria, descripcion, beneficiario, monto,
+                 tipo_pago, comprobante_path, notas)
+                VALUES (:uid, :fecha, :cat, :desc, :benef, :monto, :tipo, :comp, :notas)
+            '''), params)
+            gasto_id = cur.lastrowid
+        else:
+            res = conn.execute(text('''
+                INSERT INTO Gastos
+                (usuario_id, fecha, categoria, descripcion, beneficiario, monto,
+                 tipo_pago, comprobante_path, notas)
+                VALUES (:uid, :fecha, :cat, :desc, :benef, :monto, :tipo, :comp, :notas)
+                RETURNING id
+            '''), params)
+            gasto_id = res.scalar()
+    invalidar_cache_gastos()
+    return gasto_id
+
+
+def actualizar_gasto(uid, gasto_id, fecha, categoria, descripcion, beneficiario, monto,
+                      tipo_pago, comprobante_path=None, notas=None):
+    """Edita un gasto ya registrado. Si no se sube un comprobante nuevo, conserva el anterior."""
+    engine = obtener_conexion()
+    with engine.begin() as conn:
+        conn.execute(text('''
+            UPDATE Gastos
+            SET fecha = :fecha, categoria = :cat, descripcion = :desc,
+                beneficiario = :benef, monto = :monto, tipo_pago = :tipo,
+                comprobante_path = COALESCE(:comp, comprobante_path), notas = :notas
+            WHERE id = :gid AND usuario_id = :uid
+        '''), {
+            "fecha": fecha, "cat": categoria, "desc": descripcion,
+            "benef": beneficiario or None, "monto": monto, "tipo": tipo_pago,
+            "comp": comprobante_path, "notas": notas or None,
+            "gid": gasto_id, "uid": uid,
+        })
+    invalidar_cache_gastos()
+
+
+def eliminar_gasto(uid, gasto_id):
+    """Elimina un gasto registrado."""
+    engine = obtener_conexion()
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM Gastos WHERE id = :gid AND usuario_id = :uid"),
+                     {"gid": gasto_id, "uid": uid})
+    invalidar_cache_gastos()
+
+
+@st.cache_data(ttl=30)
+def obtener_gastos_periodo(uid, fecha_inicio, fecha_fin):
+    """Gastos registrados en un rango de fechas, para listar/filtrar/exportar."""
+    engine = obtener_conexion()
+    with engine.connect() as conn:
+        return pd.read_sql_query(text("""
+            SELECT id, fecha, categoria, descripcion, beneficiario, monto,
+                   tipo_pago, comprobante_path, notas
+            FROM Gastos
+            WHERE usuario_id = :uid
+            AND DATE(fecha) >= :f_ini AND DATE(fecha) <= :f_fin
+            ORDER BY fecha DESC
+        """), con=conn, params={
+            "uid": uid,
+            "f_ini": fecha_inicio.strftime('%Y-%m-%d'),
+            "f_fin": fecha_fin.strftime('%Y-%m-%d'),
+        })
+
+
+def obtener_gasto(uid, gasto_id):
+    """Un gasto puntual, para precargar el formulario de edición. Sin caché."""
+    engine = obtener_conexion()
+    with engine.connect() as conn:
+        return conn.execute(text("""
+            SELECT id, fecha, categoria, descripcion, beneficiario, monto,
+                   tipo_pago, comprobante_path, notas
+            FROM Gastos WHERE id = :gid AND usuario_id = :uid
+        """), {"gid": gasto_id, "uid": uid}).fetchone()
+
+
+@st.cache_data(ttl=30)
+def obtener_gastos_dia(uid, fecha):
+    """Gastos de un día, desglosados por forma de pago - insumo del Cierre de Caja
+    para restar del efectivo esperado y de la ganancia del día."""
+    engine = obtener_conexion()
+    with engine.connect() as conn:
+        row = conn.execute(text("""
+            SELECT
+                COALESCE(SUM(monto), 0) as total,
+                COALESCE(SUM(CASE WHEN tipo_pago = 'Efectivo' THEN monto ELSE 0 END), 0) as total_efectivo,
+                COALESCE(SUM(CASE WHEN tipo_pago = 'Transferencia' THEN monto ELSE 0 END), 0) as total_transferencia
+            FROM Gastos
+            WHERE usuario_id = :uid AND DATE(fecha) = :fecha
+        """), {"uid": uid, "fecha": fecha}).fetchone()
+    return {
+        "total": float(row[0]) if row else 0.0,
+        "total_efectivo": float(row[1]) if row else 0.0,
+        "total_transferencia": float(row[2]) if row else 0.0,
+    }
+
+
+@st.cache_data(ttl=60)
+def obtener_gastos_mes(uid, año, mes):
+    """Total de gastos de un mes calendario, para el Dashboard."""
+    engine = obtener_conexion()
+    f_ini = date(año, mes, 1).strftime('%Y-%m-%d')
+    f_fin = date(año, mes, calendar.monthrange(año, mes)[1]).strftime('%Y-%m-%d')
+    with engine.connect() as conn:
+        total = conn.execute(text("""
+            SELECT COALESCE(SUM(monto), 0) FROM Gastos
+            WHERE usuario_id = :uid AND DATE(fecha) >= :f_ini AND DATE(fecha) <= :f_fin
+        """), {"uid": uid, "f_ini": f_ini, "f_fin": f_fin}).scalar()
+    return float(total) if total else 0.0
+
+
+@st.cache_data(ttl=60)
+def obtener_gastos_por_categoria(uid, fecha_inicio, fecha_fin):
+    """Gastos agrupados por categoría en un período, para el desglose visual."""
+    engine = obtener_conexion()
+    with engine.connect() as conn:
+        return pd.read_sql_query(text("""
+            SELECT categoria, COALESCE(SUM(monto), 0) as total, COUNT(*) as cantidad
+            FROM Gastos
+            WHERE usuario_id = :uid
+            AND DATE(fecha) >= :f_ini AND DATE(fecha) <= :f_fin
+            GROUP BY categoria
+            ORDER BY total DESC
+        """), con=conn, params={
+            "uid": uid,
+            "f_ini": fecha_inicio.strftime('%Y-%m-%d'),
+            "f_fin": fecha_fin.strftime('%Y-%m-%d'),
+        })
+
+
+def invalidar_cache_gastos():
+    """Llamar después de crear, editar o eliminar un gasto."""
+    obtener_gastos_periodo.clear()
+    obtener_gastos_dia.clear()
+    obtener_gastos_mes.clear()
+    obtener_gastos_por_categoria.clear()
+    obtener_metricas_mes.clear()
+    obtener_ganancia_dia.clear()
+    obtener_ganancia_acumulada.clear()
 
 
 # ==========================================
