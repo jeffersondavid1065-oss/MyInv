@@ -193,6 +193,46 @@ def init_db():
                     FOREIGN KEY (producto_id) REFERENCES Productos(id)
                 )
             '''))
+            # --- NUEVO: Cotizaciones (previas a convertirse en una Venta
+            # real). Tabla separada a propósito, no un estado más de Ventas:
+            # así ninguna consulta existente (historial, cartera, reportes...)
+            # necesita filtrarlas, y una cotización nunca descuenta stock
+            # hasta que se convierte en venta real. ---
+            conn.execute(text('''
+                CREATE TABLE IF NOT EXISTS Cotizaciones (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    usuario_id INTEGER NOT NULL,
+                    cliente_id INTEGER,
+                    cajero_id INTEGER,
+                    fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    subtotal REAL NOT NULL DEFAULT 0,
+                    descuento REAL DEFAULT 0,
+                    total REAL NOT NULL DEFAULT 0,
+                    convertida_a_venta_id INTEGER,
+                    fecha_conversion TIMESTAMP,
+                    FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE,
+                    FOREIGN KEY (cliente_id) REFERENCES Clientes(id),
+                    FOREIGN KEY (cajero_id) REFERENCES Cajeros(id),
+                    FOREIGN KEY (convertida_a_venta_id) REFERENCES Ventas(id) ON DELETE SET NULL
+                )
+            '''))
+            conn.execute(text('''
+                CREATE TABLE IF NOT EXISTS Detalles_Cotizacion (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    cotizacion_id INTEGER NOT NULL,
+                    producto_id INTEGER,
+                    nombre_producto TEXT NOT NULL,
+                    codigo_barras TEXT,
+                    cantidad INTEGER NOT NULL DEFAULT 1,
+                    precio_unitario REAL NOT NULL DEFAULT 0,
+                    costo_unitario REAL DEFAULT 0,
+                    descuento REAL DEFAULT 0,
+                    subtotal REAL NOT NULL DEFAULT 0,
+                    iva_porcentaje REAL DEFAULT 0,
+                    FOREIGN KEY (cotizacion_id) REFERENCES Cotizaciones(id) ON DELETE CASCADE,
+                    FOREIGN KEY (producto_id) REFERENCES Productos(id)
+                )
+            '''))
             conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS Entradas_Inventario (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -426,6 +466,46 @@ def init_db():
                     FOREIGN KEY (producto_id) REFERENCES Productos(id)
                 )
             '''))
+            # --- NUEVO: Cotizaciones (previas a convertirse en una Venta
+            # real). Tabla separada a propósito, no un estado más de Ventas:
+            # así ninguna consulta existente (historial, cartera, reportes...)
+            # necesita filtrarlas, y una cotización nunca descuenta stock
+            # hasta que se convierte en venta real. ---
+            conn.execute(text('''
+                CREATE TABLE IF NOT EXISTS Cotizaciones (
+                    id SERIAL PRIMARY KEY,
+                    usuario_id INTEGER NOT NULL,
+                    cliente_id INTEGER,
+                    cajero_id INTEGER,
+                    fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    subtotal NUMERIC(12,2) NOT NULL DEFAULT 0,
+                    descuento NUMERIC(12,2) DEFAULT 0,
+                    total NUMERIC(12,2) NOT NULL DEFAULT 0,
+                    convertida_a_venta_id INTEGER,
+                    fecha_conversion TIMESTAMP,
+                    FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE,
+                    FOREIGN KEY (cliente_id) REFERENCES Clientes(id),
+                    FOREIGN KEY (cajero_id) REFERENCES Cajeros(id),
+                    FOREIGN KEY (convertida_a_venta_id) REFERENCES Ventas(id) ON DELETE SET NULL
+                )
+            '''))
+            conn.execute(text('''
+                CREATE TABLE IF NOT EXISTS Detalles_Cotizacion (
+                    id SERIAL PRIMARY KEY,
+                    cotizacion_id INTEGER NOT NULL,
+                    producto_id INTEGER,
+                    nombre_producto TEXT NOT NULL,
+                    codigo_barras VARCHAR(100),
+                    cantidad INTEGER NOT NULL DEFAULT 1,
+                    precio_unitario NUMERIC(12,2) NOT NULL DEFAULT 0,
+                    costo_unitario NUMERIC(12,2) DEFAULT 0,
+                    descuento NUMERIC(12,2) DEFAULT 0,
+                    subtotal NUMERIC(12,2) NOT NULL DEFAULT 0,
+                    iva_porcentaje NUMERIC(5,2) DEFAULT 0,
+                    FOREIGN KEY (cotizacion_id) REFERENCES Cotizaciones(id) ON DELETE CASCADE,
+                    FOREIGN KEY (producto_id) REFERENCES Productos(id)
+                )
+            '''))
             conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS Entradas_Inventario (
                     id SERIAL PRIMARY KEY,
@@ -523,6 +603,8 @@ def init_db():
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_abonos_credito ON Abonos(credito_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cajeros_usuario ON Cajeros(usuario_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cierres_caja_usuario ON Cierres_Caja(usuario_id, fecha)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_cotizaciones_usuario ON Cotizaciones(usuario_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_detalles_cotizacion_cotizacion ON Detalles_Cotizacion(cotizacion_id)"))
 
         # ==========================================
         # MIGRACIONES SEGURAS

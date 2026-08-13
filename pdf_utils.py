@@ -10,6 +10,33 @@ import os
 from iva_utils import texto_tasa_iva
 
 
+_REEMPLAZOS_PDF_LATIN1 = {
+    "—": "-", "–": "-",           # em dash, en dash
+    "‘": "'", "’": "'",           # comillas simples curvas
+    "“": '"', "”": '"',           # comillas dobles curvas
+    "…": "...",                          # puntos suspensivos
+    " ": " ",                            # espacio de no separación
+}
+
+
+def _texto_seguro_pdf(valor, default=""):
+    """Convierte cualquier valor a texto seguro para las fuentes core de
+    FPDF (Helvetica), que solo soportan Latin-1. Los caracteres Unicode
+    comunes que SÍ tienen un equivalente razonable (guiones largos,
+    comillas curvas, puntos suspensivos) se traducen; cualquier otro
+    caracter fuera de Latin-1 se reemplaza por '?' en vez de reventar la
+    generación del PDF (FPDFUnicodeEncodingException)."""
+    if valor is None:
+        return default
+    try:
+        s = str(valor)
+    except Exception:
+        return default
+    for original, reemplazo in _REEMPLAZOS_PDF_LATIN1.items():
+        s = s.replace(original, reemplazo)
+    return s.encode("latin-1", errors="replace").decode("latin-1")
+
+
 def generar_ticket_venta(
     negocio_nombre,
     negocio_nit="",
@@ -27,9 +54,12 @@ def generar_ticket_venta(
     descuento=0,
     total=0,
     total_iva=0,
+    es_cotizacion=False,
 ):
     """
-    Genera un ticket de venta profesional en PDF.
+    Genera un ticket de venta profesional en PDF, o de una cotización si
+    es_cotizacion=True (cambia el rótulo del encabezado y agrega un aviso
+    en el pie de que no es un documento fiscal).
     Compatible con lector de barras y código QR futuro.
     """
 
@@ -40,7 +70,7 @@ def generar_ticket_venta(
             s = str(valor)
             if "." in s and " " in s:
                 s = s.split(" ")[0]
-            return s
+            return _texto_seguro_pdf(s, default)
         except Exception:
             return default
 
@@ -52,6 +82,7 @@ def generar_ticket_venta(
     cliente          = safe_str(cliente, "Venta directa")
     tipo_pago        = safe_str(tipo_pago, "Efectivo")
     venta_id_str     = str(venta_id).zfill(5) if venta_id else "00000"
+    etiqueta_doc     = "Cotizacion" if es_cotizacion else "Ticket"
 
     GRIS_OSCURO = (80, 80, 80)
     GRIS_MEDIO  = (120, 120, 120)
@@ -98,16 +129,16 @@ def generar_ticket_venta(
         pdf.set_xy(38, y_header + 14)
         pdf.cell(80, 4, f"Tel: {negocio_telefono}")
 
-    # Ticket # y fecha
+    # Ticket # / Cotización # y fecha
     pdf.set_xy(130, y_header)
     pdf.set_font("Helvetica", "B", 12)
     pdf.set_text_color(*GRIS_OSCURO)
-    pdf.cell(65, 5, f"Ticket# {venta_id_str}", align="R")
+    pdf.cell(65, 5, f"{etiqueta_doc}# {venta_id_str}", align="R")
 
     pdf.set_xy(130, y_header + 7)
     pdf.set_font("Helvetica", "", 8)
     pdf.set_text_color(*GRIS_MEDIO)
-    pdf.cell(65, 4, "Fecha de emisión", align="R")
+    pdf.cell(65, 4, "Fecha de cotizacion" if es_cotizacion else "Fecha de emisión", align="R")
 
     pdf.set_xy(130, y_header + 12)
     pdf.set_font("Helvetica", "B", 9)
@@ -302,9 +333,13 @@ def generar_ticket_venta(
     pdf.set_xy(12, y_pie)
     pdf.set_font("Helvetica", "", 8)
     pdf.set_text_color(*GRIS_MEDIO)
-    pdf.cell(0, 4, "¡Gracias por su compra! Conserve este ticket.", align="C")
+    if es_cotizacion:
+        pdf.cell(0, 4, "Cotizacion sin valor fiscal - no reemplaza una factura o ticket.", align="C")
+    else:
+        pdf.cell(0, 4, "¡Gracias por su compra! Conserve este ticket.", align="C")
+    y_pie += 5
 
-    pdf.set_xy(12, y_pie + 5)
+    pdf.set_xy(12, y_pie)
     pdf.set_font("Helvetica", "", 7)
     pdf.set_text_color(180, 180, 180)
     pdf.cell(0, 3, "Página 1", align="C")

@@ -14,6 +14,11 @@ from queries import (
     obtener_historial_devoluciones,
     tiene_fe_habilitada,
     tiene_iva_habilitado,
+    crear_cotizacion,
+    obtener_cotizaciones,
+    obtener_cotizacion_detalle,
+    convertir_cotizacion_a_venta,
+    eliminar_cotizacion,
 )
 from utils import aplicar_estilos, verificar_auth
 from tz_utils import hoy_bogota, ahora_bogota_naive
@@ -51,6 +56,7 @@ identidad_actual = f"cajero:{cajero_id_actual}" if cajero_id_actual else f"admin
 
 if st.session_state.get("_identidad_carrito") != identidad_actual:
     st.session_state.carrito = []
+    st.session_state.carrito_cotizacion = []
     st.session_state.descuento_pos = 0
     st.session_state.descuento_pct_global = 0
     st.session_state.tipo_desc_global = "$ Fijo"
@@ -100,10 +106,11 @@ def limpiar_carrito():
 # ==========================================
 # TABS
 # ==========================================
-tab_pos, tab_historial, tab_devolucion = st.tabs([
+tab_pos, tab_historial, tab_devolucion, tab_cotizacion = st.tabs([
     "Nueva Venta",
     "Historial del Día",
-    "Devoluciones"
+    "Devoluciones",
+    "Cotización",
 ])
 
 # ==========================================
@@ -1119,3 +1126,333 @@ with tab_devolucion:
                     st.info("Al anular se restaura el stock y la venta queda marcada como anulada en los reportes.")
         else:
             st.warning(f"No se encontró la venta #{vid_dev}.")
+
+# ==========================================
+# TAB 4: COTIZACIÓN
+# ==========================================
+with tab_cotizacion:
+    if "carrito_cotizacion" not in st.session_state:
+        st.session_state.carrito_cotizacion = []
+
+    def agregar_a_cotizacion(producto_id, nombre, codigo_barras, precio, stock_actual, costo=0, cantidad=1, iva_porcentaje=0):
+        for item in st.session_state.carrito_cotizacion:
+            if item["producto_id"] == producto_id:
+                item["cantidad"] += cantidad
+                item["subtotal"] = item["cantidad"] * item["precio_unitario"]
+                return
+        st.session_state.carrito_cotizacion.append({
+            "producto_id": producto_id,
+            "nombre": nombre,
+            "codigo_barras": codigo_barras,
+            "precio_unitario": float(precio),
+            "costo_unitario": float(costo or 0),
+            "descuento_item": 0.0,
+            "cantidad": cantidad,
+            "subtotal": float(precio) * cantidad,
+            "stock_max": stock_actual,
+            "iva_porcentaje": float(iva_porcentaje or 0),
+        })
+
+    st.subheader("Nueva Cotización")
+    st.caption(
+        "Cotiza productos para un cliente sin comprometer stock ni forma de pago todavía. "
+        "Podrás descargarla en PDF y, cuando el cliente la apruebe, convertirla en una venta real "
+        "desde 'Cotizaciones Guardadas' más abajo."
+    )
+
+    col_cot_izq, col_cot_der = st.columns([3, 2])
+
+    with col_cot_izq:
+        st.markdown("**Buscar Producto**")
+        busqueda_cot = st.text_input(
+            "Código o nombre", placeholder="Escanea o escribe aquí...",
+            key="buscador_cotizacion", label_visibility="collapsed"
+        )
+
+        if busqueda_cot:
+            busqueda_cot = busqueda_cot.strip()
+            prod_encontrado_cot = buscar_producto_por_codigo(user_id, busqueda_cot)
+
+            if prod_encontrado_cot:
+                agregar_a_cotizacion(
+                    producto_id=prod_encontrado_cot[0],
+                    nombre=prod_encontrado_cot[1],
+                    codigo_barras=prod_encontrado_cot[2],
+                    precio=prod_encontrado_cot[4],
+                    stock_actual=int(prod_encontrado_cot[3]),
+                    costo=prod_encontrado_cot[5],
+                    iva_porcentaje=prod_encontrado_cot[6] if len(prod_encontrado_cot) > 6 else 0,
+                )
+                st.rerun()
+            else:
+                df_productos_cot = obtener_productos_activos(user_id)
+                if not df_productos_cot.empty:
+                    df_filtrado_cot = df_productos_cot[
+                        df_productos_cot['nombre'].str.contains(busqueda_cot, case=False, na=False)
+                    ]
+                    if not df_filtrado_cot.empty:
+                        st.markdown(f"**{len(df_filtrado_cot)} resultado(s):**")
+                        for _, prod in df_filtrado_cot.iterrows():
+                            c1, c2, c3 = st.columns([3, 1, 1])
+                            with c1:
+                                st.write(f"**{prod['nombre']}**")
+                            with c2:
+                                st.write(formato_cop(prod['precio_venta']))
+                            with c3:
+                                if st.button("Agregar", key=f"add_cot_{prod['id']}"):
+                                    agregar_a_cotizacion(
+                                        producto_id=int(prod['id']),
+                                        nombre=prod['nombre'],
+                                        codigo_barras=prod['codigo_barras'] or "",
+                                        precio=float(prod['precio_venta']),
+                                        stock_actual=int(prod['stock_actual']),
+                                        costo=float(prod['costo_compra'] or 0),
+                                        iva_porcentaje=float(prod.get('iva_porcentaje', 0) or 0),
+                                    )
+                                    st.rerun()
+                    else:
+                        st.warning(f"No se encontró '{busqueda_cot}'.")
+
+        st.markdown("---")
+        st.markdown("**Ítems de la Cotización**")
+
+        if not st.session_state.carrito_cotizacion:
+            st.info("Aún no se han agregado ítems.")
+        else:
+            items_a_quitar_cot = []
+            total_cotizacion = 0
+
+            for i, item in enumerate(st.session_state.carrito_cotizacion):
+                cc1, cc2, cc3, cc4, cc5 = st.columns([3, 1, 1, 1, 0.5])
+                with cc1:
+                    st.write(item["nombre"])
+                with cc2:
+                    st.write(formato_cop(item["precio_unitario"]))
+                with cc3:
+                    nueva_cant_cot = st.number_input(
+                        "", min_value=1, value=item["cantidad"], step=1,
+                        key=f"cant_cot_{i}", label_visibility="collapsed"
+                    )
+                    if nueva_cant_cot != item["cantidad"]:
+                        st.session_state.carrito_cotizacion[i]["cantidad"] = nueva_cant_cot
+                        st.session_state.carrito_cotizacion[i]["subtotal"] = nueva_cant_cot * item["precio_unitario"]
+                        st.rerun()
+                with cc4:
+                    st.write(formato_cop(item["subtotal"]))
+                with cc5:
+                    if st.button("Quitar", key=f"del_cot_{i}"):
+                        items_a_quitar_cot.append(i)
+
+                total_cotizacion += item["subtotal"]
+
+            for idx in sorted(items_a_quitar_cot, reverse=True):
+                st.session_state.carrito_cotizacion.pop(idx)
+            if items_a_quitar_cot:
+                st.rerun()
+
+            st.markdown("---")
+            st.markdown(f"### Total: {formato_cop(total_cotizacion)}")
+
+    with col_cot_der:
+        st.markdown("**Guardar Cotización**")
+
+        if not st.session_state.carrito_cotizacion:
+            st.info("Agrega productos para poder guardar la cotización.")
+        else:
+            clientes_cot = obtener_clientes(user_id)
+            dict_clientes_cot = {"Sin cliente": None}
+            if clientes_cot:
+                for c in clientes_cot:
+                    cid_c, nombre_c, tel_c = c[0], c[1], c[2]
+                    etiqueta = f"{nombre_c} — {tel_c}" if tel_c else nombre_c
+                    dict_clientes_cot[etiqueta] = cid_c
+
+            cliente_cot_sel = st.selectbox(
+                "Cliente (opcional)", options=list(dict_clientes_cot.keys()), key="cliente_cotizacion_sel",
+                help="Solo se requiere si vas a convertir esta cotización en una venta a crédito.",
+            )
+            cliente_id_cot = dict_clientes_cot[cliente_cot_sel]
+
+            total_cot_guardar = sum(i["subtotal"] for i in st.session_state.carrito_cotizacion)
+            st.markdown(f"**Total: {formato_cop(total_cot_guardar)}**")
+
+            if st.button("Guardar Cotización", type="primary", use_container_width=True):
+                try:
+                    cajero_id_cot = st.session_state.auth.get("cajero_id")
+                    cot_id_nueva = crear_cotizacion(
+                        user_id, cliente_id_cot, cajero_id_cot,
+                        st.session_state.carrito_cotizacion,
+                        subtotal=total_cot_guardar, descuento=0, total=total_cot_guardar,
+                    )
+                    st.session_state.carrito_cotizacion = []
+                    st.success(
+                        f"Cotización #{cot_id_nueva} guardada. Descárgala o conviértela en venta "
+                        "desde 'Cotizaciones Guardadas' más abajo."
+                    )
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error al guardar la cotización: {e}")
+
+    st.markdown("---")
+    st.subheader("Cotizaciones Guardadas")
+
+    df_cotizaciones = obtener_cotizaciones(user_id)
+
+    if df_cotizaciones.empty:
+        st.info("Aún no se ha guardado ninguna cotización.")
+    else:
+        pendientes_cot = df_cotizaciones[df_cotizaciones['convertida_a_venta_id'].isna()]
+        convertidas_cot = df_cotizaciones[df_cotizaciones['convertida_a_venta_id'].notna()]
+        st.markdown(f"**{len(pendientes_cot)}** pendiente(s) · **{len(convertidas_cot)}** ya convertida(s) en venta.")
+        st.markdown("---")
+
+        for _, cot in df_cotizaciones.iterrows():
+            cot_id_actual = int(cot['id'])
+            with st.container(border=True):
+                col_h1, col_h2, col_h3 = st.columns([3, 2, 2])
+                with col_h1:
+                    st.markdown(f"**Cotización #{cot_id_actual}** — {cot['cliente']}")
+                    st.caption(f"Total: {formato_cop(cot['total'])}")
+                with col_h2:
+                    st.caption(f"Creada: {cot['fecha']}")
+                with col_h3:
+                    if pd.notna(cot['convertida_a_venta_id']):
+                        st.success(f"Convertida en Venta #{int(cot['convertida_a_venta_id'])}")
+                    else:
+                        st.warning("Pendiente")
+
+                with st.expander("Ver detalle, descargar PDF o convertir a venta"):
+                    encabezado, df_items_cot = obtener_cotizacion_detalle(user_id, cot_id_actual)
+
+                    if df_items_cot is None or df_items_cot.empty:
+                        st.info("Esta cotización no tiene ítems.")
+                    else:
+                        st.dataframe(
+                            df_items_cot[['nombre_producto', 'cantidad', 'precio_unitario', 'subtotal']].rename(columns={
+                                'nombre_producto': 'Producto', 'cantidad': 'Cant.',
+                                'precio_unitario': 'Precio', 'subtotal': 'Subtotal',
+                            }),
+                            hide_index=True, use_container_width=True,
+                            column_config={
+                                "Precio": st.column_config.NumberColumn(format="$%,d"),
+                                "Subtotal": st.column_config.NumberColumn(format="$%,d"),
+                            }
+                        )
+
+                        st.markdown("---")
+                        st.markdown("#### Descargar PDF")
+
+                        cfg_cot = st.session_state.get("taller_config", {})
+                        logo_path_cot = cfg_cot.get("logo_path")
+                        if not logo_path_cot:
+                            with engine.connect() as conn_logo_cot:
+                                lr_cot = conn_logo_cot.execute(
+                                    text("SELECT logo_path, nit, telefono, direccion FROM Usuarios WHERE id = :uid"),
+                                    {"uid": user_id}
+                                ).fetchone()
+                                if lr_cot:
+                                    logo_path_cot = lr_cot[0]
+                                    cfg_cot = {
+                                        "logo_path": lr_cot[0], "nit": lr_cot[1] or "",
+                                        "telefono": lr_cot[2] or "", "direccion": lr_cot[3] or "",
+                                    }
+
+                        from pdf_utils import generar_ticket_venta as _generar_pdf_cotizacion
+                        pdf_bytes_cot = _generar_pdf_cotizacion(
+                            negocio_nombre=nombre_negocio,
+                            negocio_nit=cfg_cot.get("nit", ""),
+                            negocio_telefono=cfg_cot.get("telefono", ""),
+                            negocio_direccion=cfg_cot.get("direccion", ""),
+                            negocio_logo_path=logo_path_cot,
+                            venta_id=cot_id_actual,
+                            fecha=str(encabezado.fecha)[:10],
+                            cliente=encabezado.cliente or "Sin cliente",
+                            tipo_pago="",
+                            df_items=df_items_cot,
+                            subtotal=float(encabezado.subtotal),
+                            descuento=float(encabezado.descuento or 0),
+                            total=float(encabezado.total),
+                            es_cotizacion=True,
+                        )
+                        st.download_button(
+                            "Descargar Cotización en PDF", data=pdf_bytes_cot,
+                            file_name=f"Cotizacion_{cot_id_actual}.pdf", mime="application/pdf",
+                            key=f"pdf_cot_{cot_id_actual}", use_container_width=True,
+                        )
+
+                        if pd.isna(cot['convertida_a_venta_id']):
+                            st.markdown("---")
+                            st.markdown("#### Convertir en Venta Real")
+
+                            tipo_pago_conv = st.selectbox(
+                                "Tipo de Pago", ["Efectivo", "Transferencia", "Credito", "Mixto"],
+                                format_func=lambda x: "Crédito" if x == "Credito" else x,
+                                key=f"tipo_pago_conv_{cot_id_actual}"
+                            )
+
+                            tipo_cuota_conv, valor_cuota_conv = "Libre", 0
+                            fecha_limite_conv = hoy_bogota()
+                            monto_efectivo_conv, monto_transferencia_conv = 0, 0
+                            credito_bloqueado = False
+
+                            if tipo_pago_conv == "Credito":
+                                if not encabezado.cliente_id:
+                                    st.warning(
+                                        "Esta cotización no tiene cliente asignado — no se puede convertir "
+                                        "a crédito sin uno. Elimínala y crea una nueva con cliente, o cóbrala "
+                                        "de otra forma."
+                                    )
+                                    credito_bloqueado = True
+                                else:
+                                    tipo_cuota_conv = st.selectbox(
+                                        "Tipo de cuota", ["Libre", "Semanal", "Quincenal", "Mensual"],
+                                        key=f"tipo_cuota_conv_{cot_id_actual}"
+                                    )
+                                    if tipo_cuota_conv != "Libre":
+                                        valor_cuota_conv = st.number_input(
+                                            "Valor por cuota ($)", min_value=0.0, step=10000.0,
+                                            key=f"valor_cuota_conv_{cot_id_actual}"
+                                        )
+                                    fecha_limite_conv = st.date_input(
+                                        "Fecha límite", value=hoy_bogota(),
+                                        key=f"fecha_limite_conv_{cot_id_actual}"
+                                    )
+                            elif tipo_pago_conv == "Efectivo":
+                                monto_efectivo_conv = float(encabezado.total)
+                            elif tipo_pago_conv == "Transferencia":
+                                monto_transferencia_conv = float(encabezado.total)
+                            elif tipo_pago_conv == "Mixto":
+                                monto_efectivo_conv = st.number_input(
+                                    "Monto Efectivo ($)", min_value=0.0, max_value=float(encabezado.total),
+                                    step=1000.0, key=f"monto_efectivo_conv_{cot_id_actual}"
+                                )
+                                monto_transferencia_conv = float(encabezado.total) - monto_efectivo_conv
+
+                            if st.button(
+                                "Convertir en Venta", type="primary", use_container_width=True,
+                                key=f"btn_convertir_{cot_id_actual}", disabled=credito_bloqueado
+                            ):
+                                try:
+                                    cajero_id_conv = st.session_state.auth.get("cajero_id")
+                                    venta_id_nueva = convertir_cotizacion_a_venta(
+                                        user_id, cot_id_actual, tipo_pago_conv, cajero_id=cajero_id_conv,
+                                        monto_efectivo=monto_efectivo_conv,
+                                        monto_transferencia=monto_transferencia_conv,
+                                        tipo_cuota=tipo_cuota_conv, valor_cuota=valor_cuota_conv,
+                                        fecha_limite=fecha_limite_conv,
+                                    )
+                                    st.success(f"Cotización convertida en la Venta #{venta_id_nueva}.")
+                                    st.rerun()
+                                except ValueError as e:
+                                    st.error(str(e))
+                                except Exception as e:
+                                    st.error(f"Error al convertir: {e}")
+
+                            st.markdown("---")
+                            if st.button("Eliminar Cotización", key=f"del_cot_btn_{cot_id_actual}"):
+                                try:
+                                    eliminar_cotizacion(user_id, cot_id_actual)
+                                    st.success("Cotización eliminada.")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(str(e))

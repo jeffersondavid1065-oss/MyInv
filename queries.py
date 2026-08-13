@@ -884,6 +884,237 @@ def actualizar_pdf_nota_credito(venta_id, pdf_url, xml_url=None, prefijo=None, n
 
 
 # ==========================================
+# COTIZACIONES (previas a convertirse en una venta real)
+# ==========================================
+def crear_cotizacion(uid, cliente_id, cajero_id, items, subtotal, descuento, total):
+    """Guarda una cotización con sus ítems. A diferencia de una venta real,
+    NO descuenta stock de Productos - eso solo ocurre al convertirla en
+    venta (convertir_cotizacion_a_venta). `items`: lista de dicts con las
+    mismas llaves que usa el carrito del POS (producto_id, nombre,
+    codigo_barras, precio_unitario, costo_unitario, cantidad, subtotal,
+    iva_porcentaje). Retorna el id de la cotización (su número visible,
+    igual que Ventas.id)."""
+    engine = obtener_conexion()
+    with engine.begin() as conn:
+        is_sqlite = "sqlite" in str(engine.url)
+
+        if is_sqlite:
+            cur = conn.execute(text('''
+                INSERT INTO Cotizaciones (usuario_id, cliente_id, cajero_id, subtotal, descuento, total)
+                VALUES (:uid, :cid, :cajero, :sub, :desc, :total)
+            '''), {"uid": uid, "cid": cliente_id, "cajero": cajero_id,
+                   "sub": subtotal, "desc": descuento, "total": total})
+            cotizacion_id = cur.lastrowid
+        else:
+            res = conn.execute(text('''
+                INSERT INTO Cotizaciones (usuario_id, cliente_id, cajero_id, subtotal, descuento, total)
+                VALUES (:uid, :cid, :cajero, :sub, :desc, :total) RETURNING id
+            '''), {"uid": uid, "cid": cliente_id, "cajero": cajero_id,
+                   "sub": subtotal, "desc": descuento, "total": total})
+            cotizacion_id = res.scalar()
+
+        for item in items:
+            conn.execute(text('''
+                INSERT INTO Detalles_Cotizacion
+                (cotizacion_id, producto_id, nombre_producto, codigo_barras, cantidad,
+                 precio_unitario, costo_unitario, descuento, subtotal, iva_porcentaje)
+                VALUES (:cotid, :pid, :nom, :cod, :cant, :pvp, :costo, :desc, :sub, :iva)
+            '''), {
+                "cotid": cotizacion_id, "pid": item.get("producto_id"),
+                "nom": item["nombre"], "cod": item.get("codigo_barras"),
+                "cant": item["cantidad"], "pvp": item["precio_unitario"],
+                "costo": item.get("costo_unitario", 0),
+                "desc": item.get("descuento_item", 0) * item["cantidad"],
+                "sub": item["subtotal"], "iva": item.get("iva_porcentaje", 0) or 0,
+            })
+    invalidar_cache_cotizaciones()
+    return cotizacion_id
+
+
+@st.cache_data(ttl=20)
+def obtener_cotizaciones(uid):
+    """Lista de cotizaciones del negocio (convertidas o no), más recientes primero."""
+    engine = obtener_conexion()
+    with engine.connect() as conn:
+        return pd.read_sql_query(text('''
+            SELECT c.id, c.fecha, c.subtotal, c.descuento, c.total,
+                   COALESCE(cl.nombre, 'Sin cliente') as cliente,
+                   c.convertida_a_venta_id
+            FROM Cotizaciones c
+            LEFT JOIN Clientes cl ON c.cliente_id = cl.id
+            WHERE c.usuario_id = :uid
+            ORDER BY c.id DESC
+        '''), con=conn, params={"uid": uid})
+
+
+def obtener_cotizacion_detalle(uid, cotizacion_id):
+    """Encabezado + ítems de una cotización puntual. Sin caché: se consulta
+    al abrirla, no en cada rerun de la página."""
+    engine = obtener_conexion()
+    with engine.connect() as conn:
+        encabezado = conn.execute(text('''
+            SELECT c.id, c.fecha, c.subtotal, c.descuento, c.total, c.cliente_id,
+                   cl.nombre as cliente, cl.documento as cliente_documento,
+                   c.convertida_a_venta_id
+            FROM Cotizaciones c
+            LEFT JOIN Clientes cl ON c.cliente_id = cl.id
+            WHERE c.id = :cid AND c.usuario_id = :uid
+        '''), {"cid": cotizacion_id, "uid": uid}).fetchone()
+
+        if not encabezado:
+            return None, None
+
+        df_items = pd.read_sql_query(text('''
+            SELECT id, producto_id, nombre_producto, codigo_barras, cantidad,
+                   precio_unitario, costo_unitario, descuento, subtotal, iva_porcentaje
+            FROM Detalles_Cotizacion WHERE cotizacion_id = :cid
+        '''), con=conn, params={"cid": cotizacion_id})
+
+    return encabezado, df_items
+
+
+def convertir_cotizacion_a_venta(uid, cotizacion_id, tipo_pago, cajero_id=None,
+                                  monto_efectivo=0, monto_transferencia=0, cambio=0,
+                                  tipo_cuota="Libre", valor_cuota=0, fecha_limite=None):
+    """Convierte una cotización en una venta real (Ventas + Detalles_Venta),
+    descontando stock recién en este momento (una cotización nunca lo hizo,
+    así que valida que siga habiendo suficiente disponible). Si tipo_pago es
+    'Credito', también crea el registro en Creditos (requiere que la
+    cotización tenga un cliente asignado). Retorna el id de la nueva venta.
+    Lanza ValueError con un mensaje entendible si falta stock o cliente."""
+    engine = obtener_conexion()
+    with engine.begin() as conn:
+        is_sqlite = "sqlite" in str(engine.url)
+
+        cot = conn.execute(text('''
+            SELECT cliente_id, subtotal, descuento, total, convertida_a_venta_id
+            FROM Cotizaciones WHERE id = :cid AND usuario_id = :uid
+        '''), {"cid": cotizacion_id, "uid": uid}).fetchone()
+
+        if not cot:
+            raise ValueError("Esa cotización no existe.")
+        if cot.convertida_a_venta_id:
+            raise ValueError("Esta cotización ya fue convertida en una venta.")
+        if tipo_pago == "Credito" and not cot.cliente_id:
+            raise ValueError("Esta cotización no tiene cliente asignado - no se puede convertir a crédito sin uno.")
+
+        items = conn.execute(text('''
+            SELECT id, producto_id, nombre_producto, codigo_barras, cantidad,
+                   precio_unitario, costo_unitario, descuento, subtotal, iva_porcentaje
+            FROM Detalles_Cotizacion WHERE cotizacion_id = :cid
+        '''), {"cid": cotizacion_id}).fetchall()
+
+        for item in items:
+            if item.producto_id:
+                stock_actual = conn.execute(text(
+                    "SELECT stock_actual FROM Productos WHERE id = :pid AND usuario_id = :uid"
+                ), {"pid": item.producto_id, "uid": uid}).scalar()
+                if stock_actual is None or float(stock_actual) < float(item.cantidad):
+                    raise ValueError(
+                        f"Ya no hay suficiente stock de '{item.nombre_producto}' para convertir esta "
+                        f"cotización (disponible: {stock_actual if stock_actual is not None else 0})."
+                    )
+
+        estado_venta = "Credito" if tipo_pago == "Credito" else "Pagada"
+
+        if is_sqlite:
+            cur = conn.execute(text('''
+                INSERT INTO Ventas
+                (usuario_id, cliente_id, cajero_id, subtotal, descuento, total,
+                 tipo_pago, monto_efectivo, monto_transferencia, cambio, estado)
+                VALUES (:uid, :cid, :cajero, :sub, :desc, :total,
+                        :tipo, :efec, :trans, :cambio, :est)
+            '''), {
+                "uid": uid, "cid": cot.cliente_id, "cajero": cajero_id,
+                "sub": cot.subtotal, "desc": cot.descuento, "total": cot.total,
+                "tipo": tipo_pago, "efec": monto_efectivo, "trans": monto_transferencia,
+                "cambio": cambio, "est": estado_venta,
+            })
+            venta_id = cur.lastrowid
+        else:
+            res = conn.execute(text('''
+                INSERT INTO Ventas
+                (usuario_id, cliente_id, cajero_id, subtotal, descuento, total,
+                 tipo_pago, monto_efectivo, monto_transferencia, cambio, estado)
+                VALUES (:uid, :cid, :cajero, :sub, :desc, :total,
+                        :tipo, :efec, :trans, :cambio, :est) RETURNING id
+            '''), {
+                "uid": uid, "cid": cot.cliente_id, "cajero": cajero_id,
+                "sub": cot.subtotal, "desc": cot.descuento, "total": cot.total,
+                "tipo": tipo_pago, "efec": monto_efectivo, "trans": monto_transferencia,
+                "cambio": cambio, "est": estado_venta,
+            })
+            venta_id = res.scalar()
+
+        for item in items:
+            conn.execute(text('''
+                INSERT INTO Detalles_Venta
+                (venta_id, producto_id, nombre_producto, codigo_barras, cantidad,
+                 precio_unitario, costo_unitario, descuento, subtotal, iva_porcentaje)
+                VALUES (:vid, :pid, :nom, :cod, :cant, :pvp, :costo, :desc, :sub, :iva)
+            '''), {
+                "vid": venta_id, "pid": item.producto_id, "nom": item.nombre_producto,
+                "cod": item.codigo_barras, "cant": item.cantidad, "pvp": item.precio_unitario,
+                "costo": item.costo_unitario, "desc": item.descuento, "sub": item.subtotal,
+                "iva": item.iva_porcentaje,
+            })
+            if item.producto_id:
+                conn.execute(text('''
+                    UPDATE Productos SET stock_actual = stock_actual - :cant
+                    WHERE id = :pid AND stock_actual >= :cant
+                '''), {"cant": item.cantidad, "pid": item.producto_id})
+
+        if tipo_pago == "Credito":
+            conn.execute(text('''
+                INSERT INTO Creditos
+                (usuario_id, venta_id, cliente_id, total, saldo_pendiente,
+                 fecha_inicio, fecha_limite, tipo_cuota, valor_cuota, estado)
+                VALUES (:uid, :vid, :cid, :total, :saldo, :f_ini, :f_lim, :tipo_c, :val_c, 'Activo')
+            '''), {
+                "uid": uid, "vid": venta_id, "cid": cot.cliente_id,
+                "total": cot.total, "saldo": cot.total,
+                "f_ini": date.today().strftime('%Y-%m-%d'),
+                "f_lim": (fecha_limite or date.today()).strftime('%Y-%m-%d'),
+                "tipo_c": tipo_cuota, "val_c": valor_cuota,
+            })
+
+        conn.execute(text('''
+            UPDATE Cotizaciones SET convertida_a_venta_id = :vid, fecha_conversion = CURRENT_TIMESTAMP
+            WHERE id = :cid
+        '''), {"vid": venta_id, "cid": cotizacion_id})
+
+    invalidar_cache_cotizaciones()
+    invalidar_cache_ventas()
+    if tipo_pago == "Credito":
+        invalidar_cache_creditos()
+
+    return venta_id
+
+
+def eliminar_cotizacion(uid, cotizacion_id):
+    """Elimina una cotización (y sus ítems) que todavía no se ha convertido
+    en venta real. Lanza ValueError si ya fue convertida."""
+    engine = obtener_conexion()
+    with engine.begin() as conn:
+        convertida = conn.execute(text('''
+            SELECT convertida_a_venta_id FROM Cotizaciones WHERE id = :cid AND usuario_id = :uid
+        '''), {"cid": cotizacion_id, "uid": uid}).scalar()
+
+        if convertida:
+            raise ValueError("No se puede eliminar una cotización que ya fue convertida en venta.")
+
+        conn.execute(text("DELETE FROM Detalles_Cotizacion WHERE cotizacion_id = :cid"), {"cid": cotizacion_id})
+        conn.execute(text("DELETE FROM Cotizaciones WHERE id = :cid AND usuario_id = :uid"),
+                     {"cid": cotizacion_id, "uid": uid})
+    invalidar_cache_cotizaciones()
+
+
+def invalidar_cache_cotizaciones():
+    """Llamar tras crear, convertir o eliminar una cotización."""
+    obtener_cotizaciones.clear()
+
+
+# ==========================================
 # FUNCIONES DE INVALIDACIÓN DE CACHE
 # ==========================================
 def invalidar_cache_productos():
