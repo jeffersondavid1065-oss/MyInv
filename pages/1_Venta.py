@@ -162,8 +162,13 @@ with tab_pos:
                             c1, c2, c3 = st.columns([3, 1, 1])
                             with c1:
                                 st.write(f"**{prod['nombre']}**")
+                                detalle_parts = []
+                                if prod['categoria']:
+                                    detalle_parts.append(f"📂 {prod['categoria']}")
                                 if prod['codigo_barras']:
-                                    st.caption(f"Cód: {prod['codigo_barras']}")
+                                    detalle_parts.append(f"Cód: {prod['codigo_barras']}")
+                                if detalle_parts:
+                                    st.caption(" · ".join(detalle_parts))
                             with c2:
                                 st.write(formato_cop(prod['precio_venta']))
                                 color = "🔴" if prod['stock_actual'] <= 0 else "🟡" if prod['stock_actual'] <= prod['stock_minimo'] else "🟢"
