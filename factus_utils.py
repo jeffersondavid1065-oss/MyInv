@@ -4,13 +4,27 @@ Cada negocio (usuario_id) tiene su propia cuenta de Factus, guardada en
 Usuarios.factus_client_id / factus_client_secret / factus_username /
 factus_password — no hay credenciales globales.
 
-A diferencia de Alegra, en Factus POST /v2/bills/validate crea Y timbra la
-factura ante la DIAN en un solo paso (no hay estado intermedio "abierta"), el
-cliente y los ítems van embebidos en cada factura (no hay un recurso
-"contacto"/"ítem" persistente que crear antes en la cuenta de Factus), y no
-existe una API de pagos: el saldo pendiente / abonos de una venta a crédito
-se maneja 100% dentro de MyInv (ver Creditos/Abonos), sin sincronizar nada
-con Factus.
+Habla la API v1 de Factus (no v2): la cuenta de producción de Electricos.DR
+(primer negocio facturando en vivo) solo tiene habilitado acceso a v1 — v2
+responde 403 "Version de API no disponible para esta empresa" en cualquier
+endpoint para esa cuenta. Si en el futuro un negocio nuevo solo tiene v2,
+esto debe volverse configurable por negocio en vez de un único módulo v1.
+
+Particularidades de v1 frente a v2 (y frente a Alegra):
+- Los campos de cliente/producto van por ID numérico interno de Factus
+  (identification_document_id, legal_organization_id, tribute_id,
+  unit_measure_id, standard_code_id), no por código de texto — los IDs fijos
+  que usa este módulo salen de las tablas de referencia de Factus v1.
+- items.price va CON impuestos incluidos (igual que se guarda en MyInv), a
+  diferencia de v2 que pedía el precio base sin IVA.
+- Para anular una factura con nota crédito, v1 exige el bill_id interno de
+  Factus (no el número de factura) — se resuelve consultando la factura por
+  su número justo antes de crear la nota.
+- POST /v1/bills/validate crea Y timbra la factura ante la DIAN en un solo
+  paso (no hay estado intermedio "abierta"), el cliente y los ítems van
+  embebidos en cada factura, y no existe una API de pagos: el saldo
+  pendiente / abonos de una venta a crédito se maneja 100% dentro de MyInv
+  (ver Creditos/Abonos), sin sincronizar nada con Factus.
 """
 
 import base64
@@ -24,15 +38,16 @@ BASE_URL_PRODUCCION = "https://api.factus.com.co"
 # convertirse en un valor por negocio (columna en Usuarios) en vez de global.
 BASE_URL = BASE_URL_PRODUCCION
 
-# --- Catálogos DIAN usados al armar el payload (ver Tablas de referencia de Factus) ---
-TIPO_DOC_FACTUS = {"NIT": "31", "CC": "13"}
-ORGANIZACION_FACTUS = {"NIT": "1", "CC": "2"}  # 1=Persona jurídica, 2=Persona natural
-RESPONSABILIDADES_FACTUS = {
-    "COMMON_REGIME": ["O-23"],      # Agente de retención de IVA / responsable de IVA
-    "SIMPLIFIED_REGIME": ["R-99-PN"],  # No responsable
-}
-UNIDAD_MEDIDA_DEFECTO = "94"  # "unidad" — MyInv no distingue unidades finas ante la DIAN
-CODIGO_IMPUESTO_IVA = "01"
+# --- Catálogos de Factus v1 (ver Tablas de referencia de Factus v1) ---
+TIPO_DOC_ID_FACTUS = {"NIT": 6, "CC": 3}       # IDs tipos de documentos de identidad
+ORGANIZACION_ID_FACTUS = {"NIT": 1, "CC": 2}   # IDs tipos de organizaciones (1=Jurídica, 2=Natural)
+TRIBUTE_ID_CLIENTE = 21                         # ZZ - No aplica (fijo, MyInv no rastrea régimen por ID Factus)
+TRIBUTE_ID_IVA_ITEM = 1                         # IVA en items (tabla de tributos de productos)
+UNIT_MEASURE_ID_DEFECTO = 70                    # "unidad" (code 94) — MyInv no distingue unidades finas
+STANDARD_CODE_ID_DEFECTO = 1                    # Estándar de adopción del contribuyente
+DOCUMENTO_FACTURA = "01"                        # Factura electrónica de venta
+CORRECCION_ANULACION = 2                        # Código de corrección: anulación de factura electrónica
+CUSTOMIZATION_NC_CON_FACTURA = 20               # Nota crédito que referencia una factura electrónica
 PAYMENT_FORM_FACTUS = {"Efectivo": "1", "Transferencia": "1", "Mixto": "1", "Credito": "2"}
 PAYMENT_METHOD_FACTUS = {"Efectivo": "10", "Transferencia": "47", "Mixto": "10"}
 
@@ -91,13 +106,13 @@ def probar_conexion(client_id, client_secret, username, password):
 
 def listar_rangos_numeracion(client_id, client_secret, username, password):
     """Diagnóstico: consulta los rangos de numeración (autorización DIAN) que
-    tiene activos esta cuenta de Factus. Sin un rango activo, /v2/bills/validate
+    tiene activos esta cuenta de Factus. Sin un rango activo, /v1/bills/validate
     rechaza cualquier factura con un 422 genérico sin detalle de campo."""
     try:
         token, error = _obtener_token(client_id, client_secret, username, password)
         if not token:
             return False, f"No se pudo autenticar con Factus: {error}"
-        resp = requests.get(f"{BASE_URL}/v2/numbering-ranges", headers=_headers(token), timeout=15)
+        resp = requests.get(f"{BASE_URL}/v1/numbering-ranges", headers=_headers(token), timeout=15)
         if resp.status_code not in (200, 201):
             return False, f"Error consultando rangos ({resp.status_code}): {_mensaje_error(resp)}"
         return True, resp.json()
@@ -108,10 +123,9 @@ def listar_rangos_numeracion(client_id, client_secret, username, password):
 def crear_rango_numeracion(client_id, client_secret, username, password, prefix, resolution_number, current):
     """Registra ante Factus el rango de numeración (resolución DIAN) de
     facturación electrónica de este negocio — paso único que debe hacerse
-    una vez por cada cuenta de Factus nueva antes de poder facturar (sin
-    esto, /v2/bills/validate rechaza todo con 'Version de API no disponible
-    para esta empresa' o un 422 genérico). document='21' es el código fijo
-    de Factus para rango de facturación electrónica (factura de venta)."""
+    una vez por cada cuenta de Factus nueva antes de poder facturar.
+    document='21' es el código fijo de Factus para rango de facturación
+    electrónica (factura de venta)."""
     try:
         token, error = _obtener_token(client_id, client_secret, username, password)
         if not token:
@@ -122,7 +136,7 @@ def crear_rango_numeracion(client_id, client_secret, username, password, prefix,
             "resolution_number": resolution_number,
             "current": current,
         }
-        resp = requests.post(f"{BASE_URL}/v2/numbering-ranges", headers=_headers(token), json=payload, timeout=15)
+        resp = requests.post(f"{BASE_URL}/v1/numbering-ranges", headers=_headers(token), json=payload, timeout=15)
         if resp.status_code not in (200, 201):
             return False, f"El rango fue rechazado ({resp.status_code}): {_mensaje_error(resp)}"
         return True, resp.json().get("data", resp.json())
@@ -134,11 +148,11 @@ def _resolver_numbering_range_id(token, document_nombre):
     """numbering_range_id es opcional solo si la cuenta tiene un único rango
     activo para ese tipo de documento; si hay más de uno, Factus lo exige y
     rechaza la factura/nota con un 422 sin detalle si no se envía. Se
-    resuelve automáticamente contra /v2/numbering-ranges usando el rango
+    resuelve automáticamente contra /v1/numbering-ranges usando el rango
     activo más reciente. Devuelve None si no se puede determinar (la
     llamada seguirá intentando sin el campo, como antes)."""
     try:
-        resp = requests.get(f"{BASE_URL}/v2/numbering-ranges", headers=_headers(token), timeout=15)
+        resp = requests.get(f"{BASE_URL}/v1/numbering-ranges", headers=_headers(token), timeout=15)
         if resp.status_code != 200:
             return None
         rangos = resp.json().get("data", {}).get("data", [])
@@ -150,6 +164,21 @@ def _resolver_numbering_range_id(token, document_nombre):
             return None
         activos.sort(key=lambda r: r.get("id", 0), reverse=True)
         return activos[0]["id"]
+    except requests.RequestException:
+        return None
+
+
+def _obtener_bill_id(token, numero_factura):
+    """v1 exige el ID interno de la factura (no su número) para crear la nota
+    crédito que la anula — se resuelve consultando la factura por su número
+    justo antes de armar la nota."""
+    try:
+        resp = requests.get(f"{BASE_URL}/v1/bills/show/{numero_factura}", headers=_headers(token), timeout=15)
+        if resp.status_code != 200:
+            return None
+        data = resp.json().get("data", {})
+        bill = data.get("bill", data)
+        return bill.get("id")
     except requests.RequestException:
         return None
 
@@ -169,21 +198,17 @@ def _headers(token):
     return {"Authorization": f"Bearer {token}", "Accept": "application/json", "Content-Type": "application/json"}
 
 
-def _construir_customer(cliente, municipio_code=None):
+def _construir_customer(cliente):
     """Arma el objeto 'customer' embebido en la factura/nota crédito a partir
-    de un Cliente de MyInv.
-    municipio_code: código DIVIPOLA. La documentación de Factus lo marca como
-    opcional, pero algunas cuentas lo exigen igual — MyInv no rastrea ciudad
-    por cliente, así que se usa el municipio configurado para el negocio como
-    aproximación para todos sus clientes."""
+    de un Cliente de MyInv. No se envía municipality_id: en v1 ese campo pide
+    el ID interno de Factus para el municipio (no el código DIVIPOLA que
+    guarda MyInv), y la documentación lo marca como opcional."""
     tipo_doc = cliente.tipo_documento or "CC"
     customer = {
-        "identification_document_code": TIPO_DOC_FACTUS.get(tipo_doc, "13"),
+        "identification_document_id": TIPO_DOC_ID_FACTUS.get(tipo_doc, 3),
         "identification": cliente.documento,
-        "legal_organization_code": ORGANIZACION_FACTUS.get(tipo_doc, "2"),
-        "tribute_code": "ZZ",
-        "responsibilities": RESPONSABILIDADES_FACTUS.get(cliente.regimen, ["R-99-PN"]),
-        "country_code": "CO",
+        "legal_organization_id": ORGANIZACION_ID_FACTUS.get(tipo_doc, 2),
+        "tribute_id": TRIBUTE_ID_CLIENTE,
     }
     if tipo_doc == "NIT":
         customer["company"] = cliente.nombre
@@ -193,54 +218,52 @@ def _construir_customer(cliente, municipio_code=None):
         customer["names"] = cliente.nombre
     if cliente.email:
         customer["email"] = cliente.email
-    if municipio_code:
-        customer["municipality_code"] = municipio_code
     return customer
 
 
 def _construir_item(descripcion, cantidad, precio_unitario, descuento_linea, iva_porcentaje, codigo_ref):
     """Arma un renglón de la factura/nota crédito a partir de un renglón de
-    Detalles_Venta de MyInv. precio_unitario llega con IVA incluido (como se
-    guarda en MyInv) — se convierte al precio base sin IVA que espera Factus,
-    igual que se hacía para Alegra."""
+    Detalles_Venta de MyInv. A diferencia de v2, v1 espera items.price CON
+    impuestos incluidos — igual que se guarda en MyInv — así que no hay que
+    quitarle el IVA. quantity debe ser entero en v1 (MyInv no vende
+    fracciones de unidad en la práctica, así que se redondea)."""
     iva_porcentaje = float(iva_porcentaje or 0)
     cantidad = float(cantidad or 1)
     precio_unitario = float(precio_unitario or 0)
-    precio_base = precio_unitario / (1 + iva_porcentaje / 100) if iva_porcentaje > 0 else precio_unitario
 
     item = {
         "code_reference": codigo_ref,
         "name": str(descripcion)[:250],
-        "quantity": f"{cantidad:.2f}",
-        "discount_rate": "0.00",
-        "price": f"{precio_base:.2f}",
-        "unit_measure_code": UNIDAD_MEDIDA_DEFECTO,
-        "standard_code": "999",
+        "quantity": int(round(cantidad)),
+        "discount_rate": 0.0,
+        "price": round(precio_unitario, 2),
+        "tax_rate": f"{iva_porcentaje:.2f}",
+        "unit_measure_id": UNIT_MEASURE_ID_DEFECTO,
+        "standard_code_id": STANDARD_CODE_ID_DEFECTO,
+        "is_excluded": 0 if iva_porcentaje > 0 else 1,
+        "tribute_id": TRIBUTE_ID_IVA_ITEM,
     }
 
     if cantidad and precio_unitario and descuento_linea:
         descuento_unitario = float(descuento_linea) / cantidad
         descuento_pct = (descuento_unitario / precio_unitario) * 100
         if descuento_pct > 0:
-            item["discount_rate"] = f"{min(descuento_pct, 100):.2f}"
+            item["discount_rate"] = round(min(descuento_pct, 100), 2)
 
-    if iva_porcentaje > 0:
-        item["taxes"] = [{"code": CODIGO_IMPUESTO_IVA, "rate": f"{iva_porcentaje:.2f}"}]
-    else:
-        item["taxes"] = [{"code": CODIGO_IMPUESTO_IVA, "rate": "0.00", "is_excluded": True}]
     return item
 
 
-def _construir_payment_details(tipo_pago, total, fecha_vencimiento=None):
+def _campos_pago(tipo_pago, fecha_vencimiento=None):
+    """v1 manda la forma/método de pago como campos sueltos del documento
+    (no un array payment_details como v2)."""
     forma = PAYMENT_FORM_FACTUS.get(tipo_pago, "1")
-    detalle = {
+    campos = {
         "payment_form": forma,
-        "payment_method_code": PAYMENT_METHOD_FACTUS.get(tipo_pago, "1") if forma == "1" else "1",
-        "amount": f"{float(total):.2f}",
+        "payment_method_code": PAYMENT_METHOD_FACTUS.get(tipo_pago, "10") if forma == "1" else "1",
     }
     if forma == "2" and fecha_vencimiento:
-        detalle["due_date"] = fecha_vencimiento.isoformat() if hasattr(fecha_vencimiento, "isoformat") else str(fecha_vencimiento)
-    return [detalle]
+        campos["payment_due_date"] = fecha_vencimiento.isoformat() if hasattr(fecha_vencimiento, "isoformat") else str(fecha_vencimiento)
+    return campos
 
 
 def _pdf_base64_a_data_url(pdf_base64):
@@ -260,7 +283,7 @@ def _xml_base64_a_data_url(xml_base64):
 
 def _descargar_pdf(token, numero_factura):
     try:
-        resp = requests.get(f"{BASE_URL}/v2/bills/{numero_factura}/download-pdf", headers=_headers(token), timeout=20)
+        resp = requests.get(f"{BASE_URL}/v1/bills/download-pdf/{numero_factura}", headers=_headers(token), timeout=20)
         if resp.status_code == 200:
             return resp.json().get("data", {}).get("pdf_base_64_encoded")
     except requests.RequestException:
@@ -270,7 +293,7 @@ def _descargar_pdf(token, numero_factura):
 
 def _descargar_xml(token, numero_factura):
     try:
-        resp = requests.get(f"{BASE_URL}/v2/bills/{numero_factura}/download-xml", headers=_headers(token), timeout=20)
+        resp = requests.get(f"{BASE_URL}/v1/bills/download-xml/{numero_factura}", headers=_headers(token), timeout=20)
         if resp.status_code == 200:
             return resp.json().get("data", {}).get("xml_base_64_encoded")
     except requests.RequestException:
@@ -280,7 +303,7 @@ def _descargar_xml(token, numero_factura):
 
 def _descargar_pdf_nota_credito(token, numero_nc):
     try:
-        resp = requests.get(f"{BASE_URL}/v2/credit-notes/{numero_nc}/download-pdf", headers=_headers(token), timeout=20)
+        resp = requests.get(f"{BASE_URL}/v1/credit-notes/download-pdf/{numero_nc}", headers=_headers(token), timeout=20)
         if resp.status_code == 200:
             return resp.json().get("data", {}).get("pdf_base_64_encoded")
     except requests.RequestException:
@@ -290,7 +313,7 @@ def _descargar_pdf_nota_credito(token, numero_nc):
 
 def _descargar_xml_nota_credito(token, numero_nc):
     try:
-        resp = requests.get(f"{BASE_URL}/v2/credit-notes/{numero_nc}/download-xml", headers=_headers(token), timeout=20)
+        resp = requests.get(f"{BASE_URL}/v1/credit-notes/download-xml/{numero_nc}", headers=_headers(token), timeout=20)
         if resp.status_code == 200:
             return resp.json().get("data", {}).get("xml_base_64_encoded")
     except requests.RequestException:
@@ -347,8 +370,6 @@ def facturar_venta(uid, venta_id):
         if credito and credito.fecha_limite:
             fecha_vencimiento = credito.fecha_limite
 
-    municipio_code = queries.obtener_municipio_taller(uid)
-
     try:
         token, error = _obtener_token(client_id, client_secret, username, password)
         if not token:
@@ -356,33 +377,33 @@ def facturar_venta(uid, venta_id):
 
         payload = {
             "reference_code": f"MYINV-{uid}-{venta_id}",
-            "document": "01",
-            "payment_details": _construir_payment_details(venta.tipo_pago, venta.total, fecha_vencimiento),
-            "customer": _construir_customer(cliente, municipio_code),
+            "document": DOCUMENTO_FACTURA,
+            "customer": _construir_customer(cliente),
             "items": items_payload,
         }
+        payload.update(_campos_pago(venta.tipo_pago, fecha_vencimiento))
         if getattr(venta, "notas", None):
             payload["observation"] = str(venta.notas)[:250]
         numbering_range_id = _resolver_numbering_range_id(token, "Factura de Venta")
         if numbering_range_id:
             payload["numbering_range_id"] = numbering_range_id
 
-        resp = requests.post(f"{BASE_URL}/v2/bills/validate", headers=_headers(token), json=payload, timeout=30)
+        resp = requests.post(f"{BASE_URL}/v1/bills/validate", headers=_headers(token), json=payload, timeout=30)
         if resp.status_code not in (200, 201):
             queries.guardar_resultado_factura(venta_id, estado="error")
             return False, f"La factura fue rechazada ({resp.status_code}): {_mensaje_error(resp)}"
 
         data = resp.json().get("data", {})
         bill = data.get("bill", data)
-        numero_factura = bill.get("number") or bill.get("bill_number")
-        cufe = bill.get("cufe") or (bill.get("legal_stamp") or {}).get("cufe")
-        is_validated = bill.get("is_validated", True)
+        numero_factura = bill.get("number")
+        cufe = bill.get("cufe")
+        validada = bill.get("status") == 1
 
-        if not is_validated:
+        if not validada:
             queries.guardar_resultado_factura(venta_id, estado="error")
             return False, (
                 "La factura se creó pero la DIAN no la validó todavía. Revisa el estado en Factus "
-                "e inténtalo de nuevo (usa 'Eliminar no validada' desde Factus si necesitas reintentar)."
+                "e inténtalo de nuevo (usa 'Eliminar factura no validada' desde Factus si necesitas reintentar)."
             )
 
         pdf_url = _pdf_base64_a_data_url(_descargar_pdf(token, numero_factura)) if numero_factura else None
@@ -444,7 +465,6 @@ def anular_factura_venta(uid, venta_id):
         for i, r in enumerate(renglones, start=1)
     ]
 
-    municipio_code = queries.obtener_municipio_taller(uid)
     reference_code_nc = f"MYINV-NC-{uid}-{venta_id}"
 
     try:
@@ -452,19 +472,24 @@ def anular_factura_venta(uid, venta_id):
         if not token:
             return False, f"No se pudo autenticar con Factus: {error}"
 
+        bill_id = _obtener_bill_id(token, venta.factura_numero)
+        if not bill_id:
+            return False, "No se pudo obtener la factura original en Factus para generar la nota crédito."
+
         payload = {
             "reference_code": reference_code_nc,
-            "correction_concept_code": "2",  # Anulación de factura electrónica
-            "bill_number": venta.factura_numero,
-            "payment_details": _construir_payment_details(venta.tipo_pago or "Efectivo", venta.total),
-            "customer": _construir_customer(cliente, municipio_code),
+            "correction_concept_code": CORRECCION_ANULACION,
+            "customization_id": CUSTOMIZATION_NC_CON_FACTURA,
+            "bill_id": bill_id,
+            "payment_method_code": PAYMENT_METHOD_FACTUS.get(venta.tipo_pago or "Efectivo", "10"),
+            "customer": _construir_customer(cliente),
             "items": items_payload,
         }
         numbering_range_id = _resolver_numbering_range_id(token, "Nota Crédito")
         if numbering_range_id:
             payload["numbering_range_id"] = numbering_range_id
 
-        resp = requests.post(f"{BASE_URL}/v2/credit-notes/validate", headers=_headers(token), json=payload, timeout=30)
+        resp = requests.post(f"{BASE_URL}/v1/credit-notes/validate", headers=_headers(token), json=payload, timeout=30)
         if resp.status_code not in (200, 201):
             return False, f"La nota crédito fue rechazada ({resp.status_code}): {_mensaje_error(resp)}"
 
