@@ -252,6 +252,59 @@ with tab_factus:
                 st.rerun()
 
         st.markdown("---")
+        st.markdown("**Rango de numeración (resolución DIAN):**")
+        st.caption(
+            "Antes de poder facturar, esta cuenta de Factus necesita tener registrado el rango "
+            "de numeración que la DIAN autorizó para este NIT (prefijo, número de resolución y "
+            "consecutivo inicial). Es un paso único por cuenta — repítelo solo si la DIAN emite "
+            "una resolución nueva."
+        )
+
+        if st.button("Ver rangos activos", use_container_width=False):
+            with st.spinner("Consultando..."):
+                ok, resultado = factus_utils.listar_rangos_numeracion(
+                    creds.factus_client_id, creds.factus_client_secret,
+                    creds.factus_username, creds.factus_password,
+                )
+            if ok:
+                rangos = (resultado or {}).get("data", {}).get("data", [])
+                if rangos:
+                    for r in rangos:
+                        estado = "Vencido" if r.get("is_expired") else ("Activo" if r.get("is_active") else "Inactivo")
+                        st.write(
+                            f"- Prefijo **{r.get('prefix')}** — resolución {r.get('resolution_number')} "
+                            f"— rango {r.get('from')} a {r.get('to')} — {estado}"
+                        )
+                else:
+                    st.warning("Esta cuenta todavía no tiene ningún rango de numeración registrado.")
+            else:
+                st.error(resultado)
+
+        with st.form("form_rango_numeracion"):
+            col_r1, col_r2, col_r3 = st.columns(3)
+            with col_r1:
+                prefix_input = st.text_input("Prefijo", max_chars=4, placeholder="Ej: SETP")
+            with col_r2:
+                resolution_input = st.text_input("N° de resolución DIAN", placeholder="Ej: 18760000009")
+            with col_r3:
+                current_input = st.number_input("Consecutivo inicial", min_value=1, step=1, value=1)
+
+            if st.form_submit_button("Registrar rango de numeración", type="primary"):
+                if not prefix_input or not resolution_input:
+                    st.warning("Completa el prefijo y el número de resolución.")
+                else:
+                    with st.spinner("Registrando ante Factus..."):
+                        ok, resultado = factus_utils.crear_rango_numeracion(
+                            creds.factus_client_id, creds.factus_client_secret,
+                            creds.factus_username, creds.factus_password,
+                            prefix_input.strip(), resolution_input.strip(), int(current_input),
+                        )
+                    if ok:
+                        st.success(f"Rango {prefix_input.strip()} registrado. Ya puedes facturar electrónicamente.")
+                    else:
+                        st.error(resultado)
+
+        st.markdown("---")
         st.markdown("**Cambiar de cuenta:**")
 
     with st.form("form_factus"):

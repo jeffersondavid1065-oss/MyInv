@@ -104,6 +104,31 @@ def listar_rangos_numeracion(client_id, client_secret, username, password):
         return False, f"Error de conexión: {e}"
 
 
+def crear_rango_numeracion(client_id, client_secret, username, password, prefix, resolution_number, current):
+    """Registra ante Factus el rango de numeración (resolución DIAN) de
+    facturación electrónica de este negocio — paso único que debe hacerse
+    una vez por cada cuenta de Factus nueva antes de poder facturar (sin
+    esto, /v2/bills/validate rechaza todo con 'Version de API no disponible
+    para esta empresa' o un 422 genérico). document='21' es el código fijo
+    de Factus para rango de facturación electrónica (factura de venta)."""
+    try:
+        token, error = _obtener_token(client_id, client_secret, username, password)
+        if not token:
+            return False, f"No se pudo autenticar con Factus: {error}"
+        payload = {
+            "document": "21",
+            "prefix": prefix,
+            "resolution_number": resolution_number,
+            "current": current,
+        }
+        resp = requests.post(f"{BASE_URL}/v2/numbering-ranges", headers=_headers(token), json=payload, timeout=15)
+        if resp.status_code not in (200, 201):
+            return False, f"El rango fue rechazado ({resp.status_code}): {_mensaje_error(resp)}"
+        return True, resp.json().get("data", resp.json())
+    except requests.RequestException as e:
+        return False, f"Error de conexión: {e}"
+
+
 def _resolver_numbering_range_id(token, document_nombre):
     """numbering_range_id es opcional solo si la cuenta tiene un único rango
     activo para ese tipo de documento; si hay más de uno, Factus lo exige y
