@@ -18,10 +18,11 @@ import requests
 
 BASE_URL_SANDBOX = "https://api-sandbox.factus.com.co"
 BASE_URL_PRODUCCION = "https://api.factus.com.co"
-# Mientras no haya negocios facturando en vivo, todo apunta al sandbox
-# (gratis e ilimitado, espejo exacto de producción). Cambiar a
-# BASE_URL_PRODUCCION cuando un negocio tenga credenciales reales de Factus.
-BASE_URL = BASE_URL_SANDBOX
+# Electricos.DR es el primer negocio facturando en vivo, con cuenta de
+# producción real de Factus — todo MyInv apunta a producción desde aquí.
+# Si en el futuro se necesita un negocio en modo pruebas, esto debe
+# convertirse en un valor por negocio (columna en Usuarios) en vez de global.
+BASE_URL = BASE_URL_PRODUCCION
 
 # --- Catálogos DIAN usados al armar el payload (ver Tablas de referencia de Factus) ---
 TIPO_DOC_FACTUS = {"NIT": "31", "CC": "13"}
