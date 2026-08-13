@@ -188,12 +188,30 @@ with tab_pos:
                     else:
                         st.warning(f"No se encontró '{busqueda}'.")
 
-        st.markdown("---")
-        st.subheader("Carrito")
+    with col_der:
+        st.subheader("Cobrar")
 
         if not st.session_state.carrito:
-            st.info("El carrito está vacío.")
+            st.info("Agrega productos al carrito para cobrar.")
         else:
+            total_carrito = sum(i["subtotal"] for i in st.session_state.carrito)
+            desc_global = st.session_state.get("descuento_pos", 0)
+            # Si el descuento es por porcentaje, recalcular
+            pct_g = st.session_state.get("descuento_pct_global", 0)
+            if st.session_state.get("tipo_desc_global") == "% Porcentaje" and pct_g > 0:
+                desc_global = total_carrito * (pct_g / 100)
+            total_final = max(0, total_carrito - desc_global)
+            _, iva_total_cobrar = calcular_desglose_iva(st.session_state.carrito, total_final, total_carrito)
+
+            st.markdown(f"**Total: {formato_cop(total_final)}**")
+            if desc_global > 0:
+                st.caption(f"Descuento aplicado: {formato_cop(desc_global)}")
+            if iva_total_cobrar > 1:
+                st.caption(f"Incluye IVA: {formato_cop(iva_total_cobrar)}")
+
+            st.markdown("---")
+            st.subheader("Carrito")
+
             # ==========================================
             # TIPO DE DESCUENTO POR ÍTEM
             # ==========================================
@@ -339,26 +357,6 @@ with tab_pos:
                     limpiar_carrito()
                     st.rerun()
 
-    with col_der:
-        st.subheader("Cobrar")
-
-        if not st.session_state.carrito:
-            st.info("Agrega productos al carrito para cobrar.")
-        else:
-            total_carrito = sum(i["subtotal"] for i in st.session_state.carrito)
-            desc_global = st.session_state.get("descuento_pos", 0)
-            # Si el descuento es por porcentaje, recalcular
-            pct_g = st.session_state.get("descuento_pct_global", 0)
-            if st.session_state.get("tipo_desc_global") == "% Porcentaje" and pct_g > 0:
-                desc_global = total_carrito * (pct_g / 100)
-            total_final = max(0, total_carrito - desc_global)
-            _, iva_total_cobrar = calcular_desglose_iva(st.session_state.carrito, total_final, total_carrito)
-
-            st.markdown(f"**Total: {formato_cop(total_final)}**")
-            if desc_global > 0:
-                st.caption(f"Descuento aplicado: {formato_cop(desc_global)}")
-            if iva_total_cobrar > 1:
-                st.caption(f"Incluye IVA: {formato_cop(iva_total_cobrar)}")
             st.markdown("---")
 
             tipo_pago = st.selectbox(
