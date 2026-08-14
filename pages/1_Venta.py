@@ -22,12 +22,14 @@ from queries import (
     mapa_numeros_venta,
     numero_venta_negocio,
     id_venta_desde_numero,
+    invalidar_cache_clientes,
 )
 from utils import aplicar_estilos, verificar_auth
 from tz_utils import hoy_bogota, ahora_bogota_naive
 from factus_utils import (
     facturar_venta, anular_factura_venta,
     refrescar_url_factura, refrescar_url_nota_credito, mostrar_documento,
+    obtener_credenciales, consultar_adquiriente_dian,
 )
 from iva_utils import calcular_desglose_iva, calcular_iva_desde_detalles, texto_tasa_iva
 
@@ -118,6 +120,90 @@ def agregar_al_carrito(producto_id, nombre, codigo_barras, precio, stock_actual,
 
 def limpiar_carrito():
     st.session_state.carrito = []
+
+TIPOS_DOC_POS = ["CC", "NIT", "CE", "PAS", "TI"]
+REGIMENES_POS = {"No responsable de IVA": "SIMPLIFIED_REGIME", "Responsable de IVA": "COMMON_REGIME"}
+
+
+def registrar_cliente_rapido_pos(key_suffix):
+    """Expander para dar de alta un cliente sin salir del Punto de Venta,
+    con la misma consulta a la DIAN que en Clientes y Créditos para
+    autocompletar nombre y correo a partir del documento. Al guardar, deja
+    en session_state el nombre/teléfono del cliente recién creado (bajo
+    '_cliente_pos_creado') para que el selector que llamó a esta función lo
+    preseleccione."""
+    with st.expander("+ Registrar cliente nuevo"):
+        creds_dian = obtener_credenciales(user_id)
+        if creds_dian[0]:
+            st.caption("Escribe el documento y consulta a la DIAN para traer nombre y correo automáticamente.")
+            col_d1, col_d2, col_d3 = st.columns([1, 2, 1])
+            with col_d1:
+                tipo_doc_d = st.selectbox("Tipo de documento", TIPOS_DOC_POS, key=f"pos_tipo_doc_dian_{key_suffix}")
+            with col_d2:
+                num_doc_d = st.text_input("Número de documento", key=f"pos_num_doc_dian_{key_suffix}")
+            with col_d3:
+                st.markdown("<div style='height: 1.9em'></div>", unsafe_allow_html=True)
+                buscar_d = st.button("Buscar en la DIAN", key=f"pos_buscar_dian_{key_suffix}", use_container_width=True)
+            if buscar_d:
+                if num_doc_d.strip():
+                    with st.spinner("Consultando la DIAN..."):
+                        ok_d, res_d = consultar_adquiriente_dian(*creds_dian, tipo_doc_d, num_doc_d.strip())
+                    if ok_d:
+                        st.session_state[f"pos_rn_{key_suffix}"] = res_d.get("nombre") or ""
+                        st.session_state[f"pos_rt_{key_suffix}"] = tipo_doc_d
+                        st.session_state[f"pos_rd_{key_suffix}"] = num_doc_d.strip()
+                        st.session_state[f"pos_re_{key_suffix}"] = res_d.get("email") or ""
+                        st.success("Datos encontrados en la DIAN. Revisa y completa lo que falte abajo.")
+                        st.rerun()
+                    else:
+                        st.error(res_d)
+                else:
+                    st.warning("Escribe el número de documento.")
+            st.markdown("---")
+
+        with st.form(f"pos_form_nuevo_cliente_{key_suffix}", clear_on_submit=True):
+            col_c1, col_c2 = st.columns(2)
+            with col_c1:
+                nombre_c = st.text_input("Nombre completo *", value=st.session_state.get(f"pos_rn_{key_suffix}", ""))
+                telefono_c = st.text_input("Teléfono")
+                email_c = st.text_input("Email (opcional)", value=st.session_state.get(f"pos_re_{key_suffix}", ""))
+            with col_c2:
+                doc_c = st.text_input("CC / NIT", value=st.session_state.get(f"pos_rd_{key_suffix}", ""))
+                tipo_prev = st.session_state.get(f"pos_rt_{key_suffix}", "CC")
+                tipo_doc_c = st.selectbox(
+                    "Tipo de documento", options=TIPOS_DOC_POS,
+                    index=TIPOS_DOC_POS.index(tipo_prev) if tipo_prev in TIPOS_DOC_POS else 0,
+                )
+                dv_c = st.text_input("Dígito de verificación", help="Solo aplica para NIT.")
+                regimen_sel = st.selectbox("Régimen tributario", options=list(REGIMENES_POS.keys()))
+
+            if st.form_submit_button("Guardar Cliente", type="primary"):
+                if nombre_c:
+                    try:
+                        with engine.begin() as conn:
+                            conn.execute(text("""
+                                INSERT INTO Clientes
+                                (usuario_id, nombre, telefono, email, documento, tipo_documento, regimen, digito_verificacion)
+                                VALUES (:uid, :nom, :tel, :email, :doc, :tipo_doc, :regimen, :dv)
+                            """), {
+                                "uid": user_id, "nom": nombre_c,
+                                "tel": telefono_c or None,
+                                "email": email_c or None,
+                                "doc": doc_c or None,
+                                "tipo_doc": tipo_doc_c,
+                                "regimen": REGIMENES_POS[regimen_sel],
+                                "dv": dv_c or None,
+                            })
+                        invalidar_cache_clientes()
+                        for k in (f"pos_rn_{key_suffix}", f"pos_rt_{key_suffix}", f"pos_rd_{key_suffix}", f"pos_re_{key_suffix}"):
+                            st.session_state.pop(k, None)
+                        st.session_state["_cliente_pos_creado"] = (nombre_c, telefono_c)
+                        st.success(f"Cliente '{nombre_c}' registrado.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al guardar: {e}")
+                else:
+                    st.warning("El nombre es obligatorio.")
 
 # ==========================================
 # TABS
@@ -401,21 +487,29 @@ with tab_pos:
             valor_cuota = 0
             fecha_limite = hoy_bogota()
 
+            cliente_creado_pos = st.session_state.pop("_cliente_pos_creado", None)
+
             if tipo_pago in ("Efectivo", "Transferencia", "Mixto"):
                 clientes_fact = obtener_clientes(user_id)
-                if clientes_fact:
-                    dict_clientes_fact = {"Sin cliente (venta directa)": None}
-                    for c in clientes_fact:
-                        cid_c, nombre_c, tel_c = c[0], c[1], c[2]
-                        etiqueta = f"{nombre_c} — {tel_c}" if tel_c else nombre_c
-                        dict_clientes_fact[etiqueta] = cid_c
-                    cliente_fact_sel = st.selectbox(
-                        "Cliente (opcional, para poder facturar electrónicamente)",
-                        options=list(dict_clientes_fact.keys()),
-                        key="venta_cliente_opcional_sel",
-                        help="Solo se puede emitir factura electrónica si la venta queda ligada a un cliente registrado con documento.",
-                    )
-                    cliente_id = dict_clientes_fact[cliente_fact_sel]
+                dict_clientes_fact = {"Sin cliente (venta directa)": None}
+                for c in clientes_fact:
+                    cid_c, nombre_c, tel_c = c[0], c[1], c[2]
+                    etiqueta = f"{nombre_c} — {tel_c}" if tel_c else nombre_c
+                    dict_clientes_fact[etiqueta] = cid_c
+                opciones_fact = list(dict_clientes_fact.keys())
+                if cliente_creado_pos:
+                    nombre_cc, tel_cc = cliente_creado_pos
+                    etiqueta_cc = f"{nombre_cc} — {tel_cc}" if tel_cc else nombre_cc
+                    if etiqueta_cc in opciones_fact:
+                        st.session_state["venta_cliente_opcional_sel"] = etiqueta_cc
+                cliente_fact_sel = st.selectbox(
+                    "Cliente (opcional, para poder facturar electrónicamente)",
+                    options=opciones_fact,
+                    key="venta_cliente_opcional_sel",
+                    help="Solo se puede emitir factura electrónica si la venta queda ligada a un cliente registrado con documento.",
+                )
+                cliente_id = dict_clientes_fact[cliente_fact_sel]
+                registrar_cliente_rapido_pos("efectivo")
 
             if tipo_pago == "Efectivo":
                 monto_efectivo_input = st.number_input(
@@ -451,15 +545,23 @@ with tab_pos:
                         etiqueta = f"{nombre_c} — {tel_c}" if tel_c else nombre_c
                         dict_clientes[etiqueta] = cid_c
 
+                    opciones_credito = list(dict_clientes.keys())
+                    if cliente_creado_pos:
+                        nombre_cc, tel_cc = cliente_creado_pos
+                        etiqueta_cc = f"{nombre_cc} — {tel_cc}" if tel_cc else nombre_cc
+                        if etiqueta_cc in opciones_credito:
+                            st.session_state["venta_credito_cliente_sel"] = etiqueta_cc
+
                     cliente_sel = st.selectbox(
                         "Cliente",
-                        options=list(dict_clientes.keys()),
+                        options=opciones_credito,
                         key="venta_credito_cliente_sel",
                         help="Escribe el nombre o teléfono para buscar en la lista.",
                     )
                     cliente_id = dict_clientes[cliente_sel]
                     cliente_nombre_sel = cliente_sel.split(" — ")[0]
                     st.caption(f"🧾 Este crédito quedará registrado a nombre de: **{cliente_nombre_sel}**")
+                    registrar_cliente_rapido_pos("credito")
 
                     tipo_cuota = st.selectbox(
                         "Tipo de cuota", ["Libre", "Semanal", "Quincenal", "Mensual"],
@@ -475,7 +577,8 @@ with tab_pos:
                         key="venta_credito_fecha_limite"
                     )
                 else:
-                    st.warning("No tienes clientes registrados.")
+                    st.warning("No tienes clientes registrados. Registra uno abajo para poder venderle a crédito.")
+                    registrar_cliente_rapido_pos("credito")
                     tipo_pago = None
 
             elif tipo_pago == "Mixto":
