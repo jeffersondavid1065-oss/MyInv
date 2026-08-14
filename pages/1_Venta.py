@@ -89,8 +89,6 @@ if "limpiar_buscador" not in st.session_state:
     st.session_state.limpiar_buscador = False
 if "carrito" not in st.session_state:
     st.session_state.carrito = []
-if "ultima_venta_id" not in st.session_state:
-    st.session_state.ultima_venta_id = None
 
 def agregar_al_carrito(producto_id, nombre, codigo_barras, precio, stock_actual, costo=0, cantidad=1, iva_porcentaje=0):
     for item in st.session_state.carrito:
@@ -608,11 +606,6 @@ with tab_pos:
                     invalidar_cache_ventas()
                     invalidar_cache_productos()
 
-                    st.session_state.ultima_venta_id = venta_id
-                    st.session_state.ultima_venta_total = total_final
-                    st.session_state.ultima_venta_cambio = cambio
-                    st.session_state.ultima_venta_tipo = tipo_pago
-
                     limpiar_carrito()
                     st.success(f"Venta #{num_venta(venta_id)} registrada.")
                     if cambio > 0:
@@ -632,122 +625,6 @@ with tab_pos:
                     st.error(str(ve))
                 except Exception as e:
                     st.error(f"Error: {e}")
-
-            # Última venta + ticket
-            if st.session_state.ultima_venta_id:
-                st.markdown("---")
-                st.subheader("Última Venta")
-                vid = st.session_state.ultima_venta_id
-
-                with engine.connect() as conn:
-                    detalles = pd.read_sql_query(text("""
-                        SELECT nombre_producto, cantidad, precio_unitario, descuento, subtotal, iva_porcentaje
-                        FROM Detalles_Venta WHERE venta_id = :vid
-                    """), con=conn, params={"vid": vid})
-                    venta_info = conn.execute(text("""
-                        SELECT subtotal, descuento, total, tipo_pago,
-                               monto_efectivo, cambio, fecha
-                        FROM Ventas WHERE id = :vid
-                    """), {"vid": vid}).fetchone()
-
-                st.write(f"**Venta #{num_venta(vid)}** — {st.session_state.ultima_venta_tipo}")
-                if not detalles.empty:
-                    detalles_mostrar = detalles if iva_activo else detalles.drop(columns=["iva_porcentaje"])
-                    config_detalle = {
-                        "Precio": st.column_config.NumberColumn("Precio", format="$%,d"),
-                        "Descuento": st.column_config.NumberColumn("Descuento", format="$%,d"),
-                        "Subtotal": st.column_config.NumberColumn("Subtotal", format="$%,d"),
-                    }
-                    if iva_activo:
-                        config_detalle["IVA%"] = st.column_config.NumberColumn("IVA%", format="%.0f%%")
-                    st.dataframe(detalles_mostrar.rename(columns={
-                        "nombre_producto": "Producto", "cantidad": "Cant.",
-                        "precio_unitario": "Precio", "descuento": "Descuento", "subtotal": "Subtotal",
-                        "iva_porcentaje": "IVA%",
-                    }), hide_index=True, use_container_width=True,
-                    column_config=config_detalle)
-                if venta_info and float(venta_info[1] or 0) > 0:
-                    st.caption(f"Descuento total aplicado: {formato_cop(venta_info[1])}")
-                _, iva_ultima_venta = calcular_iva_desde_detalles(detalles, st.session_state.ultima_venta_total)
-                if iva_ultima_venta > 1:
-                    st.caption(f"IVA incluido ({texto_tasa_iva(detalles)}): {formato_cop(iva_ultima_venta)}")
-                st.success(f"**Total: {formato_cop(st.session_state.ultima_venta_total)}**")
-                if st.session_state.ultima_venta_cambio > 0:
-                    st.info(f"Cambio: {formato_cop(st.session_state.ultima_venta_cambio)}")
-
-                try:
-                    from pdf_utils import generar_ticket_venta
-                    cfg = st.session_state.get("taller_config", {})
-                    logo_path = cfg.get("logo_path")
-                    if not logo_path:
-                        with engine.connect() as conn_logo:
-                            lr = conn_logo.execute(
-                                text("SELECT logo_path, nit, telefono, direccion FROM Usuarios WHERE id = :uid"),
-                                {"uid": user_id}
-                            ).fetchone()
-                            if lr:
-                                logo_path = lr[0]
-                                cfg = {"logo_path": lr[0], "nit": lr[1] or "", "telefono": lr[2] or "", "direccion": lr[3] or ""}
-
-                    if venta_info:
-                        pdf_bytes = generar_ticket_venta(
-                            negocio_nombre=nombre_negocio,
-                            negocio_nit=cfg.get("nit", ""),
-                            negocio_telefono=cfg.get("telefono", ""),
-                            negocio_direccion=cfg.get("direccion", ""),
-                            negocio_logo_path=logo_path,
-                            venta_id=num_venta(vid),
-                            fecha=venta_info[6],
-                            cliente="",
-                            tipo_pago=venta_info[3],
-                            monto_efectivo=float(venta_info[4] or 0),
-                            cambio=float(venta_info[5] or 0),
-                            df_items=detalles,
-                            subtotal=float(venta_info[0] or 0),
-                            descuento=float(venta_info[1] or 0),
-                            total=float(venta_info[2] or 0),
-                            total_iva=iva_ultima_venta,
-                        )
-                        st.download_button(
-                            label="Descargar Ticket PDF",
-                            data=pdf_bytes,
-                            file_name=f"Ticket_{num_venta(vid)}.pdf",
-                            mime="application/pdf",
-                            use_container_width=True
-                        )
-                except Exception as e:
-                    st.caption(f"PDF no disponible: {e}")
-
-                if fe_activa:
-                    st.markdown("---")
-                    venta_factura = conn_factura = None
-                    with engine.connect() as conn_factura:
-                        venta_factura = conn_factura.execute(text("""
-                            SELECT cliente_id, factura_estado, factura_alegra_id, factura_pdf_url, factura_xml_url
-                            FROM Ventas WHERE id = :vid
-                        """), {"vid": vid}).fetchone()
-
-                    if venta_factura and venta_factura[1] == "emitida":
-                        st.success(f"Factura electrónica emitida ante la DIAN (#{venta_factura[2]}).")
-                        pdf_mostrar, xml_mostrar = refrescar_url_factura(user_id, vid)
-                        col_fpdf, col_fxml = st.columns(2)
-                        mostrar_documento(col_fpdf, "Ver PDF de la factura", pdf_mostrar, f"Factura_Venta_{num_venta(vid)}.pdf", "application/pdf")
-                        mostrar_documento(col_fxml, "Descargar XML (DIAN)", xml_mostrar, f"Factura_Venta_{num_venta(vid)}.xml", "application/xml")
-                    elif not venta_factura or not venta_factura[0]:
-                        st.caption("Esta venta no tiene cliente asociado — no se puede facturar electrónicamente.")
-                    else:
-                        if st.button("Emitir factura electrónica", use_container_width=True):
-                            with st.spinner("Creando factura electrónica..."):
-                                ok, msg = facturar_venta(user_id, vid)
-                            if ok:
-                                st.success(msg)
-                            else:
-                                st.warning(msg)
-                            st.rerun()
-
-                if st.button("Nueva Venta", use_container_width=True, type="primary"):
-                    st.session_state.ultima_venta_id = None
-                    st.rerun()
 
 # ==========================================
 # TAB 2: HISTORIAL DEL DÍA
