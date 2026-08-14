@@ -39,7 +39,7 @@ BASE_URL_PRODUCCION = "https://api.factus.com.co"
 BASE_URL = BASE_URL_PRODUCCION
 
 # --- Catálogos de Factus v1 (ver Tablas de referencia de Factus v1) ---
-TIPO_DOC_ID_FACTUS = {"NIT": 6, "CC": 3}       # IDs tipos de documentos de identidad
+TIPO_DOC_ID_FACTUS = {"NIT": 6, "CC": 3, "CE": 5, "PAS": 7, "TI": 2}  # IDs tipos de documentos de identidad
 ORGANIZACION_ID_FACTUS = {"NIT": 1, "CC": 2}   # IDs tipos de organizaciones (1=Jurídica, 2=Natural)
 TRIBUTE_ID_CLIENTE = 21                         # ZZ - No aplica (fijo, MyInv no rastrea régimen por ID Factus)
 TRIBUTE_ID_IVA_ITEM = 1                         # IVA en items (tabla de tributos de productos)
@@ -100,6 +100,34 @@ def probar_conexion(client_id, client_secret, username, password):
         if token:
             return True, "Conexión exitosa."
         return False, f"Credenciales rechazadas: {error}"
+    except requests.RequestException as e:
+        return False, f"Error de conexión: {e}"
+
+
+def consultar_adquiriente_dian(client_id, client_secret, username, password, tipo_documento, numero_documento):
+    """Consulta directamente a la DIAN (a través de Factus) el nombre/razón
+    social y correo asociados a un documento, para autocompletar el registro
+    de un cliente nuevo sin escribirlos a mano. Solo devuelve esos dos campos
+    — dígito de verificación, régimen y dirección siguen siendo manuales."""
+    doc_id = TIPO_DOC_ID_FACTUS.get(tipo_documento)
+    if not doc_id or not str(numero_documento or "").strip():
+        return False, "Tipo o número de documento inválido."
+    try:
+        token, error = _obtener_token(client_id, client_secret, username, password)
+        if not token:
+            return False, f"No se pudo autenticar con Factus: {error}"
+        resp = requests.get(
+            f"{BASE_URL}/v1/dian/acquirer",
+            headers=_headers(token),
+            params={"identification_document_id": doc_id, "identification_number": str(numero_documento).strip()},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            return False, f"La DIAN no encontró datos para ese documento ({resp.status_code}): {_mensaje_error(resp)}"
+        data = resp.json().get("data", {})
+        if not data.get("name"):
+            return False, "La DIAN no devolvió datos para ese documento."
+        return True, {"nombre": data.get("name"), "email": data.get("email")}
     except requests.RequestException as e:
         return False, f"Error de conexión: {e}"
 

@@ -15,7 +15,10 @@ from queries import (
 )
 from utils import aplicar_estilos, verificar_auth, bloquear_si_cajero
 from tz_utils import hoy_bogota
-from factus_utils import refrescar_url_factura, refrescar_url_nota_credito, mostrar_documento
+from factus_utils import (
+    refrescar_url_factura, refrescar_url_nota_credito, mostrar_documento,
+    obtener_credenciales, consultar_adquiriente_dian,
+)
 
 st.set_page_config(page_title="Clientes y Créditos", layout="wide")
 aplicar_estilos()
@@ -400,7 +403,46 @@ with tab_estado_cuenta:
 with tab_nuevo:
     st.subheader("Registrar Nuevo Cliente")
 
-    st.caption("Sube el PDF del RUT y la IA rellena NIT, dígito de verificación, régimen y dirección — o llena el formulario a mano.")
+    TIPOS_DOC_CLIENTE = ["CC", "NIT", "CE", "PAS", "TI"]
+
+    creds_dian = obtener_credenciales(user_id)
+    if creds_dian[0]:
+        st.caption(
+            "Escribe el tipo y número de documento y consulta directamente a la DIAN para "
+            "traer el nombre/razón social y correo — no hace falta escribirlos a mano. "
+            "(No trae dígito de verificación, régimen ni dirección — esos se completan abajo.)"
+        )
+        col_dian1, col_dian2, col_dian3 = st.columns([1, 2, 1])
+        with col_dian1:
+            tipo_doc_dian = st.selectbox("Tipo de documento", options=TIPOS_DOC_CLIENTE, key="tipo_doc_dian_sel")
+        with col_dian2:
+            numero_doc_dian = st.text_input("Número de documento", key="numero_doc_dian_input")
+        with col_dian3:
+            st.markdown("<div style='height: 1.9em'></div>", unsafe_allow_html=True)
+            buscar_dian = st.button("Buscar en la DIAN", use_container_width=True)
+        if buscar_dian:
+            if numero_doc_dian.strip():
+                with st.spinner("Consultando la DIAN..."):
+                    ok_dian, resultado_dian = consultar_adquiriente_dian(
+                        *creds_dian, tipo_doc_dian, numero_doc_dian.strip()
+                    )
+                if ok_dian:
+                    st.session_state.rut_nombre = resultado_dian.get("nombre") or ""
+                    st.session_state.rut_tipo_doc = tipo_doc_dian
+                    st.session_state.rut_documento = numero_doc_dian.strip()
+                    st.session_state.rut_email = resultado_dian.get("email") or ""
+                    for k in ("rut_dv", "rut_regimen", "rut_direccion", "rut_telefono"):
+                        st.session_state.pop(k, None)
+                    st.success("Datos encontrados en la DIAN. Revisa y completa lo que falte abajo antes de guardar.")
+                    st.rerun()
+                else:
+                    st.error(resultado_dian)
+            else:
+                st.warning("Escribe el número de documento.")
+
+        st.markdown("---")
+
+    st.caption("O sube el PDF del RUT y la IA rellena NIT, dígito de verificación, régimen y dirección — o llena el formulario a mano.")
     rut_pdf = st.file_uploader("PDF del RUT (opcional)", type=["pdf"], key="rut_uploader")
     if rut_pdf and st.button("Leer RUT con IA", key="btn_leer_rut"):
         with st.spinner("Gemini está leyendo el RUT..."):
@@ -426,7 +468,6 @@ with tab_nuevo:
     st.markdown("---")
 
     REGIMENES_CLIENTE = {"No responsable de IVA": "SIMPLIFIED_REGIME", "Responsable de IVA": "COMMON_REGIME"}
-    TIPOS_DOC_CLIENTE = ["CC", "NIT", "CE", "PAS", "TI"]
 
     with st.form("form_nuevo_cliente", clear_on_submit=True):
         col_c1, col_c2 = st.columns(2)
