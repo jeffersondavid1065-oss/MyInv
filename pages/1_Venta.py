@@ -176,33 +176,44 @@ with tab_pos:
                     ]
                     if not df_filtrado.empty:
                         st.markdown(f"**{len(df_filtrado)} resultado(s):**")
-                        for _, prod in df_filtrado.iterrows():
-                            c1, c2, c3 = st.columns([3, 1, 1])
-                            with c1:
-                                st.write(f"**{prod['nombre']}**")
-                                detalle_parts = []
-                                if prod['categoria']:
-                                    detalle_parts.append(f"📂 {prod['categoria']}")
-                                if prod['codigo_barras']:
-                                    detalle_parts.append(f"Cód: {prod['codigo_barras']}")
-                                if detalle_parts:
-                                    st.caption(" · ".join(detalle_parts))
-                            with c2:
-                                st.write(formato_cop(prod['precio_venta']))
-                                color = "🔴" if prod['stock_actual'] <= 0 else "🟡" if prod['stock_actual'] <= prod['stock_minimo'] else "🟢"
-                                st.caption(f"{color} {prod['stock_actual']} uds.")
-                            with c3:
-                                if st.button("Agregar", key=f"add_{prod['id']}"):
-                                    agregar_al_carrito(
-                                        producto_id=int(prod['id']),
-                                        nombre=prod['nombre'],
-                                        codigo_barras=prod['codigo_barras'] or "",
-                                        precio=float(prod['precio_venta']),
-                                        stock_actual=int(prod['stock_actual']),
-                                        costo=float(prod['costo_compra'] or 0),
-                                        iva_porcentaje=float(prod.get('iva_porcentaje', 0) or 0),
-                                    )
-                                    st.rerun()
+                        st.markdown("""
+                            <style>
+                            .st-key-resultados_busqueda_pos [data-testid="stVerticalBlock"] {
+                                gap: 0.3rem !important;
+                            }
+                            .st-key-resultados_busqueda_pos [data-testid="stVerticalBlockBorderWrapper"] {
+                                gap: 0.3rem !important;
+                            }
+                            </style>
+                        """, unsafe_allow_html=True)
+                        with st.container(key="resultados_busqueda_pos"):
+                            for _, prod in df_filtrado.iterrows():
+                                c1, c2, c3 = st.columns([3, 1, 1])
+                                with c1:
+                                    st.write(f"**{prod['nombre']}**")
+                                    detalle_parts = []
+                                    if prod['categoria']:
+                                        detalle_parts.append(f"📂 {prod['categoria']}")
+                                    if prod['codigo_barras']:
+                                        detalle_parts.append(f"Cód: {prod['codigo_barras']}")
+                                    if detalle_parts:
+                                        st.caption(" · ".join(detalle_parts))
+                                with c2:
+                                    st.write(formato_cop(prod['precio_venta']))
+                                    color = "🔴" if prod['stock_actual'] <= 0 else "🟡" if prod['stock_actual'] <= prod['stock_minimo'] else "🟢"
+                                    st.caption(f"{color} {prod['stock_actual']} uds.")
+                                with c3:
+                                    if st.button("Agregar", key=f"add_{prod['id']}"):
+                                        agregar_al_carrito(
+                                            producto_id=int(prod['id']),
+                                            nombre=prod['nombre'],
+                                            codigo_barras=prod['codigo_barras'] or "",
+                                            precio=float(prod['precio_venta']),
+                                            stock_actual=int(prod['stock_actual']),
+                                            costo=float(prod['costo_compra'] or 0),
+                                            iva_porcentaje=float(prod.get('iva_porcentaje', 0) or 0),
+                                        )
+                                        st.rerun()
                     else:
                         st.warning(f"No se encontró '{busqueda}'.")
 
