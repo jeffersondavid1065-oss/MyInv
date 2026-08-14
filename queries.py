@@ -764,6 +764,54 @@ def obtener_facturas_periodo(uid, fecha_inicio, fecha_fin):
 
 
 @st.cache_data(ttl=30)
+def mapa_numeros_venta(uid):
+    """Mapea cada Ventas.id de este negocio a su número de venta propio
+    (1, 2, 3... en el orden en que se registraron). Ventas.id es una sola
+    secuencia AUTOINCREMENT compartida por TODOS los negocios de la
+    plataforma, así que el ID interno de la primera venta real de un negocio
+    nuevo puede ser un número grande sin relación con cuántas ventas tiene
+    ese negocio — este mapa da el número que sí tiene sentido mostrarle al
+    negocio. El ID interno nunca se muestra en pantalla, pero sigue siendo
+    la llave real usada por dentro (Detalles_Venta, Creditos, reference_code
+    de Factus)."""
+    engine = obtener_conexion()
+    with engine.connect() as conn:
+        ids = conn.execute(text("""
+            SELECT id FROM Ventas WHERE usuario_id = :uid ORDER BY id ASC
+        """), {"uid": uid}).scalars().all()
+    return {vid: i for i, vid in enumerate(ids, start=1)}
+
+
+def numero_venta_negocio(uid, venta_id):
+    """Número de venta propio del negocio para una sola venta (ver
+    mapa_numeros_venta). Se consulta directo en vez de pasar por el mapa
+    cacheado — útil justo después de crear/anular una venta, sin esperar a
+    que se refresque la caché de 30s."""
+    if venta_id is None:
+        return None
+    engine = obtener_conexion()
+    with engine.connect() as conn:
+        return conn.execute(text("""
+            SELECT COUNT(*) FROM Ventas WHERE usuario_id = :uid AND id <= :vid
+        """), {"uid": uid, "vid": venta_id}).scalar()
+
+
+def id_venta_desde_numero(uid, numero_venta):
+    """Inverso de numero_venta_negocio(): dado el número de venta propio del
+    negocio (el único que ve el usuario), devuelve el Ventas.id real. Se usa
+    cuando el usuario escribe/busca una venta por ese número (ej. en
+    Devoluciones o en el buscador de Facturación Electrónica)."""
+    if not numero_venta or numero_venta < 1:
+        return None
+    engine = obtener_conexion()
+    with engine.connect() as conn:
+        return conn.execute(text("""
+            SELECT id FROM Ventas WHERE usuario_id = :uid ORDER BY id ASC
+            LIMIT 1 OFFSET :offset
+        """), {"uid": uid, "offset": numero_venta - 1}).scalar()
+
+
+@st.cache_data(ttl=30)
 def obtener_historial_devoluciones(uid, fecha_inicio, fecha_fin):
     """Ventas anuladas (devoluciones) del período, con la factura que originaron
     y la nota crédito que las anuló (si Alegra la emitió), para la pestaña de
@@ -1333,6 +1381,7 @@ def invalidar_cache_ventas():
     obtener_ganancia_acumulada.clear()
     obtener_facturas_periodo.clear()
     obtener_historial_devoluciones.clear()
+    mapa_numeros_venta.clear()
 
 
 def invalidar_cache_clientes():

@@ -19,6 +19,9 @@ from queries import (
     obtener_cotizacion_detalle,
     convertir_cotizacion_a_venta,
     eliminar_cotizacion,
+    mapa_numeros_venta,
+    numero_venta_negocio,
+    id_venta_desde_numero,
 )
 from utils import aplicar_estilos, verificar_auth
 from tz_utils import hoy_bogota, ahora_bogota_naive
@@ -35,6 +38,21 @@ user_id, nombre_negocio = verificar_auth()
 engine = obtener_conexion()
 fe_activa = tiene_fe_habilitada(user_id)
 iva_activo = tiene_iva_habilitado(user_id)
+numeros_venta = mapa_numeros_venta(user_id)
+
+
+def num_venta(vid):
+    """Número de venta propio de este negocio (1, 2, 3...) — es lo único que
+    se le muestra al usuario. El ID interno de Ventas.id (compartido por
+    todos los negocios de la plataforma) queda oculto pero sigue siendo la
+    llave real por debajo. Usa numero_venta_negocio() como respaldo para una
+    venta recién creada en este mismo rerun, que todavía no está en el mapa
+    calculado al inicio del script."""
+    if vid is None or (isinstance(vid, float) and pd.isna(vid)):
+        return None
+    vid = int(vid)
+    return numeros_venta.get(vid) or numero_venta_negocio(user_id, vid)
+
 
 def formato_cop(numero):
     return f"${float(numero):,.0f}".replace(",", ".")
@@ -585,7 +603,7 @@ with tab_pos:
                     st.session_state.ultima_venta_tipo = tipo_pago
 
                     limpiar_carrito()
-                    st.success(f"Venta #{venta_id} registrada.")
+                    st.success(f"Venta #{num_venta(venta_id)} registrada.")
                     if cambio > 0:
                         st.info(f"Cambio: {formato_cop(cambio)}")
 
@@ -621,7 +639,7 @@ with tab_pos:
                         FROM Ventas WHERE id = :vid
                     """), {"vid": vid}).fetchone()
 
-                st.write(f"**Venta #{vid}** — {st.session_state.ultima_venta_tipo}")
+                st.write(f"**Venta #{num_venta(vid)}** — {st.session_state.ultima_venta_tipo}")
                 if not detalles.empty:
                     detalles_mostrar = detalles if iva_activo else detalles.drop(columns=["iva_porcentaje"])
                     config_detalle = {
@@ -667,7 +685,7 @@ with tab_pos:
                             negocio_telefono=cfg.get("telefono", ""),
                             negocio_direccion=cfg.get("direccion", ""),
                             negocio_logo_path=logo_path,
-                            venta_id=vid,
+                            venta_id=num_venta(vid),
                             fecha=venta_info[6],
                             cliente="",
                             tipo_pago=venta_info[3],
@@ -682,7 +700,7 @@ with tab_pos:
                         st.download_button(
                             label="Descargar Ticket PDF",
                             data=pdf_bytes,
-                            file_name=f"Ticket_{vid}.pdf",
+                            file_name=f"Ticket_{num_venta(vid)}.pdf",
                             mime="application/pdf",
                             use_container_width=True
                         )
@@ -702,8 +720,8 @@ with tab_pos:
                         st.success(f"Factura electrónica emitida ante la DIAN (#{venta_factura[2]}).")
                         pdf_mostrar, xml_mostrar = refrescar_url_factura(user_id, vid)
                         col_fpdf, col_fxml = st.columns(2)
-                        mostrar_documento(col_fpdf, "Ver PDF de la factura", pdf_mostrar, f"Factura_Venta_{vid}.pdf", "application/pdf")
-                        mostrar_documento(col_fxml, "Descargar XML (DIAN)", xml_mostrar, f"Factura_Venta_{vid}.xml", "application/xml")
+                        mostrar_documento(col_fpdf, "Ver PDF de la factura", pdf_mostrar, f"Factura_Venta_{num_venta(vid)}.pdf", "application/pdf")
+                        mostrar_documento(col_fxml, "Descargar XML (DIAN)", xml_mostrar, f"Factura_Venta_{num_venta(vid)}.xml", "application/xml")
                     elif not venta_factura or not venta_factura[0]:
                         st.caption("Esta venta no tiene cliente asociado — no se puede facturar electrónicamente.")
                     else:
@@ -747,9 +765,12 @@ with tab_historial:
         df_hoy['fe_texto'] = df_hoy['factura_estado'].fillna('Sin facturar').replace({
             'emitida': 'Emitida', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
         })
-        cols_hoy = ['id', 'fecha', 'cliente', 'total']
+        # numero_venta reemplaza el ID interno (compartido por todos los
+        # negocios de la plataforma) por el número propio de este negocio.
+        df_hoy['numero_venta'] = df_hoy['id'].map(numeros_venta)
+        cols_hoy = ['numero_venta', 'fecha', 'cliente', 'total']
         rename_hoy = {
-            'id': 'N°', 'fecha': 'Hora', 'cliente': 'Cliente', 'total': 'Total',
+            'numero_venta': 'N°', 'fecha': 'Hora', 'cliente': 'Cliente', 'total': 'Total',
             'tipo_pago': 'Pago', 'estado': 'Estado',
             'fe_texto': 'Factura Electrónica', 'numero_factura_texto': 'N° Factura',
             'factura_pdf_url': 'Factura PDF', 'factura_xml_url': 'Factura XML',
@@ -773,7 +794,7 @@ with tab_historial:
         if not df_hoy.empty:
             st.markdown("**Descargar factura de una venta específica:**")
             dict_desc_hoy = {
-                f"Venta #{r['id']} — {formato_cop(r['total'])} — {r['cliente']}": i
+                f"Venta #{num_venta(r['id'])} — {formato_cop(r['total'])} — {r['cliente']}": i
                 for i, r in df_hoy.iterrows()
             }
             desc_sel_hoy_str = st.selectbox(
@@ -783,13 +804,13 @@ with tab_historial:
             if desc_sel_hoy_str:
                 fila_desc_hoy = df_hoy.loc[dict_desc_hoy[desc_sel_hoy_str]]
                 col_dh1, col_dh2 = st.columns(2)
-                mostrar_documento(col_dh1, "Descargar PDF", fila_desc_hoy['factura_pdf_url'], f"Factura_Venta_{fila_desc_hoy['id']}.pdf", "application/pdf")
-                mostrar_documento(col_dh2, "Descargar XML", fila_desc_hoy['factura_xml_url'], f"Factura_Venta_{fila_desc_hoy['id']}.xml", "application/xml")
+                mostrar_documento(col_dh1, "Descargar PDF", fila_desc_hoy['factura_pdf_url'], f"Factura_Venta_{num_venta(fila_desc_hoy['id'])}.pdf", "application/pdf")
+                mostrar_documento(col_dh2, "Descargar XML", fila_desc_hoy['factura_xml_url'], f"Factura_Venta_{num_venta(fila_desc_hoy['id'])}.xml", "application/xml")
 
         st.markdown("---")
         st.markdown("**Reimprimir ticket:**")
         dict_ventas = {
-            f"Venta #{r['id']} — {formato_cop(r['total'])} — {r['cliente']}": r['id']
+            f"Venta #{num_venta(r['id'])} — {formato_cop(r['total'])} — {r['cliente']}": r['id']
             for _, r in df_hoy.iterrows()
         }
         venta_reimp = st.selectbox(
@@ -852,7 +873,7 @@ with tab_historial:
                     negocio_telefono=cfg.get("telefono", ""),
                     negocio_direccion=cfg.get("direccion", ""),
                     negocio_logo_path=logo_path,
-                    venta_id=venta_id_reimp,
+                    venta_id=num_venta(venta_id_reimp),
                     fecha=info_reimp[6] if info_reimp else "",
                     cliente="",
                     tipo_pago=info_reimp[3] if info_reimp else "",
@@ -867,7 +888,7 @@ with tab_historial:
                 st.download_button(
                     label="Reimprimir Ticket PDF",
                     data=pdf_reimp,
-                    file_name=f"Ticket_{venta_id_reimp}.pdf",
+                    file_name=f"Ticket_{num_venta(venta_id_reimp)}.pdf",
                     mime="application/pdf",
                     use_container_width=True
                 )
@@ -917,12 +938,13 @@ with tab_devolucion:
                 return 'No aplica (sin FE)'
 
             df_devoluciones['nc_estado_texto'] = df_devoluciones.apply(_estado_nc, axis=1)
+            df_devoluciones['numero_venta'] = df_devoluciones['id'].map(numeros_venta)
 
             df_dev_mostrar = df_devoluciones[[
-                'id', 'fecha', 'cliente', 'total', 'numero_factura_texto',
+                'numero_venta', 'fecha', 'cliente', 'total', 'numero_factura_texto',
                 'nc_estado_texto', 'numero_nc_texto',
                 'notas']].rename(columns={
-                'id': 'Venta #', 'fecha': 'Fecha', 'cliente': 'Cliente', 'total': 'Total',
+                'numero_venta': 'Venta #', 'fecha': 'Fecha', 'cliente': 'Cliente', 'total': 'Total',
                 'numero_factura_texto': 'N° Factura', 'nc_estado_texto': 'Nota Crédito',
                 'numero_nc_texto': 'N° Nota Crédito',
                 'notas': 'Motivo',
@@ -937,7 +959,7 @@ with tab_devolucion:
             if not nc_con_documento.empty:
                 st.markdown("**Descargar nota crédito de una devolución específica:**")
                 dict_desc_nc = {
-                    f"Venta #{r['id']} — {formato_cop(r['total'])} — {r['cliente']}": i
+                    f"Venta #{num_venta(r['id'])} — {formato_cop(r['total'])} — {r['cliente']}": i
                     for i, r in nc_con_documento.iterrows()
                 }
                 desc_sel_nc_str = st.selectbox(
@@ -947,14 +969,14 @@ with tab_devolucion:
                 if desc_sel_nc_str:
                     fila_desc_nc = nc_con_documento.loc[dict_desc_nc[desc_sel_nc_str]]
                     col_dn1, col_dn2 = st.columns(2)
-                    mostrar_documento(col_dn1, "Descargar PDF", fila_desc_nc['nota_credito_pdf_url'], f"NotaCredito_Venta_{fila_desc_nc['id']}.pdf", "application/pdf")
-                    mostrar_documento(col_dn2, "Descargar XML", fila_desc_nc['nota_credito_xml_url'], f"NotaCredito_Venta_{fila_desc_nc['id']}.xml", "application/xml")
+                    mostrar_documento(col_dn1, "Descargar PDF", fila_desc_nc['nota_credito_pdf_url'], f"NotaCredito_Venta_{num_venta(fila_desc_nc['id'])}.pdf", "application/pdf")
+                    mostrar_documento(col_dn2, "Descargar XML", fila_desc_nc['nota_credito_xml_url'], f"NotaCredito_Venta_{num_venta(fila_desc_nc['id'])}.xml", "application/xml")
 
             pendientes_nc = df_devoluciones[df_devoluciones['nc_estado_texto'] == 'Pendiente']
             if not pendientes_nc.empty:
                 st.warning(f"{len(pendientes_nc)} devolución(es) con factura electrónica sin nota crédito confirmada.")
                 dict_reintento_nc = {
-                    f"Venta #{r['id']} — {r['cliente']} — {formato_cop(r['total'])}": r['id']
+                    f"Venta #{num_venta(r['id'])} — {r['cliente']} — {formato_cop(r['total'])}": r['id']
                     for _, r in pendientes_nc.iterrows()
                 }
                 reintento_nc_sel = st.selectbox(
@@ -988,10 +1010,12 @@ with tab_devolucion:
         """), con=conn, params={"uid": user_id, "hoy": hoy_bogota().strftime('%Y-%m-%d')})
 
     if not df_hoy_dev.empty:
+        df_hoy_dev = df_hoy_dev.copy()
+        df_hoy_dev['numero_venta'] = df_hoy_dev['id'].map(numeros_venta)
         st.markdown("**Ventas de hoy** (para identificar el número de venta):")
         st.dataframe(
-            df_hoy_dev.rename(columns={
-                'id': 'N°', 'fecha': 'Hora', 'cliente': 'Cliente',
+            df_hoy_dev[['numero_venta', 'fecha', 'cliente', 'total', 'tipo_pago']].rename(columns={
+                'numero_venta': 'N°', 'fecha': 'Hora', 'cliente': 'Cliente',
                 'total': 'Total', 'tipo_pago': 'Pago'
             }),
             hide_index=True, use_container_width=True,
@@ -1005,12 +1029,15 @@ with tab_devolucion:
     st.markdown("---")
     col_d1, col_d2 = st.columns(2)
     with col_d1:
-        venta_num = st.text_input("Número de venta", placeholder="Ej: 25")
+        venta_num = st.text_input("Número de venta", placeholder="Ej: 3")
     with col_d2:
         motivo = st.text_input("Motivo (opcional)", placeholder="Ej: Producto defectuoso")
 
     if venta_num and venta_num.isdigit():
-        vid_dev = int(venta_num)
+        # El usuario escribe el número de venta propio del negocio (el que ve
+        # en pantalla), no el ID interno — se traduce al ID real por debajo.
+        numero_tipeado_dev = int(venta_num)
+        vid_dev = id_venta_desde_numero(user_id, numero_tipeado_dev)
 
         with engine.connect() as conn:
             venta_dev = conn.execute(text("""
@@ -1034,7 +1061,7 @@ with tab_devolucion:
 
         if venta_dev:
             if venta_dev[2] == "Anulada":
-                st.warning(f"La venta #{vid_dev} ya fue anulada.")
+                st.warning(f"La venta #{num_venta(vid_dev)} ya fue anulada.")
                 if venta_dev[6] == "anulada" and venta_dev[10]:
                     numero_factura_dev = f"{venta_dev[8] or ''}{venta_dev[9] or ''}"
                     st.info(
@@ -1043,8 +1070,8 @@ with tab_devolucion:
                     )
                     pdf_mostrar_nc, xml_mostrar_nc = refrescar_url_nota_credito(user_id, vid_dev)
                     col_ncpdf, col_ncxml = st.columns(2)
-                    mostrar_documento(col_ncpdf, "Ver PDF de la Nota Crédito", pdf_mostrar_nc, f"NotaCredito_Venta_{vid_dev}.pdf", "application/pdf")
-                    mostrar_documento(col_ncxml, "Descargar XML (DIAN)", xml_mostrar_nc, f"NotaCredito_Venta_{vid_dev}.xml", "application/xml")
+                    mostrar_documento(col_ncpdf, "Ver PDF de la Nota Crédito", pdf_mostrar_nc, f"NotaCredito_Venta_{num_venta(vid_dev)}.pdf", "application/pdf")
+                    mostrar_documento(col_ncxml, "Descargar XML (DIAN)", xml_mostrar_nc, f"NotaCredito_Venta_{num_venta(vid_dev)}.xml", "application/xml")
                 elif venta_dev[7]:
                     st.warning(
                         "Esta venta tenía factura electrónica emitida pero no se confirmó la nota crédito."
@@ -1060,7 +1087,7 @@ with tab_devolucion:
             else:
                 with st.container(border=True):
                     c1, c2, c3 = st.columns(3)
-                    c1.metric("Venta #", vid_dev)
+                    c1.metric("Venta #", num_venta(vid_dev))
                     c2.metric("Total", formato_cop(venta_dev[1]))
                     c3.metric("Estado", venta_dev[2])
                     st.write(f"**Cliente:** {venta_dev[5]} | **Fecha:** {venta_dev[4]} | **Pago:** {venta_dev[3]}")
@@ -1111,7 +1138,7 @@ with tab_devolucion:
 
                             invalidar_cache_ventas()
                             invalidar_cache_productos()
-                            st.success(f"Venta #{vid_dev} anulada. Stock restaurado.")
+                            st.success(f"Venta #{num_venta(vid_dev)} anulada. Stock restaurado.")
 
                             with st.spinner("Verificando si necesita nota crédito electrónica..."):
                                 ok_nc, msg_nc = anular_factura_venta(user_id, vid_dev)
@@ -1128,7 +1155,7 @@ with tab_devolucion:
                 with col_b2:
                     st.info("Al anular se restaura el stock y la venta queda marcada como anulada en los reportes.")
         else:
-            st.warning(f"No se encontró la venta #{vid_dev}.")
+            st.warning(f"No se encontró la venta #{numero_tipeado_dev}.")
 
 # ==========================================
 # TAB 4: COTIZACIÓN
@@ -1320,7 +1347,7 @@ with tab_cotizacion:
                     st.caption(f"Creada: {cot['fecha']}")
                 with col_h3:
                     if pd.notna(cot['convertida_a_venta_id']):
-                        st.success(f"Convertida en Venta #{int(cot['convertida_a_venta_id'])}")
+                        st.success(f"Convertida en Venta #{num_venta(int(cot['convertida_a_venta_id']))}")
                     else:
                         st.warning("Pendiente")
 
@@ -1444,7 +1471,7 @@ with tab_cotizacion:
                                         tipo_cuota=tipo_cuota_conv, valor_cuota=valor_cuota_conv,
                                         fecha_limite=fecha_limite_conv,
                                     )
-                                    st.success(f"Cotización convertida en la Venta #{venta_id_nueva}.")
+                                    st.success(f"Cotización convertida en la Venta #{num_venta(venta_id_nueva)}.")
                                     st.rerun()
                                 except ValueError as e:
                                     st.error(str(e))

@@ -11,6 +11,7 @@ from queries import (
     invalidar_cache_creditos,
     obtener_historial_ventas_cliente,
     obtener_historial_abonos_cliente,
+    mapa_numeros_venta,
 )
 from utils import aplicar_estilos, verificar_auth, bloquear_si_cajero
 from tz_utils import hoy_bogota
@@ -22,6 +23,17 @@ user_id, nombre_negocio = verificar_auth()
 bloquear_si_cajero()
 
 engine = obtener_conexion()
+numeros_venta = mapa_numeros_venta(user_id)
+
+
+def num_venta(vid):
+    """Número de venta propio de este negocio (ver queries.mapa_numeros_venta),
+    en vez del ID interno de Ventas.id compartido por todos los negocios de
+    la plataforma."""
+    if vid is None or (isinstance(vid, float) and pd.isna(vid)):
+        return None
+    return numeros_venta.get(int(vid), int(vid))
+
 
 def formato_cop(numero):
     return f"${float(numero):,.0f}".replace(",", ".")
@@ -82,11 +94,12 @@ with tab_creditos:
         df_mostrar['factura_estado'] = df_mostrar['factura_estado'].fillna('Sin facturar').replace({
             'emitida': 'Facturada', 'error': 'Error factura', 'anulada': 'Anulada (N.C.)'
         })
+        df_mostrar['numero_venta'] = df_mostrar['venta_id'].map(numeros_venta)
         df_mostrar = df_mostrar[[
-            'venta_id', 'cliente', 'total', 'saldo_pendiente', 'fecha_limite', 'tipo_cuota',
+            'numero_venta', 'cliente', 'total', 'saldo_pendiente', 'fecha_limite', 'tipo_cuota',
             'estado', 'vencido', 'factura_estado', 'numero_factura_texto'
         ]].rename(columns={
-            'venta_id': 'Venta #',
+            'numero_venta': 'Venta #',
             'cliente': 'Cliente', 'total': 'Total Original', 'saldo_pendiente': 'Saldo Pendiente',
             'fecha_limite': 'Fecha Límite', 'tipo_cuota': 'Tipo Cuota', 'estado': 'Estado',
             'vencido': 'Vencido', 'factura_estado': 'Facturación', 'numero_factura_texto': 'N° Factura',
@@ -157,8 +170,8 @@ with tab_creditos:
                     if tiene_factura:
                         st.caption("🧾 Esta venta tiene factura electrónica emitida.")
                         col_fd1, col_fd2 = st.columns(2)
-                        mostrar_documento(col_fd1, "Factura PDF", fila_credito.get('factura_pdf_url'), f"Factura_Venta_{venta_id_credito}.pdf", "application/pdf")
-                        mostrar_documento(col_fd2, "Factura XML", fila_credito.get('factura_xml_url'), f"Factura_Venta_{venta_id_credito}.xml", "application/xml")
+                        mostrar_documento(col_fd1, "Factura PDF", fila_credito.get('factura_pdf_url'), f"Factura_Venta_{num_venta(venta_id_credito)}.pdf", "application/pdf")
+                        mostrar_documento(col_fd2, "Factura XML", fila_credito.get('factura_xml_url'), f"Factura_Venta_{num_venta(venta_id_credito)}.xml", "application/xml")
 
                     col_ab1, col_ab2 = st.columns(2)
                     with col_ab1:
@@ -329,10 +342,11 @@ with tab_estado_cuenta:
                 df_compras_mostrar['fe_texto'] = df_compras_mostrar['factura_estado'].fillna('Sin facturar').replace({
                     'emitida': 'Emitida', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
                 })
+                df_compras_mostrar['numero_venta'] = df_compras_mostrar['id'].map(numeros_venta)
                 df_compras_display = df_compras_mostrar[[
-                    'id', 'fecha', 'total', 'tipo_pago', 'estado', 'fe_texto', 'numero_factura_texto'
+                    'numero_venta', 'fecha', 'total', 'tipo_pago', 'estado', 'fe_texto', 'numero_factura_texto'
                 ]].rename(columns={
-                    'id': 'Venta #', 'fecha': 'Fecha', 'total': 'Total',
+                    'numero_venta': 'Venta #', 'fecha': 'Fecha', 'total': 'Total',
                     'tipo_pago': 'Pago', 'estado': 'Estado',
                     'fe_texto': 'Factura Electrónica', 'numero_factura_texto': 'N° Factura',
                 })
@@ -348,7 +362,7 @@ with tab_estado_cuenta:
                 if not con_documento_ec.empty:
                     st.markdown("**Descargar factura o nota crédito de una compra específica:**")
                     dict_desc_ec = {
-                        f"Venta #{r['id']} — {formato_cop(r['total'])} — {r['fecha']}": i
+                        f"Venta #{num_venta(r['id'])} — {formato_cop(r['total'])} — {r['fecha']}": i
                         for i, r in con_documento_ec.iterrows()
                     }
                     desc_sel_ec_str = st.selectbox(
@@ -358,19 +372,21 @@ with tab_estado_cuenta:
                     if desc_sel_ec_str:
                         fila_desc_ec = con_documento_ec.loc[dict_desc_ec[desc_sel_ec_str]]
                         col_de1, col_de2, col_de3, col_de4 = st.columns(4)
-                        mostrar_documento(col_de1, "Factura PDF", fila_desc_ec['factura_pdf_url'], f"Factura_Venta_{fila_desc_ec['id']}.pdf", "application/pdf")
-                        mostrar_documento(col_de2, "Factura XML", fila_desc_ec['factura_xml_url'], f"Factura_Venta_{fila_desc_ec['id']}.xml", "application/xml")
-                        mostrar_documento(col_de3, "N.C. PDF", fila_desc_ec['nota_credito_pdf_url'], f"NotaCredito_Venta_{fila_desc_ec['id']}.pdf", "application/pdf")
-                        mostrar_documento(col_de4, "N.C. XML", fila_desc_ec['nota_credito_xml_url'], f"NotaCredito_Venta_{fila_desc_ec['id']}.xml", "application/xml")
+                        mostrar_documento(col_de1, "Factura PDF", fila_desc_ec['factura_pdf_url'], f"Factura_Venta_{num_venta(fila_desc_ec['id'])}.pdf", "application/pdf")
+                        mostrar_documento(col_de2, "Factura XML", fila_desc_ec['factura_xml_url'], f"Factura_Venta_{num_venta(fila_desc_ec['id'])}.xml", "application/xml")
+                        mostrar_documento(col_de3, "N.C. PDF", fila_desc_ec['nota_credito_pdf_url'], f"NotaCredito_Venta_{num_venta(fila_desc_ec['id'])}.pdf", "application/pdf")
+                        mostrar_documento(col_de4, "N.C. XML", fila_desc_ec['nota_credito_xml_url'], f"NotaCredito_Venta_{num_venta(fila_desc_ec['id'])}.xml", "application/xml")
             else:
                 st.caption("Este cliente todavía no tiene compras registradas.")
 
             st.markdown("---")
             st.markdown("**Historial de pagos (abonos):**")
             if not df_abonos_ec.empty:
+                df_abonos_ec = df_abonos_ec.copy()
+                df_abonos_ec['numero_venta'] = df_abonos_ec['venta_id'].map(numeros_venta)
                 st.dataframe(
-                    df_abonos_ec[['fecha', 'monto', 'venta_id', 'notas']].rename(columns={
-                        'fecha': 'Fecha', 'monto': 'Monto', 'venta_id': 'Venta #', 'notas': 'Notas'
+                    df_abonos_ec[['fecha', 'monto', 'numero_venta', 'notas']].rename(columns={
+                        'fecha': 'Fecha', 'monto': 'Monto', 'numero_venta': 'Venta #', 'notas': 'Notas'
                     }),
                     use_container_width=True, hide_index=True,
                     column_config={"Monto": st.column_config.NumberColumn(format="$%,d")}

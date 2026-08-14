@@ -16,6 +16,8 @@ from queries import (
     obtener_iva_por_tasa_periodo,
     tiene_iva_habilitado,
     obtener_gastos_periodo,
+    mapa_numeros_venta,
+    id_venta_desde_numero,
 )
 from utils import aplicar_estilos, verificar_auth, bloquear_si_cajero
 from tz_utils import hoy_bogota, ahora_bogota
@@ -29,12 +31,23 @@ bloquear_si_cajero()
 iva_activo = tiene_iva_habilitado(user_id)
 
 engine = obtener_conexion()
+numeros_venta = mapa_numeros_venta(user_id)
+
+
+def num_venta(vid):
+    """Número de venta propio de este negocio (ver queries.mapa_numeros_venta),
+    en vez del ID interno de Ventas.id compartido por todos los negocios de
+    la plataforma."""
+    if vid is None or (isinstance(vid, float) and pd.isna(vid)):
+        return None
+    return numeros_venta.get(int(vid), int(vid))
+
 
 def formato_cop(numero):
     return f"${float(numero):,.0f}".replace(",", ".")
 
 
-def generar_excel_ventas(df_ventas, fecha_ini, fecha_fin, ingresos, costos, margen, nombre_negocio, iva=0, mostrar_iva=True, gastos=0, utilidad_neta=None):
+def generar_excel_ventas(df_ventas, fecha_ini, fecha_fin, ingresos, costos, margen, nombre_negocio, iva=0, mostrar_iva=True, gastos=0, utilidad_neta=None, numeros_venta=None):
     """Genera reporte Excel de ventas del período."""
     wb = Workbook()
     ws = wb.active
@@ -92,8 +105,10 @@ def generar_excel_ventas(df_ventas, fecha_ini, fecha_fin, ingresos, costos, marg
         ws.append(["Utilidad Neta (Margen Bruto - Gastos)", f"${utilidad_neta:,.0f}".replace(",", ".")])
         ws.append([])
 
+    numeros_venta = numeros_venta or {}
+
     # Headers de tabla
-    headers = ["ID Venta", "Fecha", "Cliente", "Descuento ($)", "Total ($)", "Tipo Pago", "Estado", "Cambio ($)"]
+    headers = ["N° Venta", "Fecha", "Cliente", "Descuento ($)", "Total ($)", "Tipo Pago", "Estado", "Cambio ($)"]
     ws.append(headers)
     header_row = ws.max_row
     for col_num in range(1, len(headers) + 1):
@@ -107,7 +122,7 @@ def generar_excel_ventas(df_ventas, fecha_ini, fecha_fin, ingresos, costos, marg
     if not df_ventas.empty:
         for _, row in df_ventas.iterrows():
             ws.append([
-                row.get('id', ''),
+                numeros_venta.get(row.get('id'), row.get('id', '')),
                 str(row.get('fecha', '')),
                 row.get('cliente', 'Venta directa'),
                 float(row.get('descuento', 0)),
@@ -194,9 +209,11 @@ with tab_dia:
         st.markdown("---")
 
         # Tabla detallada
+        df_hoy = df_hoy.copy()
+        df_hoy['numero_venta'] = df_hoy['id'].map(numeros_venta)
         st.dataframe(
-            df_hoy[['id', 'fecha', 'cliente', 'subtotal', 'descuento', 'total', 'tipo_pago', 'estado']].rename(columns={
-                'id': 'ID', 'fecha': 'Hora', 'cliente': 'Cliente',
+            df_hoy[['numero_venta', 'fecha', 'cliente', 'subtotal', 'descuento', 'total', 'tipo_pago', 'estado']].rename(columns={
+                'numero_venta': 'N°', 'fecha': 'Hora', 'cliente': 'Cliente',
                 'subtotal': 'Subtotal ($)', 'descuento': 'Descuento ($)',
                 'total': 'Total ($)', 'tipo_pago': 'Pago', 'estado': 'Estado'
             }),
@@ -213,7 +230,7 @@ with tab_dia:
         st.markdown("---")
         st.markdown("**Ver ítems de una venta:**")
         dict_ventas_hoy = {
-            f"Venta #{r['id']} — {formato_cop(r['total'])}": r['id']
+            f"Venta #{num_venta(r['id'])} — {formato_cop(r['total'])}": r['id']
             for _, r in df_hoy.iterrows()
         }
         venta_sel_hoy = st.selectbox("Selecciona la venta", options=list(dict_ventas_hoy.keys()), key="venta_hoy")
@@ -337,9 +354,11 @@ with tab_periodo:
     st.markdown("---")
 
     if not df_periodo.empty:
+        df_periodo = df_periodo.copy()
+        df_periodo['numero_venta'] = df_periodo['id'].map(numeros_venta)
         st.dataframe(
-            df_periodo[['id', 'fecha', 'cliente', 'subtotal', 'descuento', 'total', 'tipo_pago', 'estado']].rename(columns={
-                'id': 'ID', 'fecha': 'Fecha', 'cliente': 'Cliente',
+            df_periodo[['numero_venta', 'fecha', 'cliente', 'subtotal', 'descuento', 'total', 'tipo_pago', 'estado']].rename(columns={
+                'numero_venta': 'N°', 'fecha': 'Fecha', 'cliente': 'Cliente',
                 'subtotal': 'Subtotal ($)', 'descuento': 'Descuento ($)',
                 'total': 'Total ($)', 'tipo_pago': 'Pago', 'estado': 'Estado'
             }),
@@ -356,7 +375,7 @@ with tab_periodo:
         excel_buf = generar_excel_ventas(
             df_periodo, fecha_ini_rep, fecha_fin_rep,
             ingresos_rep, costos_rep, margen_rep, nombre_negocio, iva_rep, mostrar_iva=iva_activo,
-            gastos=gastos_rep, utilidad_neta=utilidad_neta_rep
+            gastos=gastos_rep, utilidad_neta=utilidad_neta_rep, numeros_venta=numeros_venta
         )
         st.download_button(
             label="Descargar Reporte en Excel (para DIAN)",
@@ -524,7 +543,7 @@ with tab_facturas:
 
             col_s1, col_s2, col_s3 = st.columns(3)
             with col_s1:
-                busq_id = st.text_input("Buscar por ID de venta", key="busq_factura_id")
+                busq_id = st.text_input("Buscar por N° de venta", key="busq_factura_id")
             with col_s2:
                 busq_num_factura = st.text_input(
                     "Buscar por N° de factura (prefijo o número)", key="busq_factura_numero"
@@ -559,10 +578,11 @@ with tab_facturas:
                 df_mostrar_fe['factura_prefijo'].fillna('').astype(str)
                 + df_mostrar_fe['factura_numero'].fillna('').astype(str)
             )
+            df_mostrar_fe['numero_venta'] = df_mostrar_fe['id'].map(numeros_venta)
 
             if busq_id.strip():
                 df_mostrar_fe = df_mostrar_fe[
-                    df_mostrar_fe['id'].astype(str).str.contains(busq_id.strip(), case=False, na=False)
+                    df_mostrar_fe['numero_venta'].astype(str).str.contains(busq_id.strip(), case=False, na=False)
                 ]
             if busq_num_factura.strip():
                 df_mostrar_fe = df_mostrar_fe[
@@ -586,9 +606,9 @@ with tab_facturas:
             })
 
             df_reportes_display = df_mostrar_fe[[
-                'id', 'fecha', 'cliente', 'cliente_documento', 'total', 'estado_texto',
+                'numero_venta', 'fecha', 'cliente', 'cliente_documento', 'total', 'estado_texto',
                 'numero_factura_texto', 'factura_cufe']].rename(columns={
-                'id': 'Venta #', 'fecha': 'Fecha', 'cliente': 'Cliente',
+                'numero_venta': 'Venta #', 'fecha': 'Fecha', 'cliente': 'Cliente',
                 'cliente_documento': 'NIT/Documento',
                 'total': 'Total ($)', 'estado_texto': 'Estado',
                 'numero_factura_texto': 'N° Factura', 'factura_cufe': 'CUFE',
@@ -605,23 +625,23 @@ with tab_facturas:
             if not con_documento.empty:
                 st.markdown("**Descargar factura o nota crédito de una venta específica:**")
                 dict_desc_reportes = {
-                    f"Venta #{r['id']} — {formato_cop(r['total'])} — {r['cliente']}": i
+                    f"Venta #{num_venta(r['id'])} — {formato_cop(r['total'])} — {r['cliente']}": i
                     for i, r in con_documento.iterrows()
                 }
                 desc_sel_reportes_str = st.selectbox("Selecciona la venta", options=list(dict_desc_reportes.keys()), key="desc_sel_reportes")
                 fila_desc_rep = con_documento.loc[dict_desc_reportes[desc_sel_reportes_str]]
                 col_dr1, col_dr2, col_dr3, col_dr4 = st.columns(4)
-                mostrar_documento(col_dr1, "Factura PDF", fila_desc_rep['factura_pdf_url'], f"Factura_Venta_{fila_desc_rep['id']}.pdf", "application/pdf")
-                mostrar_documento(col_dr2, "Factura XML", fila_desc_rep['factura_xml_url'], f"Factura_Venta_{fila_desc_rep['id']}.xml", "application/xml")
-                mostrar_documento(col_dr3, "N.C. PDF", fila_desc_rep['nota_credito_pdf_url'], f"NotaCredito_Venta_{fila_desc_rep['id']}.pdf", "application/pdf")
-                mostrar_documento(col_dr4, "N.C. XML", fila_desc_rep['nota_credito_xml_url'], f"NotaCredito_Venta_{fila_desc_rep['id']}.xml", "application/xml")
+                mostrar_documento(col_dr1, "Factura PDF", fila_desc_rep['factura_pdf_url'], f"Factura_Venta_{num_venta(fila_desc_rep['id'])}.pdf", "application/pdf")
+                mostrar_documento(col_dr2, "Factura XML", fila_desc_rep['factura_xml_url'], f"Factura_Venta_{num_venta(fila_desc_rep['id'])}.xml", "application/xml")
+                mostrar_documento(col_dr3, "N.C. PDF", fila_desc_rep['nota_credito_pdf_url'], f"NotaCredito_Venta_{num_venta(fila_desc_rep['id'])}.pdf", "application/pdf")
+                mostrar_documento(col_dr4, "N.C. XML", fila_desc_rep['nota_credito_xml_url'], f"NotaCredito_Venta_{num_venta(fila_desc_rep['id'])}.xml", "application/xml")
 
             facturas_con_error = df_facturas[df_facturas['factura_estado'] == 'error']
             if not facturas_con_error.empty:
                 st.markdown("---")
                 st.markdown("**Reintentar facturas con error:**")
                 dict_reintento = {
-                    f"Venta #{r['id']} — {r['cliente']} — {formato_cop(r['total'])}": r['id']
+                    f"Venta #{num_venta(r['id'])} — {r['cliente']} — {formato_cop(r['total'])}": r['id']
                     for _, r in facturas_con_error.iterrows()
                 }
                 reintento_sel = st.selectbox("Selecciona la venta", options=list(dict_reintento.keys()), key="reintento_factura_sel")

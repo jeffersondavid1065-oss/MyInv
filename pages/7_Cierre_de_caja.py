@@ -4,7 +4,10 @@ from datetime import date, timedelta
 from sqlalchemy import text
 from db import obtener_conexion
 from utils import verificar_auth, bloquear_si_cajero
-from queries import obtener_ganancia_dia, obtener_ganancia_por_producto_dia, obtener_ganancia_acumulada, obtener_gastos_dia
+from queries import (
+    obtener_ganancia_dia, obtener_ganancia_por_producto_dia, obtener_ganancia_acumulada,
+    obtener_gastos_dia, mapa_numeros_venta,
+)
 from tz_utils import hoy_bogota, ahora_bogota_naive
 
 st.set_page_config(page_title="Cierre de Caja", layout="wide")
@@ -12,6 +15,7 @@ user_id, nombre_negocio = verificar_auth()
 bloquear_si_cajero()
 
 engine = obtener_conexion()
+numeros_venta = mapa_numeros_venta(user_id)
 
 def formato_cop(numero):
     return f"${float(numero):,.0f}".replace(",", ".")
@@ -162,6 +166,8 @@ with tab_cierre:
                     ORDER BY v.fecha DESC
                 """), con=conn, params={"uid": user_id, "fecha": fecha_cierre.strftime('%Y-%m-%d')})
             if not df_ventas.empty:
+                df_ventas = df_ventas.copy()
+                df_ventas['id'] = df_ventas['id'].map(numeros_venta)
                 st.dataframe(df_ventas.rename(columns={
                     'id': 'N°', 'fecha': 'Fecha', 'cliente': 'Cliente',
                     'subtotal': 'Subtotal', 'descuento': 'Descuento',
