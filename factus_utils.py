@@ -435,8 +435,7 @@ def facturar_venta(uid, venta_id):
         if resp.status_code not in (200, 201):
             queries.guardar_resultado_factura(venta_id, estado="error")
             detalle = f"La factura fue rechazada ({resp.status_code}): {_mensaje_error(resp)}"
-            if not numbering_range_id:
-                detalle += f" | Rangos de numeración en Factus: {rangos_debug}"
+            detalle += f" | numbering_range_id enviado: {numbering_range_id!r} | Rangos en Factus: {rangos_debug}"
             return False, detalle
 
         data = resp.json().get("data", {})
@@ -538,8 +537,7 @@ def anular_factura_venta(uid, venta_id):
         resp = requests.post(f"{BASE_URL}/v1/credit-notes/validate", headers=_headers(token), json=payload, timeout=30)
         if resp.status_code not in (200, 201):
             detalle = f"La nota crédito fue rechazada ({resp.status_code}): {_mensaje_error(resp)}"
-            if not numbering_range_id:
-                detalle += f" | Rangos de numeración en Factus: {rangos_debug}"
+            detalle += f" | numbering_range_id enviado: {numbering_range_id!r} | Rangos en Factus: {rangos_debug}"
             return False, detalle
 
         data = resp.json().get("data", {})
