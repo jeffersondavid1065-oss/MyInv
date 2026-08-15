@@ -115,16 +115,18 @@ if not df_almacenes.empty:
     st.markdown("---")
     st.subheader("Mantenimiento: Corregir valores $NaN en Productos")
     st.caption(
-        "Si se guardó un producto con el costo o precio de venta en blanco, ese valor "
+        "Si se guardó un producto con el costo, precio de venta o cantidad en blanco "
+        "(incluida una factura mal leída por la IA en Entradas de Mercancía), ese valor "
         "puede quedar como NaN en la base de datos, haciendo que 'Inversión', "
         "'Valor Comercial' y 'Ganancia Potencial' en Inventario se muestren como $NaN. "
-        "Esta acción resetea esos valores corruptos a $0."
+        "Esta acción resetea esos valores corruptos a 0."
     )
 
     is_sqlite = "sqlite" in str(engine.url)
     condicion_nan = (
-        "(costo_compra != costo_compra OR precio_venta != precio_venta)" if is_sqlite
-        else "(costo_compra::text = 'NaN' OR precio_venta::text = 'NaN')"
+        "(costo_compra != costo_compra OR precio_venta != precio_venta OR stock_actual != stock_actual)"
+        if is_sqlite else
+        "(costo_compra::text = 'NaN' OR precio_venta::text = 'NaN' OR stock_actual::text = 'NaN')"
     )
 
     with engine.connect() as conn:
@@ -141,19 +143,24 @@ if not df_almacenes.empty:
                         resultado = conn.execute(text("""
                             UPDATE Productos
                             SET costo_compra = CASE WHEN costo_compra != costo_compra THEN 0 ELSE costo_compra END,
-                                precio_venta = CASE WHEN precio_venta != precio_venta THEN 0 ELSE precio_venta END
+                                precio_venta = CASE WHEN precio_venta != precio_venta THEN 0 ELSE precio_venta END,
+                                stock_actual = CASE WHEN stock_actual != stock_actual THEN 0 ELSE stock_actual END
                             WHERE costo_compra != costo_compra OR precio_venta != precio_venta
+                               OR stock_actual != stock_actual
                         """))
                     else:
                         resultado = conn.execute(text("""
                             UPDATE Productos
                             SET costo_compra = CASE WHEN costo_compra::text = 'NaN' THEN 0 ELSE costo_compra END,
-                                precio_venta = CASE WHEN precio_venta::text = 'NaN' THEN 0 ELSE precio_venta END
+                                precio_venta = CASE WHEN precio_venta::text = 'NaN' THEN 0 ELSE precio_venta END,
+                                stock_actual = CASE WHEN stock_actual::text = 'NaN' THEN 0 ELSE stock_actual END
                             WHERE costo_compra::text = 'NaN' OR precio_venta::text = 'NaN'
+                               OR stock_actual::text = 'NaN'
                         """))
                 from queries import invalidar_cache_productos
                 invalidar_cache_productos()
-                st.success(f"Valores corregidos en {resultado.rowcount} producto(s).")
+                st.success(f"Valores corregidos en {resultado.rowcount} producto(s). "
+                           f"Si algún producto quedó en stock 0, revisa y ajusta la cantidad real.")
                 st.rerun()
             except Exception as e:
                 st.error(f"Error: {e}")

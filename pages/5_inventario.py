@@ -371,9 +371,9 @@ with tab_entradas:
                             st.session_state.items_entrada = [
                                 {
                                     "nombre": p.get("nombre", ""),
-                                    "cantidad": float(p.get("cantidad", 1)),
-                                    "costo": float(p.get("costo_unitario", 0)),
-                                    "subtotal": float(p.get("subtotal", 0)),
+                                    "cantidad": safe_float(p.get("cantidad", 1), 1.0),
+                                    "costo": safe_float(p.get("costo_unitario", 0)),
+                                    "subtotal": safe_float(p.get("subtotal", 0)),
                                     "unidad_medida": "Unidad",
                                     "ia": True
                                 }
@@ -469,11 +469,11 @@ with tab_entradas:
                     st.session_state.items_entrada[i]["unidad_medida"] = um_sel
                 with col_f3:
                     es_dec = um_sel in UNIDADES_DECIMALES
-                    cant_actual = item.get("cantidad", 1)
+                    cant_actual = safe_float(item.get("cantidad", 1), 1.0)
                     cant_nueva = st.number_input(
                         f"Cant. ({um_sel})",
                         min_value=0.0 if es_dec else 1,
-                        value=float(cant_actual) if es_dec else int(float(cant_actual)),
+                        value=cant_actual if es_dec else int(cant_actual),
                         step=0.5 if es_dec else 1,
                         key=f"cant_{i}"
                     )
@@ -481,7 +481,7 @@ with tab_entradas:
                 with col_f4:
                     costo_nuevo = st.number_input(
                         f"Costo/$/{um_sel}", min_value=0.0,
-                        value=float(item.get("costo", 0)),
+                        value=safe_float(item.get("costo", 0)),
                         step=1000.0, key=f"costo_{i}"
                     )
                     st.session_state.items_entrada[i]["costo"] = costo_nuevo
@@ -573,9 +573,9 @@ with tab_entradas:
 
                         for item in items_validos:
                             pid = item.get("producto_id")
-                            pvp = float(item.get("precio_venta", 0))
-                            costo = float(item.get("costo", 0))
-                            cantidad = float(item.get("cantidad", 1))
+                            pvp = safe_float(item.get("precio_venta", 0))
+                            costo = safe_float(item.get("costo", 0))
+                            cantidad = safe_float(item.get("cantidad", 1), 1.0)
                             um = item.get("unidad_medida", "Unidad")
                             cod = item.get("codigo_barras") or None
                             cat = item.get("categoria", "General")
@@ -622,7 +622,7 @@ with tab_entradas:
                                 VALUES (:eid, :pid, :cant, :costo, :sub)
                             """), {"eid": entrada_id, "pid": pid,
                                    "cant": cantidad, "costo": costo,
-                                   "sub": float(item.get("subtotal", 0))})
+                                   "sub": safe_float(item.get("subtotal", 0))})
 
                     invalidar_cache_productos()
                     st.session_state.items_entrada = []
