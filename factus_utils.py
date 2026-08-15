@@ -173,33 +173,32 @@ def crear_rango_numeracion(client_id, client_secret, username, password, prefix,
         return False, f"Error de conexión: {e}"
 
 
-def _resolver_numbering_range_id(token, document_codigo=DOCUMENT_CODE_RANGO_FACTURA):
+def _resolver_numbering_range_id(token):
     """numbering_range_id es obligatorio para notas crédito y opcional para
     facturas solo si la cuenta tiene un único rango activo; si hay más de
     uno, Factus lo exige y rechaza la factura/nota con un 422 sin detalle si
     no se envía. Se resuelve automáticamente contra /v1/numbering-ranges
-    usando el rango activo más reciente para ese código de documento (ver
-    'document' en crear_rango_numeracion: '21' = Factura de Venta). En
-    Colombia las notas crédito se emiten bajo la misma resolución/rango que
-    la factura que corrigen -- no existe un rango separado tipo 'Nota
-    Crédito' que buscar, por eso ambas llamadas usan el mismo código.
-    Devuelve None si no se puede determinar (la llamada seguirá intentando
-    sin el campo, como antes)."""
+    tomando el rango activo y no vencido más reciente -- no se filtra por
+    tipo de documento porque MyInv solo registra un tipo de rango
+    (crear_rango_numeracion siempre usa document='21', Factura de Venta) y
+    en Colombia las notas crédito se emiten bajo esa misma resolución, no
+    bajo un rango propio. Devuelve (numbering_range_id, rangos_crudos);
+    rangos_crudos se devuelve siempre (incluso si se resolvió bien) para
+    poder diagnosticar si Factus sigue rechazando el campo."""
     try:
         resp = requests.get(f"{BASE_URL}/v1/numbering-ranges", headers=_headers(token), timeout=15)
         if resp.status_code != 200:
-            return None
+            return None, []
         rangos = resp.json().get("data", {}).get("data", [])
-        activos = [
-            r for r in rangos
-            if str(r.get("document")) == document_codigo and r.get("is_active") and not r.get("is_expired")
-        ]
+        activos = [r for r in rangos if r.get("is_active") and not r.get("is_expired")]
         if not activos:
-            return None
+            activos = rangos
+        if not activos:
+            return None, rangos
         activos.sort(key=lambda r: r.get("id", 0), reverse=True)
-        return activos[0]["id"]
+        return activos[0].get("id"), rangos
     except requests.RequestException:
-        return None
+        return None, []
 
 
 def _obtener_bill_id(token, numero_factura):
@@ -428,14 +427,17 @@ def facturar_venta(uid, venta_id):
         payload.update(_campos_pago(venta.tipo_pago, fecha_vencimiento))
         if getattr(venta, "notas", None):
             payload["observation"] = str(venta.notas)[:250]
-        numbering_range_id = _resolver_numbering_range_id(token)
+        numbering_range_id, rangos_debug = _resolver_numbering_range_id(token)
         if numbering_range_id:
             payload["numbering_range_id"] = numbering_range_id
 
         resp = requests.post(f"{BASE_URL}/v1/bills/validate", headers=_headers(token), json=payload, timeout=30)
         if resp.status_code not in (200, 201):
             queries.guardar_resultado_factura(venta_id, estado="error")
-            return False, f"La factura fue rechazada ({resp.status_code}): {_mensaje_error(resp)}"
+            detalle = f"La factura fue rechazada ({resp.status_code}): {_mensaje_error(resp)}"
+            if not numbering_range_id:
+                detalle += f" | Rangos de numeración en Factus: {rangos_debug}"
+            return False, detalle
 
         data = resp.json().get("data", {})
         bill = data.get("bill", data)
@@ -529,13 +531,16 @@ def anular_factura_venta(uid, venta_id):
             "customer": _construir_customer(cliente),
             "items": items_payload,
         }
-        numbering_range_id = _resolver_numbering_range_id(token)
+        numbering_range_id, rangos_debug = _resolver_numbering_range_id(token)
         if numbering_range_id:
             payload["numbering_range_id"] = numbering_range_id
 
         resp = requests.post(f"{BASE_URL}/v1/credit-notes/validate", headers=_headers(token), json=payload, timeout=30)
         if resp.status_code not in (200, 201):
-            return False, f"La nota crédito fue rechazada ({resp.status_code}): {_mensaje_error(resp)}"
+            detalle = f"La nota crédito fue rechazada ({resp.status_code}): {_mensaje_error(resp)}"
+            if not numbering_range_id:
+                detalle += f" | Rangos de numeración en Factus: {rangos_debug}"
+            return False, detalle
 
         data = resp.json().get("data", {})
         nota = data.get("credit_note", data)
