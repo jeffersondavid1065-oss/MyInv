@@ -23,11 +23,14 @@ from queries import (
     numero_venta_negocio,
     id_venta_desde_numero,
     invalidar_cache_clientes,
+    restaurar_stock_items,
+    acreditar_venta,
 )
 from utils import aplicar_estilos, verificar_auth
 from tz_utils import hoy_bogota, ahora_bogota_naive
 from factus_utils import (
-    facturar_venta, anular_factura_venta,
+    facturar_venta, anular_factura_venta, emitir_nota_credito,
+    CORRECCION_DEVOLUCION_PARCIAL, CORRECCION_REBAJA, CORRECCION_AJUSTE_PRECIO, CORRECCION_OTROS,
     refrescar_url_factura, refrescar_url_nota_credito, mostrar_documento,
     obtener_credenciales, consultar_adquiriente_dian,
 )
@@ -1077,7 +1080,7 @@ with tab_devolucion:
             if venta_dev:
                 detalles_dev = pd.read_sql_query(text("""
                     SELECT id, producto_id, nombre_producto, cantidad,
-                           precio_unitario, descuento, subtotal
+                           precio_unitario, descuento, subtotal, iva_porcentaje
                     FROM Detalles_Venta WHERE venta_id = :vid
                 """), con=conn, params={"vid": vid_dev})
 
@@ -1129,53 +1132,205 @@ with tab_devolucion:
                     )
 
                 st.markdown("---")
-                col_b1, col_b2 = st.columns(2)
+                tipo_correccion = st.radio(
+                    "Tipo de corrección",
+                    ["Anulación completa", "Devolución parcial de productos",
+                     "Rebaja / descuento", "Ajuste de precio", "Otro"],
+                    key=f"tipo_correccion_{vid_dev}",
+                    help="Define qué concepto de corrección DIAN se envía en la nota crédito "
+                         "electrónica (si la venta tiene factura emitida).",
+                )
 
-                with col_b1:
-                    if st.button("Anular Venta Completa", use_container_width=True, type="primary"):
+                if tipo_correccion == "Anulación completa":
+                    col_b1, col_b2 = st.columns(2)
+
+                    with col_b1:
+                        if st.button("Anular Venta Completa", use_container_width=True, type="primary"):
+                            try:
+                                with engine.begin() as conn:
+                                    conn.execute(text("""
+                                        UPDATE Ventas SET estado = 'Anulada', notas = :notas
+                                        WHERE id = :vid AND usuario_id = :uid
+                                    """), {
+                                        "vid": vid_dev, "uid": user_id,
+                                        "notas": f"Anulada: {motivo}" if motivo else "Anulada"
+                                    })
+                                    for _, item in detalles_dev.iterrows():
+                                        if item['producto_id']:
+                                            conn.execute(text("""
+                                                UPDATE Productos
+                                                SET stock_actual = stock_actual + :cant
+                                                WHERE id = :pid AND usuario_id = :uid
+                                            """), {
+                                                "cant": int(item['cantidad']),
+                                                "pid": int(item['producto_id']),
+                                                "uid": user_id
+                                            })
+                                    conn.execute(text("""
+                                        UPDATE Creditos SET estado = 'Pagado'
+                                        WHERE venta_id = :vid AND usuario_id = :uid
+                                    """), {"vid": vid_dev, "uid": user_id})
+
+                                invalidar_cache_ventas()
+                                invalidar_cache_productos()
+                                st.success(f"Venta #{num_venta(vid_dev)} anulada. Stock restaurado.")
+
+                                with st.spinner("Verificando si necesita nota crédito electrónica..."):
+                                    ok_nc, msg_nc = anular_factura_venta(user_id, vid_dev)
+                                if ok_nc:
+                                    if "nota crédito" in msg_nc.lower():
+                                        st.success(msg_nc)
+                                else:
+                                    st.warning(f"La venta se anuló en MyInv, pero: {msg_nc}")
+
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error al anular: {e}")
+
+                    with col_b2:
+                        st.info("Al anular se restaura el stock y la venta queda marcada como anulada en los reportes.")
+
+                elif tipo_correccion == "Devolución parcial de productos":
+                    st.caption(
+                        "Indica cuántas unidades de cada producto devuelve el cliente. "
+                        "Solo se restaura el stock de esas cantidades y se acredita su valor."
+                    )
+                    df_dev_base = detalles_dev.copy()
+                    df_dev_base['cantidad_devolver'] = 0.0
+                    df_dev_editado = st.data_editor(
+                        df_dev_base[['nombre_producto', 'cantidad', 'precio_unitario', 'cantidad_devolver']],
+                        hide_index=True, use_container_width=True,
+                        disabled=['nombre_producto', 'cantidad', 'precio_unitario'],
+                        column_config={
+                            'nombre_producto': 'Producto',
+                            'cantidad': 'Cant. vendida',
+                            'precio_unitario': st.column_config.NumberColumn("Precio", format="$%,d"),
+                            'cantidad_devolver': st.column_config.NumberColumn(
+                                "Cant. a devolver", min_value=0.0, step=1.0
+                            ),
+                        },
+                        key=f"editor_dev_parcial_{vid_dev}",
+                    )
+                    if st.button("Registrar devolución y nota crédito", type="primary", use_container_width=True):
                         try:
-                            with engine.begin() as conn:
-                                conn.execute(text("""
-                                    UPDATE Ventas SET estado = 'Anulada', notas = :notas
-                                    WHERE id = :vid AND usuario_id = :uid
-                                """), {
-                                    "vid": vid_dev, "uid": user_id,
-                                    "notas": f"Anulada: {motivo}" if motivo else "Anulada"
+                            items_stock, items_credito = [], []
+                            monto_total = 0.0
+                            for idx, fila in df_dev_editado.iterrows():
+                                cant_dev = min(float(fila['cantidad_devolver'] or 0), float(fila['cantidad']))
+                                if cant_dev <= 0:
+                                    continue
+                                original = detalles_dev.loc[idx]
+                                precio_unit = float(original['precio_unitario'])
+                                cant_original = float(original['cantidad'])
+                                desc_unit = float(original['descuento'] or 0) / cant_original if cant_original else 0.0
+                                monto_linea = cant_dev * (precio_unit - desc_unit)
+                                monto_total += monto_linea
+                                if original['producto_id']:
+                                    items_stock.append({"producto_id": int(original['producto_id']), "cantidad": cant_dev})
+                                items_credito.append({
+                                    "producto_id": original['producto_id'],
+                                    "nombre_producto": original['nombre_producto'],
+                                    "cantidad": cant_dev,
+                                    "precio_unitario": precio_unit,
+                                    "descuento": desc_unit * cant_dev,
+                                    "iva_porcentaje": original['iva_porcentaje'],
                                 })
-                                for _, item in detalles_dev.iterrows():
-                                    if item['producto_id']:
-                                        conn.execute(text("""
-                                            UPDATE Productos
-                                            SET stock_actual = stock_actual + :cant
-                                            WHERE id = :pid AND usuario_id = :uid
-                                        """), {
-                                            "cant": int(item['cantidad']),
-                                            "pid": int(item['producto_id']),
-                                            "uid": user_id
-                                        })
-                                conn.execute(text("""
-                                    UPDATE Creditos SET estado = 'Pagado'
-                                    WHERE venta_id = :vid AND usuario_id = :uid
-                                """), {"vid": vid_dev, "uid": user_id})
 
-                            invalidar_cache_ventas()
-                            invalidar_cache_productos()
-                            st.success(f"Venta #{num_venta(vid_dev)} anulada. Stock restaurado.")
-
-                            with st.spinner("Verificando si necesita nota crédito electrónica..."):
-                                ok_nc, msg_nc = anular_factura_venta(user_id, vid_dev)
-                            if ok_nc:
-                                if "nota crédito" in msg_nc.lower():
-                                    st.success(msg_nc)
+                            if not items_credito:
+                                st.warning("Indica al menos una cantidad a devolver mayor a 0.")
+                            elif monto_total > float(venta_dev[1]):
+                                st.warning("El monto a acreditar no puede superar el total de la venta.")
                             else:
-                                st.warning(f"La venta se anuló en MyInv, pero: {msg_nc}")
+                                if items_stock:
+                                    restaurar_stock_items(user_id, items_stock)
+                                acreditar_venta(user_id, vid_dev, monto_total,
+                                                 motivo=f"Devolución parcial: {motivo}" if motivo else "Devolución parcial")
+                                st.success(f"Devolución registrada. Se acreditaron {formato_cop(monto_total)} "
+                                           f"y se restauró el stock devuelto.")
 
-                            st.rerun()
+                                with st.spinner("Verificando si necesita nota crédito electrónica..."):
+                                    ok_nc, msg_nc = emitir_nota_credito(
+                                        user_id, vid_dev, CORRECCION_DEVOLUCION_PARCIAL, items_credito, motivo
+                                    )
+                                if ok_nc:
+                                    if "nota crédito" in msg_nc.lower():
+                                        st.success(msg_nc)
+                                else:
+                                    st.warning(f"La devolución se registró en MyInv, pero: {msg_nc}")
+                                st.rerun()
                         except Exception as e:
-                            st.error(f"Error al anular: {e}")
+                            st.error(f"Error al registrar la devolución: {e}")
 
-                with col_b2:
-                    st.info("Al anular se restaura el stock y la venta queda marcada como anulada en los reportes.")
+                else:
+                    concepto_map = {
+                        "Rebaja / descuento": CORRECCION_REBAJA,
+                        "Ajuste de precio": CORRECCION_AJUSTE_PRECIO,
+                        "Otro": CORRECCION_OTROS,
+                    }
+                    st.caption(
+                        "Indica el monto a acreditar por producto (no cambia el stock, solo "
+                        "el total cobrado de la venta)."
+                    )
+                    df_credito_base = detalles_dev.copy()
+                    df_credito_base['monto_credito'] = 0.0
+                    df_credito_editado = st.data_editor(
+                        df_credito_base[['nombre_producto', 'subtotal', 'monto_credito']],
+                        hide_index=True, use_container_width=True,
+                        disabled=['nombre_producto', 'subtotal'],
+                        column_config={
+                            'nombre_producto': 'Producto',
+                            'subtotal': st.column_config.NumberColumn("Subtotal vendido", format="$%,d"),
+                            'monto_credito': st.column_config.NumberColumn(
+                                "Monto a acreditar ($)", min_value=0.0, step=500.0
+                            ),
+                        },
+                        key=f"editor_credito_{vid_dev}_{tipo_correccion}",
+                    )
+                    motivo_requerido = tipo_correccion == "Otro"
+                    if motivo_requerido and not motivo:
+                        st.info("Para 'Otro' es obligatorio indicar el motivo arriba.")
+                    if st.button(f"Registrar {tipo_correccion.lower()} y nota crédito",
+                                 type="primary", use_container_width=True,
+                                 disabled=motivo_requerido and not motivo):
+                        try:
+                            items_credito = []
+                            monto_total = 0.0
+                            for idx, fila in df_credito_editado.iterrows():
+                                monto_linea = min(float(fila['monto_credito'] or 0), float(fila['subtotal']))
+                                if monto_linea <= 0:
+                                    continue
+                                original = detalles_dev.loc[idx]
+                                monto_total += monto_linea
+                                items_credito.append({
+                                    "producto_id": original['producto_id'],
+                                    "nombre_producto": original['nombre_producto'],
+                                    "cantidad": float(original['cantidad']),
+                                    "precio_unitario": float(original['precio_unitario']),
+                                    "descuento": monto_linea,
+                                    "iva_porcentaje": original['iva_porcentaje'],
+                                })
+
+                            if not items_credito:
+                                st.warning("Indica al menos un monto a acreditar mayor a 0.")
+                            elif monto_total > float(venta_dev[1]):
+                                st.warning("El monto a acreditar no puede superar el total de la venta.")
+                            else:
+                                acreditar_venta(user_id, vid_dev, monto_total,
+                                                 motivo=f"{tipo_correccion}: {motivo}" if motivo else tipo_correccion)
+                                st.success(f"Se acreditaron {formato_cop(monto_total)} sobre la venta #{num_venta(vid_dev)}.")
+
+                                with st.spinner("Verificando si necesita nota crédito electrónica..."):
+                                    ok_nc, msg_nc = emitir_nota_credito(
+                                        user_id, vid_dev, concepto_map[tipo_correccion], items_credito, motivo
+                                    )
+                                if ok_nc:
+                                    if "nota crédito" in msg_nc.lower():
+                                        st.success(msg_nc)
+                                else:
+                                    st.warning(f"El crédito se registró en MyInv, pero: {msg_nc}")
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al registrar el crédito: {e}")
         else:
             st.warning(f"No se encontró la venta #{numero_tipeado_dev}.")
 

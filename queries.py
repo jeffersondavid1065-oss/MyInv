@@ -867,20 +867,73 @@ def obtener_credito_de_venta(venta_id):
         """), {"vid": venta_id}).fetchone()
 
 
-def guardar_nota_credito(venta_id, reference_code, pdf_url=None, xml_url=None, prefijo=None, numero=None):
+def guardar_nota_credito(venta_id, reference_code, pdf_url=None, xml_url=None, prefijo=None, numero=None,
+                          anular_venta=True):
     """Guarda el reference_code, número (prefijo+consecutivo) y PDF/XML de la
-    nota crédito emitida en Factus para una venta anulada."""
+    nota crédito emitida en Factus para una venta. anular_venta=True (caso de
+    anulación completa, concepto DIAN 2) también marca factura_estado =
+    'anulada'; para los demás conceptos (devolución parcial, rebaja, ajuste
+    de precio, otros) la factura original sigue siendo válida, así que
+    factura_estado no se toca."""
+    engine = obtener_conexion()
+    with engine.begin() as conn:
+        if anular_venta:
+            conn.execute(text("""
+                UPDATE Ventas SET nota_credito_alegra_id = :ncid, nota_credito_pdf_url = :pdf_url,
+                       nota_credito_xml_url = :xml_url, nota_credito_prefijo = :prefijo,
+                       nota_credito_numero = :numero, factura_estado = 'anulada'
+                WHERE id = :vid
+            """), {
+                "ncid": reference_code, "pdf_url": pdf_url, "xml_url": xml_url,
+                "prefijo": prefijo, "numero": numero, "vid": venta_id
+            })
+        else:
+            conn.execute(text("""
+                UPDATE Ventas SET nota_credito_alegra_id = :ncid, nota_credito_pdf_url = :pdf_url,
+                       nota_credito_xml_url = :xml_url, nota_credito_prefijo = :prefijo,
+                       nota_credito_numero = :numero
+                WHERE id = :vid
+            """), {
+                "ncid": reference_code, "pdf_url": pdf_url, "xml_url": xml_url,
+                "prefijo": prefijo, "numero": numero, "vid": venta_id
+            })
+    invalidar_cache_ventas()
+
+
+def restaurar_stock_items(uid, items):
+    """Devuelve al stock las cantidades indicadas (para devoluciones
+    parciales). items: iterable de dicts/objetos con producto_id y
+    cantidad."""
+    engine = obtener_conexion()
+    with engine.begin() as conn:
+        for item in items:
+            pid = item["producto_id"] if isinstance(item, dict) else item.producto_id
+            cant = item["cantidad"] if isinstance(item, dict) else item.cantidad
+            if pid:
+                conn.execute(text("""
+                    UPDATE Productos SET stock_actual = stock_actual + :cant
+                    WHERE id = :pid AND usuario_id = :uid
+                """), {"cant": cant, "pid": pid, "uid": uid})
+    invalidar_cache_productos()
+
+
+def acreditar_venta(uid, venta_id, monto, motivo=None):
+    """Reduce el total de una venta por un monto acreditado (devolución
+    parcial, rebaja, ajuste de precio u otros) sin cambiar su estado -- la
+    venta sigue activa, solo con un total menor. El motivo, si se da, se
+    anexa a las notas de la venta."""
     engine = obtener_conexion()
     with engine.begin() as conn:
         conn.execute(text("""
-            UPDATE Ventas SET nota_credito_alegra_id = :ncid, nota_credito_pdf_url = :pdf_url,
-                   nota_credito_xml_url = :xml_url, nota_credito_prefijo = :prefijo,
-                   nota_credito_numero = :numero, factura_estado = 'anulada'
-            WHERE id = :vid
-        """), {
-            "ncid": reference_code, "pdf_url": pdf_url, "xml_url": xml_url,
-            "prefijo": prefijo, "numero": numero, "vid": venta_id
-        })
+            UPDATE Ventas
+            SET total = total - :monto,
+                notas = CASE
+                    WHEN :motivo IS NULL OR :motivo = '' THEN notas
+                    WHEN notas IS NULL OR notas = '' THEN :motivo
+                    ELSE notas || ' | ' || :motivo
+                END
+            WHERE id = :vid AND usuario_id = :uid
+        """), {"monto": monto, "motivo": motivo, "vid": venta_id, "uid": uid})
     invalidar_cache_ventas()
 
 

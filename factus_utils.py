@@ -47,7 +47,13 @@ UNIT_MEASURE_ID_DEFECTO = 70                    # "unidad" (code 94) — MyInv n
 STANDARD_CODE_ID_DEFECTO = 1                    # Estándar de adopción del contribuyente
 DOCUMENTO_FACTURA = "01"                        # Factura electrónica de venta
 DOCUMENT_CODE_RANGO_FACTURA = "21"              # Código de Factus para el rango de numeración de Factura de Venta
-CORRECCION_ANULACION = 2                        # Código de corrección: anulación de factura electrónica
+# Catálogo DIAN de conceptos de corrección para notas crédito (estándar,
+# igual para cualquier proveedor de facturación electrónica):
+CORRECCION_DEVOLUCION_PARCIAL = 1               # Devolución parcial de bienes / no aceptación parcial del servicio
+CORRECCION_ANULACION = 2                        # Anulación de factura electrónica
+CORRECCION_REBAJA = 3                           # Rebaja o descuento parcial o total
+CORRECCION_AJUSTE_PRECIO = 4                    # Ajuste de precio
+CORRECCION_OTROS = 5                            # Otros
 CUSTOMIZATION_NC_CON_FACTURA = 20               # Nota crédito que referencia una factura electrónica
 PAYMENT_FORM_FACTUS = {"Efectivo": "1", "Transferencia": "1", "Mixto": "1", "Credito": "2"}
 PAYMENT_METHOD_FACTUS = {"Efectivo": "10", "Transferencia": "47", "Mixto": "10"}
@@ -485,11 +491,26 @@ def facturar_venta(uid, venta_id):
         return False, f"Error de conexión al conectar con Factus para crear la factura: {e}"
 
 
-def anular_factura_venta(uid, venta_id):
+def emitir_nota_credito(uid, venta_id, concepto_codigo, items_credito, motivo=None):
     """
-    Emite la nota crédito en Factus que anula la factura electrónica de una
-    venta (cuando esa venta se anula/devuelve en MyInv). No hace nada (y no
-    es un error) si la venta nunca tuvo factura electrónica emitida.
+    Emite en Factus una nota crédito que corrige una venta, según cualquiera
+    de los 5 conceptos de corrección del catálogo DIAN (CORRECCION_* arriba).
+    No hace nada (y no es un error) si la venta nunca tuvo factura
+    electrónica emitida -- en ese caso la corrección solo vive dentro de
+    MyInv (stock/total), sin nota crédito electrónica.
+
+    items_credito: lista de objetos/dicts con producto_id, nombre_producto,
+    cantidad, precio_unitario, descuento, iva_porcentaje -- el subconjunto
+    (y las cantidades/montos) que realmente se está acreditando. Para una
+    anulación completa es el 100% de los ítems originales a su cantidad
+    completa; para una devolución parcial, solo las líneas devueltas a su
+    cantidad devuelta; para rebaja/ajuste de precio/otros, las líneas
+    completas con 'descuento' = monto a acreditar en esa línea (activa el
+    discount_rate ya soportado por _construir_item).
+
+    MyInv solo admite una nota crédito por venta (ver el guard de
+    nota_credito_alegra_id más abajo) -- no hay notas crédito acumulativas.
+
     Devuelve (True, mensaje) o (False, mensaje).
     """
     import queries
@@ -512,16 +533,19 @@ def anular_factura_venta(uid, venta_id):
 
     iva_permitido = queries.tiene_iva_habilitado(uid)
 
-    renglones = queries.obtener_items_venta(venta_id)
-    if not renglones:
+    if not items_credito:
         return False, "No hay ítems para la nota crédito."
 
     items_payload = [
         _construir_item(
-            r.nombre_producto, r.cantidad, r.precio_unitario, r.descuento,
-            (r.iva_porcentaje or 0) if iva_permitido else 0, f"VENTA-{venta_id}-{i}",
+            item["nombre_producto"] if isinstance(item, dict) else item.nombre_producto,
+            item["cantidad"] if isinstance(item, dict) else item.cantidad,
+            item["precio_unitario"] if isinstance(item, dict) else item.precio_unitario,
+            item["descuento"] if isinstance(item, dict) else item.descuento,
+            ((item["iva_porcentaje"] if isinstance(item, dict) else item.iva_porcentaje) or 0) if iva_permitido else 0,
+            f"VENTA-{venta_id}-{i}",
         )
-        for i, r in enumerate(renglones, start=1)
+        for i, item in enumerate(items_credito, start=1)
     ]
 
     reference_code_nc = f"MYINV-NC-{uid}-{venta_id}"
@@ -537,13 +561,15 @@ def anular_factura_venta(uid, venta_id):
 
         payload = {
             "reference_code": reference_code_nc,
-            "correction_concept_code": CORRECCION_ANULACION,
+            "correction_concept_code": concepto_codigo,
             "customization_id": CUSTOMIZATION_NC_CON_FACTURA,
             "bill_id": bill_id,
             "payment_method_code": PAYMENT_METHOD_FACTUS.get(venta.tipo_pago or "Efectivo", "10"),
             "customer": _construir_customer(cliente),
             "items": items_payload,
         }
+        if motivo:
+            payload["observation"] = str(motivo)[:250]
         numbering_range_id, rangos_debug = _resolver_numbering_range_id(token, "nota_credito")
         if numbering_range_id:
             payload["numbering_range_id"] = numbering_range_id
@@ -564,10 +590,22 @@ def anular_factura_venta(uid, venta_id):
         queries.guardar_nota_credito(
             venta_id, reference_code_nc, pdf_url=pdf_url_nc, xml_url=xml_url_nc,
             prefijo=None, numero=numero_nc,
+            anular_venta=(concepto_codigo == CORRECCION_ANULACION),
         )
         return True, f"Nota crédito emitida ({numero_nc})."
     except requests.RequestException as e:
         return False, f"Error de conexión al conectar con Factus para crear la nota crédito: {e}"
+
+
+def anular_factura_venta(uid, venta_id):
+    """Wrapper de compatibilidad: anulación completa de una venta (concepto
+    DIAN 2), referenciando el 100% de los ítems originales a su cantidad
+    completa. Usado por los flujos existentes de 'Anular Venta Completa' y
+    reintento de nota crédito."""
+    import queries
+    return emitir_nota_credito(
+        uid, venta_id, CORRECCION_ANULACION, queries.obtener_items_venta(venta_id)
+    )
 
 
 def refrescar_url_factura(uid, venta_id):
