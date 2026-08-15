@@ -326,13 +326,15 @@ with tab_pos:
             st.subheader("Carrito")
 
             # ==========================================
-            # TIPO DE DESCUENTO POR ÍTEM
+            # TIPO DE AJUSTE POR ÍTEM (DESCUENTO O AUMENTO)
             # ==========================================
             tipo_desc_item = st.radio(
-                "Descuento por ítem:",
-                ["$ Valor fijo", "% Porcentaje"],
+                "Ajuste por ítem:",
+                ["Desc. $", "Desc. %", "▲ Aumento $", "▲ Aumento %"],
                 horizontal=True,
-                key="tipo_desc_item"
+                key="tipo_desc_item",
+                help="Aumento: cobra más caro que el precio de lista solo en esta venta, "
+                     "sin modificar el precio del producto en el inventario."
             )
 
             # Headers carrito
@@ -345,10 +347,7 @@ with tab_pos:
             h1.markdown("**Producto**")
             h2.markdown("**Precio**")
             h3.markdown("**Cant.**")
-            if tipo_desc_item == "$ Valor fijo":
-                h4.markdown("**Desc.$**")
-            else:
-                h4.markdown("**Desc.%**")
+            h4.markdown(f"**{tipo_desc_item}**")
             if iva_activo:
                 h5.markdown("**IVA%**")
             h6.markdown("**Total**")
@@ -381,19 +380,22 @@ with tab_pos:
                         st.session_state.carrito[i]["subtotal"] = nueva_cant * max(0, precio_neto)
                         st.rerun()
                 with c4:
-                    if tipo_desc_item == "$ Valor fijo":
+                    ajuste_actual = item.get("descuento_item", 0)
+                    if tipo_desc_item == "Desc. $":
+                        valor_actual = max(0.0, ajuste_actual)
                         desc_item = st.number_input(
                             "", min_value=0.0,
-                            value=float(item.get("descuento_item", 0)),
+                            value=float(valor_actual),
                             step=500.0, key=f"desc_{i}", label_visibility="collapsed"
                         )
-                        if desc_item != item.get("descuento_item", 0):
+                        if desc_item != valor_actual:
                             st.session_state.carrito[i]["descuento_item"] = desc_item
                             st.session_state.carrito[i]["descuento_pct_item"] = 0.0
+                            st.session_state.carrito[i]["aumento_pct_item"] = 0.0
                             precio_neto = item["precio_unitario"] - desc_item
                             st.session_state.carrito[i]["subtotal"] = item["cantidad"] * max(0, precio_neto)
                             st.rerun()
-                    else:
+                    elif tipo_desc_item == "Desc. %":
                         pct_item = st.number_input(
                             "", min_value=0.0, max_value=100.0,
                             value=float(item.get("descuento_pct_item", 0)),
@@ -402,8 +404,37 @@ with tab_pos:
                         if pct_item != item.get("descuento_pct_item", 0):
                             desc_calculado = item["precio_unitario"] * (pct_item / 100)
                             st.session_state.carrito[i]["descuento_pct_item"] = pct_item
+                            st.session_state.carrito[i]["aumento_pct_item"] = 0.0
                             st.session_state.carrito[i]["descuento_item"] = desc_calculado
                             precio_neto = item["precio_unitario"] - desc_calculado
+                            st.session_state.carrito[i]["subtotal"] = item["cantidad"] * max(0, precio_neto)
+                            st.rerun()
+                    elif tipo_desc_item == "▲ Aumento $":
+                        valor_actual = max(0.0, -ajuste_actual)
+                        aum_item = st.number_input(
+                            "", min_value=0.0,
+                            value=float(valor_actual),
+                            step=500.0, key=f"aum_{i}", label_visibility="collapsed"
+                        )
+                        if aum_item != valor_actual:
+                            st.session_state.carrito[i]["descuento_item"] = -aum_item
+                            st.session_state.carrito[i]["descuento_pct_item"] = 0.0
+                            st.session_state.carrito[i]["aumento_pct_item"] = 0.0
+                            precio_neto = item["precio_unitario"] + aum_item
+                            st.session_state.carrito[i]["subtotal"] = item["cantidad"] * max(0, precio_neto)
+                            st.rerun()
+                    else:  # ▲ Aumento %
+                        pct_item = st.number_input(
+                            "", min_value=0.0, max_value=300.0,
+                            value=float(item.get("aumento_pct_item", 0)),
+                            step=5.0, key=f"aumpct_{i}", label_visibility="collapsed"
+                        )
+                        if pct_item != item.get("aumento_pct_item", 0):
+                            aum_calculado = item["precio_unitario"] * (pct_item / 100)
+                            st.session_state.carrito[i]["aumento_pct_item"] = pct_item
+                            st.session_state.carrito[i]["descuento_pct_item"] = 0.0
+                            st.session_state.carrito[i]["descuento_item"] = -aum_calculado
+                            precio_neto = item["precio_unitario"] + aum_calculado
                             st.session_state.carrito[i]["subtotal"] = item["cantidad"] * max(0, precio_neto)
                             st.rerun()
                 if iva_activo:

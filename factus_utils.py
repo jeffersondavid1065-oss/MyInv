@@ -258,25 +258,35 @@ def _construir_item(descripcion, cantidad, precio_unitario, descuento_linea, iva
     iva_porcentaje = float(iva_porcentaje or 0)
     cantidad = float(cantidad or 1)
     precio_unitario = float(precio_unitario or 0)
+    descuento_linea = float(descuento_linea or 0)
+
+    precio_item = precio_unitario
+    discount_rate = 0.0
+
+    if cantidad and precio_unitario and descuento_linea:
+        ajuste_unitario = descuento_linea / cantidad
+        if ajuste_unitario > 0:
+            descuento_pct = (ajuste_unitario / precio_unitario) * 100
+            if descuento_pct > 0:
+                discount_rate = round(min(descuento_pct, 100), 2)
+        else:
+            # ajuste_unitario negativo = "aumento" (venta a un cliente más caro
+            # que el precio de lista). Factus no tiene discount_rate negativo,
+            # así que se factura directo al precio real cobrado en esta venta.
+            precio_item = precio_unitario - ajuste_unitario
 
     item = {
         "code_reference": codigo_ref,
         "name": str(descripcion)[:250],
         "quantity": int(round(cantidad)),
-        "discount_rate": 0.0,
-        "price": round(precio_unitario, 2),
+        "discount_rate": discount_rate,
+        "price": round(precio_item, 2),
         "tax_rate": f"{iva_porcentaje:.2f}",
         "unit_measure_id": UNIT_MEASURE_ID_DEFECTO,
         "standard_code_id": STANDARD_CODE_ID_DEFECTO,
         "is_excluded": 0 if iva_porcentaje > 0 else 1,
         "tribute_id": TRIBUTE_ID_IVA_ITEM,
     }
-
-    if cantidad and precio_unitario and descuento_linea:
-        descuento_unitario = float(descuento_linea) / cantidad
-        descuento_pct = (descuento_unitario / precio_unitario) * 100
-        if descuento_pct > 0:
-            item["discount_rate"] = round(min(descuento_pct, 100), 2)
 
     return item
 
