@@ -173,30 +173,44 @@ def crear_rango_numeracion(client_id, client_secret, username, password, prefix,
         return False, f"Error de conexión: {e}"
 
 
-def _resolver_numbering_range_id(token):
+def _resolver_numbering_range_id(token, tipo_documento="factura"):
     """numbering_range_id es obligatorio para notas crédito y opcional para
     facturas solo si la cuenta tiene un único rango activo; si hay más de
-    uno, Factus lo exige y rechaza la factura/nota con un 422 sin detalle si
-    no se envía. Se resuelve automáticamente contra /v1/numbering-ranges
-    tomando el rango activo y no vencido más reciente -- no se filtra por
-    tipo de documento porque MyInv solo registra un tipo de rango
-    (crear_rango_numeracion siempre usa document='21', Factura de Venta) y
-    en Colombia las notas crédito se emiten bajo esa misma resolución, no
-    bajo un rango propio. Devuelve (numbering_range_id, rangos_crudos);
-    rangos_crudos se devuelve siempre (incluso si se resolvió bien) para
-    poder diagnosticar si Factus sigue rechazando el campo."""
+    uno, Factus lo exige y rechaza la factura/nota con un 422 sin detalle
+    ('obligatorio') si no se envía, o 'inválido' si se envía uno de otro
+    tipo de documento -- Factus SÍ exige un rango propio para notas crédito,
+    no comparte el de la factura (confirmado en producción: un rango con
+    document='Factura de Venta' fue rechazado como inválido al usarlo en
+    una nota crédito). Se resuelve automáticamente contra
+    /v1/numbering-ranges, filtrando por el campo 'document' (nombre legible
+    que devuelve Factus, ej. 'Factura de Venta' / 'Nota Crédito') de forma
+    tolerante a mayúsculas/acentos; si no hay ningún rango de ese tipo, cae
+    de vuelta a cualquier rango activo como último recurso. tipo_documento:
+    'factura' o 'nota_credito'. Devuelve (numbering_range_id,
+    rangos_crudos); rangos_crudos se devuelve siempre para poder
+    diagnosticar si Factus sigue rechazando el campo."""
     try:
         resp = requests.get(f"{BASE_URL}/v1/numbering-ranges", headers=_headers(token), timeout=15)
         if resp.status_code != 200:
             return None, []
         rangos = resp.json().get("data", {}).get("data", [])
-        activos = [r for r in rangos if r.get("is_active") and not r.get("is_expired")]
-        if not activos:
-            activos = rangos
-        if not activos:
+
+        def coincide(doc):
+            d = (doc or "").lower()
+            if tipo_documento == "nota_credito":
+                return "nota" in d and "cr" in d
+            return "factura" in d
+
+        candidatos = [
+            r for r in rangos
+            if coincide(r.get("document")) and r.get("is_active") and not r.get("is_expired")
+        ]
+        if not candidatos:
+            candidatos = [r for r in rangos if r.get("is_active") and not r.get("is_expired")]
+        if not candidatos:
             return None, rangos
-        activos.sort(key=lambda r: r.get("id", 0), reverse=True)
-        return activos[0].get("id"), rangos
+        candidatos.sort(key=lambda r: r.get("id", 0), reverse=True)
+        return candidatos[0].get("id"), rangos
     except requests.RequestException:
         return None, []
 
@@ -427,7 +441,7 @@ def facturar_venta(uid, venta_id):
         payload.update(_campos_pago(venta.tipo_pago, fecha_vencimiento))
         if getattr(venta, "notas", None):
             payload["observation"] = str(venta.notas)[:250]
-        numbering_range_id, rangos_debug = _resolver_numbering_range_id(token)
+        numbering_range_id, rangos_debug = _resolver_numbering_range_id(token, "factura")
         if numbering_range_id:
             payload["numbering_range_id"] = numbering_range_id
 
@@ -530,7 +544,7 @@ def anular_factura_venta(uid, venta_id):
             "customer": _construir_customer(cliente),
             "items": items_payload,
         }
-        numbering_range_id, rangos_debug = _resolver_numbering_range_id(token)
+        numbering_range_id, rangos_debug = _resolver_numbering_range_id(token, "nota_credito")
         if numbering_range_id:
             payload["numbering_range_id"] = numbering_range_id
 
