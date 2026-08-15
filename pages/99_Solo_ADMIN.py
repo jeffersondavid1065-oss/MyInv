@@ -113,6 +113,54 @@ if not df_almacenes.empty:
         st.success("Todas las ventas ya tienen su costo registrado.")
 
     st.markdown("---")
+    st.subheader("Mantenimiento: Corregir valores $NaN en Productos")
+    st.caption(
+        "Si se guardó un producto con el costo o precio de venta en blanco, ese valor "
+        "puede quedar como NaN en la base de datos, haciendo que 'Inversión', "
+        "'Valor Comercial' y 'Ganancia Potencial' en Inventario se muestren como $NaN. "
+        "Esta acción resetea esos valores corruptos a $0."
+    )
+
+    is_sqlite = "sqlite" in str(engine.url)
+    condicion_nan = (
+        "(costo_compra != costo_compra OR precio_venta != precio_venta)" if is_sqlite
+        else "(costo_compra::text = 'NaN' OR precio_venta::text = 'NaN')"
+    )
+
+    with engine.connect() as conn:
+        nan_pendientes = conn.execute(text(
+            f"SELECT COUNT(*) FROM Productos WHERE {condicion_nan}"
+        )).scalar()
+
+    if nan_pendientes and nan_pendientes > 0:
+        st.warning(f"Hay **{nan_pendientes}** producto(s) con valores $NaN.")
+        if st.button("Corregir valores $NaN ahora", type="primary"):
+            try:
+                with engine.begin() as conn:
+                    if is_sqlite:
+                        resultado = conn.execute(text("""
+                            UPDATE Productos
+                            SET costo_compra = CASE WHEN costo_compra != costo_compra THEN 0 ELSE costo_compra END,
+                                precio_venta = CASE WHEN precio_venta != precio_venta THEN 0 ELSE precio_venta END
+                            WHERE costo_compra != costo_compra OR precio_venta != precio_venta
+                        """))
+                    else:
+                        resultado = conn.execute(text("""
+                            UPDATE Productos
+                            SET costo_compra = CASE WHEN costo_compra::text = 'NaN' THEN 0 ELSE costo_compra END,
+                                precio_venta = CASE WHEN precio_venta::text = 'NaN' THEN 0 ELSE precio_venta END
+                            WHERE costo_compra::text = 'NaN' OR precio_venta::text = 'NaN'
+                        """))
+                from queries import invalidar_cache_productos
+                invalidar_cache_productos()
+                st.success(f"Valores corregidos en {resultado.rowcount} producto(s).")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error: {e}")
+    else:
+        st.success("No hay productos con valores $NaN.")
+
+    st.markdown("---")
 
     if sel:
         almacen_id = dict_almacenes[sel]

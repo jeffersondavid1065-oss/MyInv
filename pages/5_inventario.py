@@ -34,6 +34,15 @@ OPCIONES_IVA = [0, 5, 19]
 def formato_cop(numero):
     return f"${float(numero):,.0f}".replace(",", ".")
 
+def safe_float(valor, default=0.0):
+    """Convierte a float; si es NaN, None o inválido, devuelve default.
+    Evita guardar NaN en la BD cuando el usuario deja una celda vacía."""
+    try:
+        f = float(valor)
+        return default if f != f else f
+    except (TypeError, ValueError):
+        return default
+
 def formato_cant(numero, unidad="Unidad"):
     if unidad in UNIDADES_DECIMALES:
         s = f"{float(numero):.3f}".rstrip('0').rstrip('.')
@@ -121,7 +130,9 @@ with tab_stock:
             else:
                 df_show['iva_porcentaje'] = df_show['iva_porcentaje'].fillna(0)
 
-            # Calcular ganancia
+            # Calcular ganancia (fillna por si hay valores corruptos/NaN en BD)
+            df_show['costo_compra'] = df_show['costo_compra'].fillna(0)
+            df_show['precio_venta'] = df_show['precio_venta'].fillna(0)
             df_show['ganancia'] = df_show['precio_venta'] - df_show['costo_compra']
             df_show['pct_ganancia'] = df_show.apply(
                 lambda r: round((r['ganancia'] / r['costo_compra']) * 100, 1)
@@ -184,16 +195,16 @@ with tab_stock:
                                 "ref": row['codigo_ref'] or None,
                                 "cat": row['categoria'],
                                 "um": um,
-                                "st_act": float(row['stock_actual']),
-                                "st_min": float(row['stock_minimo']),
-                                "costo": float(row['costo_compra']),
-                                "pvp": float(row['precio_venta']),
+                                "st_act": safe_float(row['stock_actual']),
+                                "st_min": safe_float(row['stock_minimo']),
+                                "costo": safe_float(row['costo_compra']),
+                                "pvp": safe_float(row['precio_venta']),
                                 # ganancia y pct_ganancia son calculadas, NO se guardan
                                 "id": int(row['id']),
                                 "uid": user_id
                             }
                             if iva_activo:
-                                params["iva"] = float(row.get('iva_porcentaje', 0) or 0)
+                                params["iva"] = safe_float(row.get('iva_porcentaje', 0))
                             conn.execute(text(f"""
                                 UPDATE Productos
                                 SET nombre = :nom, codigo_barras = :cod,
