@@ -46,6 +46,7 @@ TRIBUTE_ID_IVA_ITEM = 1                         # IVA en items (tabla de tributo
 UNIT_MEASURE_ID_DEFECTO = 70                    # "unidad" (code 94) — MyInv no distingue unidades finas
 STANDARD_CODE_ID_DEFECTO = 1                    # Estándar de adopción del contribuyente
 DOCUMENTO_FACTURA = "01"                        # Factura electrónica de venta
+DOCUMENT_CODE_RANGO_FACTURA = "21"              # Código de Factus para el rango de numeración de Factura de Venta
 CORRECCION_ANULACION = 2                        # Código de corrección: anulación de factura electrónica
 CUSTOMIZATION_NC_CON_FACTURA = 20               # Nota crédito que referencia una factura electrónica
 PAYMENT_FORM_FACTUS = {"Efectivo": "1", "Transferencia": "1", "Mixto": "1", "Credito": "2"}
@@ -159,7 +160,7 @@ def crear_rango_numeracion(client_id, client_secret, username, password, prefix,
         if not token:
             return False, f"No se pudo autenticar con Factus: {error}"
         payload = {
-            "document": "21",
+            "document": DOCUMENT_CODE_RANGO_FACTURA,
             "prefix": prefix,
             "resolution_number": resolution_number,
             "current": current,
@@ -172,13 +173,18 @@ def crear_rango_numeracion(client_id, client_secret, username, password, prefix,
         return False, f"Error de conexión: {e}"
 
 
-def _resolver_numbering_range_id(token, document_nombre):
-    """numbering_range_id es opcional solo si la cuenta tiene un único rango
-    activo para ese tipo de documento; si hay más de uno, Factus lo exige y
-    rechaza la factura/nota con un 422 sin detalle si no se envía. Se
-    resuelve automáticamente contra /v1/numbering-ranges usando el rango
-    activo más reciente. Devuelve None si no se puede determinar (la
-    llamada seguirá intentando sin el campo, como antes)."""
+def _resolver_numbering_range_id(token, document_codigo=DOCUMENT_CODE_RANGO_FACTURA):
+    """numbering_range_id es obligatorio para notas crédito y opcional para
+    facturas solo si la cuenta tiene un único rango activo; si hay más de
+    uno, Factus lo exige y rechaza la factura/nota con un 422 sin detalle si
+    no se envía. Se resuelve automáticamente contra /v1/numbering-ranges
+    usando el rango activo más reciente para ese código de documento (ver
+    'document' en crear_rango_numeracion: '21' = Factura de Venta). En
+    Colombia las notas crédito se emiten bajo la misma resolución/rango que
+    la factura que corrigen -- no existe un rango separado tipo 'Nota
+    Crédito' que buscar, por eso ambas llamadas usan el mismo código.
+    Devuelve None si no se puede determinar (la llamada seguirá intentando
+    sin el campo, como antes)."""
     try:
         resp = requests.get(f"{BASE_URL}/v1/numbering-ranges", headers=_headers(token), timeout=15)
         if resp.status_code != 200:
@@ -186,7 +192,7 @@ def _resolver_numbering_range_id(token, document_nombre):
         rangos = resp.json().get("data", {}).get("data", [])
         activos = [
             r for r in rangos
-            if r.get("document") == document_nombre and r.get("is_active") and not r.get("is_expired")
+            if str(r.get("document")) == document_codigo and r.get("is_active") and not r.get("is_expired")
         ]
         if not activos:
             return None
@@ -422,7 +428,7 @@ def facturar_venta(uid, venta_id):
         payload.update(_campos_pago(venta.tipo_pago, fecha_vencimiento))
         if getattr(venta, "notas", None):
             payload["observation"] = str(venta.notas)[:250]
-        numbering_range_id = _resolver_numbering_range_id(token, "Factura de Venta")
+        numbering_range_id = _resolver_numbering_range_id(token)
         if numbering_range_id:
             payload["numbering_range_id"] = numbering_range_id
 
@@ -523,7 +529,7 @@ def anular_factura_venta(uid, venta_id):
             "customer": _construir_customer(cliente),
             "items": items_payload,
         }
-        numbering_range_id = _resolver_numbering_range_id(token, "Nota Crédito")
+        numbering_range_id = _resolver_numbering_range_id(token)
         if numbering_range_id:
             payload["numbering_range_id"] = numbering_range_id
 
