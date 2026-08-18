@@ -707,10 +707,10 @@ def obtener_facturas_periodo(uid, fecha_inicio, fecha_fin):
             SELECT v.id, v.fecha, COALESCE(cl.nombre, 'Sin cliente') as cliente,
                    cl.documento as cliente_documento,
                    v.total, v.tipo_pago, v.estado as estado_venta, v.factura_estado, v.factura_alegra_id,
-                   v.factura_prefijo, v.factura_numero,
+                   v.factura_prefijo, v.factura_numero, v.factura_correo_enviado,
                    v.factura_cufe, v.factura_pdf_url, v.factura_xml_url,
                    v.nota_credito_alegra_id, v.nota_credito_pdf_url, v.nota_credito_xml_url,
-                   v.nota_credito_prefijo, v.nota_credito_numero
+                   v.nota_credito_prefijo, v.nota_credito_numero, v.nota_credito_correo_enviado
             FROM Ventas v
             LEFT JOIN Clientes cl ON v.cliente_id = cl.id
             WHERE v.usuario_id = :uid
@@ -724,7 +724,8 @@ def obtener_facturas_periodo(uid, fecha_inicio, fecha_fin):
     # Red de seguridad: si la migración de columnas nuevas (init_db) todavía no
     # corrió en este proceso cuando se hizo esta consulta, no se debe romper la
     # página con un KeyError - se completan como vacías y ya.
-    for col in ('factura_xml_url', 'nota_credito_xml_url', 'nota_credito_prefijo', 'nota_credito_numero'):
+    for col in ('factura_xml_url', 'nota_credito_xml_url', 'nota_credito_prefijo', 'nota_credito_numero',
+                'factura_correo_enviado', 'nota_credito_correo_enviado'):
         if col not in df.columns:
             df[col] = None
 
@@ -868,34 +869,37 @@ def obtener_credito_de_venta(venta_id):
 
 
 def guardar_nota_credito(venta_id, reference_code, pdf_url=None, xml_url=None, prefijo=None, numero=None,
-                          anular_venta=True):
+                          anular_venta=True, correo_enviado=None):
     """Guarda el reference_code, número (prefijo+consecutivo) y PDF/XML de la
     nota crédito emitida en Factus para una venta. anular_venta=True (caso de
     anulación completa, concepto DIAN 2) también marca factura_estado =
     'anulada'; para los demás conceptos (devolución parcial, rebaja, ajuste
     de precio, otros) la factura original sigue siendo válida, así que
-    factura_estado no se toca."""
+    factura_estado no se toca. correo_enviado: None si no se intentó mandar
+    el correo (ej. cliente sin email registrado), True/False según si Factus
+    confirmó el envío."""
     engine = obtener_conexion()
     with engine.begin() as conn:
         if anular_venta:
             conn.execute(text("""
                 UPDATE Ventas SET nota_credito_alegra_id = :ncid, nota_credito_pdf_url = :pdf_url,
                        nota_credito_xml_url = :xml_url, nota_credito_prefijo = :prefijo,
-                       nota_credito_numero = :numero, factura_estado = 'anulada'
+                       nota_credito_numero = :numero, nota_credito_correo_enviado = :correo_enviado,
+                       factura_estado = 'anulada'
                 WHERE id = :vid
             """), {
                 "ncid": reference_code, "pdf_url": pdf_url, "xml_url": xml_url,
-                "prefijo": prefijo, "numero": numero, "vid": venta_id
+                "prefijo": prefijo, "numero": numero, "correo_enviado": correo_enviado, "vid": venta_id
             })
         else:
             conn.execute(text("""
                 UPDATE Ventas SET nota_credito_alegra_id = :ncid, nota_credito_pdf_url = :pdf_url,
                        nota_credito_xml_url = :xml_url, nota_credito_prefijo = :prefijo,
-                       nota_credito_numero = :numero
+                       nota_credito_numero = :numero, nota_credito_correo_enviado = :correo_enviado
                 WHERE id = :vid
             """), {
                 "ncid": reference_code, "pdf_url": pdf_url, "xml_url": xml_url,
-                "prefijo": prefijo, "numero": numero, "vid": venta_id
+                "prefijo": prefijo, "numero": numero, "correo_enviado": correo_enviado, "vid": venta_id
             })
     invalidar_cache_ventas()
 
@@ -950,19 +954,21 @@ def obtener_items_venta(venta_id):
 
 
 def guardar_resultado_factura(venta_id, reference_code=None, cufe=None, pdf_url=None, xml_url=None,
-                               estado="emitida", prefijo=None, numero=None):
-    """Guarda el resultado de emitir (o intentar emitir) la factura electrónica de una venta."""
+                               estado="emitida", prefijo=None, numero=None, correo_enviado=None):
+    """Guarda el resultado de emitir (o intentar emitir) la factura electrónica de una venta.
+    correo_enviado: None si no se intentó mandar el correo (ej. cliente sin
+    email registrado), True/False según si Factus confirmó el envío."""
     engine = obtener_conexion()
     with engine.begin() as conn:
         conn.execute(text("""
             UPDATE Ventas
             SET factura_alegra_id = :reference_code, factura_cufe = :cufe,
                 factura_pdf_url = :pdf_url, factura_xml_url = :xml_url, factura_estado = :estado,
-                factura_prefijo = :prefijo, factura_numero = :numero
+                factura_prefijo = :prefijo, factura_numero = :numero, factura_correo_enviado = :correo_enviado
             WHERE id = :vid
         """), {
             "reference_code": reference_code, "cufe": cufe, "pdf_url": pdf_url, "xml_url": xml_url,
-            "estado": estado, "prefijo": prefijo, "numero": numero, "vid": venta_id
+            "estado": estado, "prefijo": prefijo, "numero": numero, "correo_enviado": correo_enviado, "vid": venta_id
         })
     invalidar_cache_ventas()
 

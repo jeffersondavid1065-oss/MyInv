@@ -166,11 +166,13 @@ def init_db():
                     factura_estado TEXT,
                     factura_prefijo TEXT,
                     factura_numero TEXT,
+                    factura_correo_enviado BOOLEAN,
                     nota_credito_alegra_id TEXT,
                     nota_credito_pdf_url TEXT,
                     nota_credito_xml_url TEXT,
                     nota_credito_prefijo TEXT,
                     nota_credito_numero TEXT,
+                    nota_credito_correo_enviado BOOLEAN,
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE,
                     FOREIGN KEY (cliente_id) REFERENCES Clientes(id),
                     FOREIGN KEY (cajero_id) REFERENCES Cajeros(id)
@@ -460,11 +462,13 @@ def init_db():
                     factura_estado TEXT,
                     factura_prefijo TEXT,
                     factura_numero TEXT,
+                    factura_correo_enviado BOOLEAN,
                     nota_credito_alegra_id TEXT,
                     nota_credito_pdf_url TEXT,
                     nota_credito_xml_url TEXT,
                     nota_credito_prefijo TEXT,
                     nota_credito_numero TEXT,
+                    nota_credito_correo_enviado BOOLEAN,
                     FOREIGN KEY (usuario_id) REFERENCES Usuarios(id) ON DELETE CASCADE,
                     FOREIGN KEY (cliente_id) REFERENCES Clientes(id),
                     FOREIGN KEY (cajero_id) REFERENCES Cajeros(id)
@@ -707,6 +711,10 @@ def init_db():
                     conn.execute(text("ALTER TABLE Ventas ADD COLUMN factura_prefijo TEXT"))
                 if 'factura_numero' not in cols_v:
                     conn.execute(text("ALTER TABLE Ventas ADD COLUMN factura_numero TEXT"))
+                if 'factura_correo_enviado' not in cols_v:
+                    conn.execute(text("ALTER TABLE Ventas ADD COLUMN factura_correo_enviado BOOLEAN"))
+                if 'nota_credito_correo_enviado' not in cols_v:
+                    conn.execute(text("ALTER TABLE Ventas ADD COLUMN nota_credito_correo_enviado BOOLEAN"))
                 if 'alegra_email' not in cols:
                     conn.execute(text("ALTER TABLE Usuarios ADD COLUMN alegra_email TEXT"))
                 if 'alegra_token' not in cols:
@@ -769,6 +777,8 @@ def init_db():
                 conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS factura_estado TEXT"))
                 conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS factura_prefijo TEXT"))
                 conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS factura_numero TEXT"))
+                conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS factura_correo_enviado BOOLEAN"))
+                conn.execute(text("ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS nota_credito_correo_enviado BOOLEAN"))
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS alegra_email TEXT"))
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS alegra_token TEXT"))
                 conn.execute(text("ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS fe_habilitada BOOLEAN DEFAULT FALSE"))

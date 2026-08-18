@@ -510,6 +510,15 @@ def facturar_venta(uid, venta_id):
         pdf_url = _pdf_base64_a_data_url(_descargar_pdf(token, numero_factura)) if numero_factura else None
         xml_url = _xml_base64_a_data_url(_descargar_xml(token, numero_factura)) if numero_factura else None
 
+        # El send_email automático de /v2/bills/validate no confirma si el
+        # correo realmente llegó -- se reintenta aquí explícito, antes de
+        # guardar, para poder registrar el resultado real (no solo intentado)
+        # y avisarle al usuario en el mensaje si falla, en vez de que se
+        # entere solo cuando el cliente reclame que nunca le llegó la factura.
+        correo_enviado, correo_error = (None, None)
+        if cliente.email and numero_factura:
+            correo_enviado, correo_error = _enviar_correo_factura(token, numero_factura, cliente.email)
+
         queries.guardar_resultado_factura(
             venta_id,
             reference_code=payload["reference_code"],
@@ -519,17 +528,12 @@ def facturar_venta(uid, venta_id):
             estado="emitida",
             prefijo=None,
             numero=numero_factura,
+            correo_enviado=correo_enviado,
         )
 
         mensaje = f"Factura {numero_factura} emitida ante la DIAN."
-        if cliente.email and numero_factura:
-            # El send_email automático de /v2/bills/validate no confirma si el
-            # correo realmente llegó -- se reintenta aquí explícito para
-            # poder avisarle al usuario si falla, en vez de que se entere
-            # solo cuando el cliente reclame que nunca le llegó la factura.
-            correo_ok, correo_error = _enviar_correo_factura(token, numero_factura, cliente.email)
-            if not correo_ok:
-                mensaje += f" (No se pudo enviar el correo a {cliente.email}: {correo_error})"
+        if correo_enviado is False:
+            mensaje += f" (No se pudo enviar el correo a {cliente.email}: {correo_error})"
 
         return True, mensaje
     except requests.RequestException as e:
@@ -635,17 +639,20 @@ def emitir_nota_credito(uid, venta_id, concepto_codigo, items_credito, motivo=No
         pdf_url_nc = _pdf_base64_a_data_url(_descargar_pdf_nota_credito(token, numero_nc)) if numero_nc else None
         xml_url_nc = _xml_base64_a_data_url(_descargar_xml_nota_credito(token, numero_nc)) if numero_nc else None
 
+        correo_enviado, correo_error = (None, None)
+        if cliente.email and numero_nc:
+            correo_enviado, correo_error = _enviar_correo_nota_credito(token, numero_nc, cliente.email)
+
         queries.guardar_nota_credito(
             venta_id, reference_code_nc, pdf_url=pdf_url_nc, xml_url=xml_url_nc,
             prefijo=None, numero=numero_nc,
             anular_venta=(concepto_codigo == CORRECCION_ANULACION),
+            correo_enviado=correo_enviado,
         )
 
         mensaje = f"Nota crédito emitida ({numero_nc})."
-        if cliente.email and numero_nc:
-            correo_ok, correo_error = _enviar_correo_nota_credito(token, numero_nc, cliente.email)
-            if not correo_ok:
-                mensaje += f" (No se pudo enviar el correo a {cliente.email}: {correo_error})"
+        if correo_enviado is False:
+            mensaje += f" (No se pudo enviar el correo a {cliente.email}: {correo_error})"
 
         return True, mensaje
     except requests.RequestException as e:

@@ -605,12 +605,29 @@ with tab_facturas:
                 'emitida': 'Emitida', 'error': 'Error', 'anulada': 'Anulada (N.C.)'
             })
 
+            def _texto_correo_fe(fila):
+                # Cuando la venta ya está anulada, el documento vigente para
+                # el cliente es la nota crédito, no la factura original -- se
+                # reporta el envío de esa, igual que 'estado_texto' arriba ya
+                # prioriza 'anulada' sobre 'emitida'.
+                if fila['factura_estado'] == 'anulada':
+                    enviado = fila['nota_credito_correo_enviado']
+                elif fila['factura_estado'] == 'emitida':
+                    enviado = fila['factura_correo_enviado']
+                else:
+                    return '—'
+                if pd.isna(enviado):
+                    return 'Cliente sin correo'
+                return 'Enviado' if enviado else 'Falló'
+
+            df_mostrar_fe['correo_texto'] = df_mostrar_fe.apply(_texto_correo_fe, axis=1)
+
             df_reportes_display = df_mostrar_fe[[
                 'numero_venta', 'fecha', 'cliente', 'cliente_documento', 'total', 'estado_texto',
-                'numero_factura_texto', 'factura_cufe']].rename(columns={
+                'correo_texto', 'numero_factura_texto', 'factura_cufe']].rename(columns={
                 'numero_venta': 'Venta #', 'fecha': 'Fecha', 'cliente': 'Cliente',
                 'cliente_documento': 'NIT/Documento',
-                'total': 'Total ($)', 'estado_texto': 'Estado',
+                'total': 'Total ($)', 'estado_texto': 'Estado', 'correo_texto': 'Enviada correo',
                 'numero_factura_texto': 'N° Factura', 'factura_cufe': 'CUFE',
             })
             st.dataframe(
