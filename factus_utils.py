@@ -36,14 +36,12 @@ import requests
 
 BASE_URL_SANDBOX = "https://api-sandbox.factus.com.co"
 BASE_URL_PRODUCCION = "https://api.factus.com.co"
-# TEMPORAL: apuntado a sandbox mientras se prueba la migración a v2 con las
-# credenciales de sandbox que dio Factus. Volver a BASE_URL_PRODUCCION (y
-# cargar las credenciales de producción en Usuarios.factus_*) en cuanto las
-# pruebas queden validadas -- mientras tanto NO se puede facturar en vivo.
-# Si en el futuro se necesita un negocio en modo pruebas permanente junto a
-# otro en producción, esto debe volverse un valor por negocio (columna en
-# Usuarios) en vez de este único interruptor global.
-BASE_URL = BASE_URL_SANDBOX
+# Migración a v2 validada en sandbox (factura y nota crédito) el 2026-08-18.
+# Electricos.DR es el primer negocio facturando en vivo, con cuenta de
+# producción real de Factus — todo MyInv apunta a producción desde aquí.
+# Si en el futuro se necesita un negocio en modo pruebas, esto debe
+# convertirse en un valor por negocio (columna en Usuarios) en vez de global.
+BASE_URL = BASE_URL_PRODUCCION
 
 # --- Catálogos de Factus v2 (ver Tablas de referencia de Factus v2) ---
 TIPO_DOC_CODE_FACTUS = {"NIT": "31", "CC": "13", "CE": "22", "PAS": "41", "TI": "12"}  # Códigos DIAN de tipos de documento de identidad
