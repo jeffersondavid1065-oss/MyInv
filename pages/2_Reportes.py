@@ -683,6 +683,27 @@ with tab_facturas:
                     ok_correo_nc, msg_correo_nc = reenviar_correo_nota_credito(user_id, int(fila_desc_rep['id']), correo_destino)
                     (st.success if ok_correo_nc else st.error)(msg_correo_nc)
 
+            ventas_sin_fe = df_facturas[
+                df_facturas['factura_estado'].isna() & (df_facturas['estado_venta'] != 'Anulada')
+            ]
+            if not ventas_sin_fe.empty:
+                st.markdown("---")
+                st.markdown("**Emitir factura electrónica a una venta sin facturar:**")
+                dict_sin_fe = {
+                    f"Venta #{num_venta(r['id'])} — {r['cliente']} — {formato_cop(r['total'])}": r['id']
+                    for _, r in ventas_sin_fe.iterrows()
+                }
+                sin_fe_sel = st.selectbox("Selecciona la venta", options=list(dict_sin_fe.keys()), key="sin_fe_sel")
+                if st.button("Emitir factura electrónica", use_container_width=True, key="btn_emitir_sin_fe"):
+                    with st.spinner("Emitiendo ante la DIAN..."):
+                        ok_fe, msg_fe = facturar_venta(user_id, dict_sin_fe[sin_fe_sel])
+                    if ok_fe:
+                        st.success(msg_fe)
+                        obtener_facturas_periodo.clear()
+                        st.rerun()
+                    else:
+                        st.error(msg_fe)
+
             facturas_con_error = df_facturas[df_facturas['factura_estado'] == 'error']
             if not facturas_con_error.empty:
                 st.markdown("---")
