@@ -121,11 +121,35 @@ def agregar_al_carrito(producto_id, nombre, codigo_barras, precio, stock_actual,
         "iva_porcentaje": float(iva_porcentaje or 0),
     })
 
+def agregar_item_libre_al_carrito(nombre, precio, cantidad=1, costo=0, iva_porcentaje=0):
+    """Agrega al carrito un ítem que NO está en el inventario (Venta Libre):
+    algo que se consiguió por fuera para no perder la venta. producto_id
+    queda en None -- Detalles_Venta.producto_id ya admite NULL y tanto el
+    descuento de stock como la facturación electrónica (que arma la factura
+    solo con los datos de Detalles_Venta) ya lo manejan correctamente. No se
+    fusiona con otros ítems del carrito (a diferencia de agregar_al_carrito)
+    porque dos ítems libres distintos comparten producto_id=None."""
+    st.session_state.carrito.append({
+        "producto_id": None,
+        "nombre": nombre,
+        "codigo_barras": "",
+        "precio_unitario": float(precio),
+        "costo_unitario": float(costo or 0),
+        "descuento_item": 0.0,
+        "descuento_pct_item": 0.0,
+        "cantidad": cantidad,
+        "subtotal": float(precio) * cantidad,
+        "stock_max": None,
+        "iva_porcentaje": float(iva_porcentaje or 0),
+        "es_libre": True,
+    })
+
 def limpiar_carrito():
     st.session_state.carrito = []
 
 TIPOS_DOC_POS = ["CC", "NIT", "CE", "PAS", "TI"]
 REGIMENES_POS = {"No responsable de IVA": "SIMPLIFIED_REGIME", "Responsable de IVA": "COMMON_REGIME"}
+OPCIONES_IVA_POS = [0, 5, 19]
 
 
 def registrar_cliente_rapido_pos(key_suffix):
@@ -304,6 +328,42 @@ with tab_pos:
                     else:
                         st.warning(f"No se encontró '{busqueda}'.")
 
+        with st.expander("Venta libre (algo que no está en el inventario)"):
+            st.caption(
+                "Para cuando no tienes el producto y lo consigues por fuera para no "
+                "perder el cliente. Se agrega al carrito y se puede facturar "
+                "electrónicamente igual que cualquier otra venta, pero no descuenta "
+                "stock de Productos."
+            )
+            with st.form("form_venta_libre", clear_on_submit=True):
+                nombre_libre = st.text_input("Nombre / descripción *", placeholder="Ej: Filtro de aceite Toyota")
+                col_vl1, col_vl2, col_vl3 = st.columns(3)
+                with col_vl1:
+                    precio_libre = st.number_input("Precio de venta ($) *", min_value=0.0, step=1000.0)
+                with col_vl2:
+                    cantidad_libre = st.number_input("Cantidad", min_value=1, value=1, step=1)
+                with col_vl3:
+                    costo_libre = st.number_input(
+                        "Costo (opcional, $)", min_value=0.0, step=1000.0,
+                        help="Lo que te costó a ti, si lo sabes. Solo afecta los reportes de ganancia."
+                    )
+                if iva_activo:
+                    iva_libre = st.selectbox("IVA%", OPCIONES_IVA_POS, index=0)
+                else:
+                    iva_libre = 0
+                if st.form_submit_button("Agregar venta libre al carrito", use_container_width=True):
+                    if not nombre_libre.strip():
+                        st.warning("Escribe el nombre o descripción del ítem.")
+                    elif precio_libre <= 0:
+                        st.warning("El precio debe ser mayor a 0.")
+                    else:
+                        agregar_item_libre_al_carrito(
+                            nombre=nombre_libre.strip(), precio=precio_libre,
+                            cantidad=int(cantidad_libre), costo=costo_libre,
+                            iva_porcentaje=iva_libre,
+                        )
+                        st.rerun()
+
     with col_der:
         st.subheader("Cobrar")
 
@@ -366,7 +426,7 @@ with tab_pos:
                 else:
                     c1, c2, c3, c4, c6, c7 = cols_fila
                 with c1:
-                    st.write(item["nombre"])
+                    st.write(f"(Libre) {item['nombre']}" if item.get("es_libre") else item["nombre"])
                 with c2:
                     st.write(formato_cop(item["precio_unitario"]))
                 with c3:
@@ -717,12 +777,13 @@ with tab_pos:
                                 "sub": item["subtotal"],
                                 "iva": item.get("iva_porcentaje", 0) or 0
                             })
-                            resultado = conn.execute(text("""
-                                UPDATE Productos SET stock_actual = stock_actual - :cant
-                                WHERE id = :pid AND stock_actual >= :cant
-                            """), {"cant": item["cantidad"], "pid": item["producto_id"]})
-                            if resultado.rowcount == 0:
-                                raise ValueError(f"Stock insuficiente para '{item['nombre']}'.")
+                            if item["producto_id"]:
+                                resultado = conn.execute(text("""
+                                    UPDATE Productos SET stock_actual = stock_actual - :cant
+                                    WHERE id = :pid AND stock_actual >= :cant
+                                """), {"cant": item["cantidad"], "pid": item["producto_id"]})
+                                if resultado.rowcount == 0:
+                                    raise ValueError(f"Stock insuficiente para '{item['nombre']}'.")
 
                         if tipo_pago == "Credito" and cliente_id:
                             conn.execute(text("""
