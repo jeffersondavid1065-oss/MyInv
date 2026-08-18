@@ -4,23 +4,27 @@ Cada negocio (usuario_id) tiene su propia cuenta de Factus, guardada en
 Usuarios.factus_client_id / factus_client_secret / factus_username /
 factus_password — no hay credenciales globales.
 
-Habla la API v1 de Factus (no v2): la cuenta de producción de Electricos.DR
-(primer negocio facturando en vivo) solo tiene habilitado acceso a v1 — v2
-responde 403 "Version de API no disponible para esta empresa" en cualquier
-endpoint para esa cuenta. Si en el futuro un negocio nuevo solo tiene v2,
-esto debe volverse configurable por negocio en vez de un único módulo v1.
+Habla la API v2 de Factus: Factus ya habilitó v2 para la cuenta de producción
+de Electricos.DR (antes solo tenía v1 — ver historial de este archivo si v2
+vuelve a devolver 403 "Version de API no disponible para esta empresa"). Si
+en el futuro un negocio nuevo solo tiene v1, esto debe volverse configurable
+por negocio en vez de un único módulo v2.
 
-Particularidades de v1 frente a v2 (y frente a Alegra):
-- Los campos de cliente/producto van por ID numérico interno de Factus
-  (identification_document_id, legal_organization_id, tribute_id,
-  unit_measure_id, standard_code_id), no por código de texto — los IDs fijos
-  que usa este módulo salen de las tablas de referencia de Factus v1.
-- items.price va CON impuestos incluidos (igual que se guarda en MyInv), a
-  diferencia de v2 que pedía el precio base sin IVA.
-- Para anular una factura con nota crédito, v1 exige el bill_id interno de
-  Factus (no el número de factura) — se resuelve consultando la factura por
-  su número justo antes de crear la nota.
-- POST /v1/bills/validate crea Y timbra la factura ante la DIAN en un solo
+Particularidades de v2 frente a v1 (y frente a Alegra):
+- Los campos de cliente/producto van por código de texto DIAN
+  (identification_document_code, legal_organization_code, tribute_code,
+  unit_measure_code, standard_code), no por ID numérico interno de Factus
+  como en v1 — son códigos estándar iguales para cualquier cuenta.
+- items.price va SIN impuestos (valor neto), a diferencia de v1 que lo pedía
+  con impuestos incluidos (igual que se guarda en MyInv) — hay que quitarle
+  el IVA antes de mandarlo.
+- items.taxes es un array de objetos (código + tarifa), no un tax_rate plano.
+- El medio de pago va en payment_details (array de objetos), no en campos
+  sueltos payment_form/payment_method_code.
+- Para anular una factura con nota crédito, v2 solo pide el número de
+  factura (bill_number), no un ID interno como en v1 — no hace falta
+  consultar la factura por separado antes de crear la nota.
+- POST /v2/bills/validate crea Y timbra la factura ante la DIAN en un solo
   paso (no hay estado intermedio "abierta"), el cliente y los ítems van
   embebidos en cada factura, y no existe una API de pagos: el saldo
   pendiente / abonos de una venta a crédito se maneja 100% dentro de MyInv
@@ -32,23 +36,27 @@ import requests
 
 BASE_URL_SANDBOX = "https://api-sandbox.factus.com.co"
 BASE_URL_PRODUCCION = "https://api.factus.com.co"
-# Electricos.DR es el primer negocio facturando en vivo, con cuenta de
-# producción real de Factus — todo MyInv apunta a producción desde aquí.
-# Si en el futuro se necesita un negocio en modo pruebas, esto debe
-# convertirse en un valor por negocio (columna en Usuarios) en vez de global.
-BASE_URL = BASE_URL_PRODUCCION
+# TEMPORAL: apuntado a sandbox mientras se prueba la migración a v2 con las
+# credenciales de sandbox que dio Factus. Volver a BASE_URL_PRODUCCION (y
+# cargar las credenciales de producción en Usuarios.factus_*) en cuanto las
+# pruebas queden validadas -- mientras tanto NO se puede facturar en vivo.
+# Si en el futuro se necesita un negocio en modo pruebas permanente junto a
+# otro en producción, esto debe volverse un valor por negocio (columna en
+# Usuarios) en vez de este único interruptor global.
+BASE_URL = BASE_URL_SANDBOX
 
-# --- Catálogos de Factus v1 (ver Tablas de referencia de Factus v1) ---
-TIPO_DOC_ID_FACTUS = {"NIT": 6, "CC": 3, "CE": 5, "PAS": 7, "TI": 2}  # IDs tipos de documentos de identidad
-ORGANIZACION_ID_FACTUS = {"NIT": 1, "CC": 2}   # IDs tipos de organizaciones (1=Jurídica, 2=Natural)
-TRIBUTE_ID_CLIENTE = 21                         # ZZ - No aplica (fijo, MyInv no rastrea régimen por ID Factus)
-TRIBUTE_ID_IVA_ITEM = 1                         # IVA en items (tabla de tributos de productos)
-UNIT_MEASURE_ID_DEFECTO = 70                    # "unidad" (code 94) — MyInv no distingue unidades finas
-STANDARD_CODE_ID_DEFECTO = 1                    # Estándar de adopción del contribuyente
-DOCUMENTO_FACTURA = "01"                        # Factura electrónica de venta
-DOCUMENT_CODE_RANGO_FACTURA = "21"              # Código de Factus para el rango de numeración de Factura de Venta
+# --- Catálogos de Factus v2 (ver Tablas de referencia de Factus v2) ---
+TIPO_DOC_CODE_FACTUS = {"NIT": "31", "CC": "13", "CE": "22", "PAS": "41", "TI": "12"}  # Códigos DIAN de tipos de documento de identidad
+ORGANIZACION_CODE_FACTUS = {"NIT": "1", "CC": "2"}   # Códigos de tipos de organización (1=Jurídica, 2=Natural)
+TRIBUTE_CODE_CLIENTE = "ZZ"                          # No aplica (fijo, MyInv no rastrea régimen del cliente)
+CODIGO_IMPUESTO_IVA = "01"                           # IVA en la tabla de códigos de impuestos
+UNIT_MEASURE_CODE_DEFECTO = "94"                     # "unidad" — MyInv no distingue unidades finas
+STANDARD_CODE_DEFECTO = "999"                        # Estándar de adopción del contribuyente
+DOCUMENTO_FACTURA = "01"                             # Factura electrónica de venta
+DOCUMENT_CODE_RANGO_FACTURA = "21"                   # Código de Factus para el rango de numeración de Factura de Venta
 # Catálogo DIAN de conceptos de corrección para notas crédito (estándar,
-# igual para cualquier proveedor de facturación electrónica):
+# igual para cualquier proveedor de facturación electrónica, no cambia
+# entre v1 y v2):
 CORRECCION_DEVOLUCION_PARCIAL = 1               # Devolución parcial de bienes / no aceptación parcial del servicio
 CORRECCION_ANULACION = 2                        # Anulación de factura electrónica
 CORRECCION_REBAJA = 3                           # Rebaja o descuento parcial o total
@@ -116,17 +124,17 @@ def consultar_adquiriente_dian(client_id, client_secret, username, password, tip
     social y correo asociados a un documento, para autocompletar el registro
     de un cliente nuevo sin escribirlos a mano. Solo devuelve esos dos campos
     — dígito de verificación, régimen y dirección siguen siendo manuales."""
-    doc_id = TIPO_DOC_ID_FACTUS.get(tipo_documento)
-    if not doc_id or not str(numero_documento or "").strip():
+    doc_code = TIPO_DOC_CODE_FACTUS.get(tipo_documento)
+    if not doc_code or not str(numero_documento or "").strip():
         return False, "Tipo o número de documento inválido."
     try:
         token, error = _obtener_token(client_id, client_secret, username, password)
         if not token:
             return False, f"No se pudo autenticar con Factus: {error}"
         resp = requests.get(
-            f"{BASE_URL}/v1/dian/acquirer",
+            f"{BASE_URL}/v2/dian/acquirer",
             headers=_headers(token),
-            params={"identification_document_id": doc_id, "identification_number": str(numero_documento).strip()},
+            params={"identification_document_code": doc_code, "identification_number": str(numero_documento).strip()},
             timeout=15,
         )
         if resp.status_code != 200:
@@ -141,13 +149,13 @@ def consultar_adquiriente_dian(client_id, client_secret, username, password, tip
 
 def listar_rangos_numeracion(client_id, client_secret, username, password):
     """Diagnóstico: consulta los rangos de numeración (autorización DIAN) que
-    tiene activos esta cuenta de Factus. Sin un rango activo, /v1/bills/validate
+    tiene activos esta cuenta de Factus. Sin un rango activo, /v2/bills/validate
     rechaza cualquier factura con un 422 genérico sin detalle de campo."""
     try:
         token, error = _obtener_token(client_id, client_secret, username, password)
         if not token:
             return False, f"No se pudo autenticar con Factus: {error}"
-        resp = requests.get(f"{BASE_URL}/v1/numbering-ranges", headers=_headers(token), timeout=15)
+        resp = requests.get(f"{BASE_URL}/v2/numbering-ranges", headers=_headers(token), timeout=15)
         if resp.status_code not in (200, 201):
             return False, f"Error consultando rangos ({resp.status_code}): {_mensaje_error(resp)}"
         return True, resp.json()
@@ -171,7 +179,7 @@ def crear_rango_numeracion(client_id, client_secret, username, password, prefix,
             "resolution_number": resolution_number,
             "current": current,
         }
-        resp = requests.post(f"{BASE_URL}/v1/numbering-ranges", headers=_headers(token), json=payload, timeout=15)
+        resp = requests.post(f"{BASE_URL}/v2/numbering-ranges", headers=_headers(token), json=payload, timeout=15)
         if resp.status_code not in (200, 201):
             return False, f"El rango fue rechazado ({resp.status_code}): {_mensaje_error(resp)}"
         return True, resp.json().get("data", resp.json())
@@ -185,10 +193,10 @@ def _resolver_numbering_range_id(token, tipo_documento="factura"):
     uno, Factus lo exige y rechaza la factura/nota con un 422 sin detalle
     ('obligatorio') si no se envía, o 'inválido' si se envía uno de otro
     tipo de documento -- Factus SÍ exige un rango propio para notas crédito,
-    no comparte el de la factura (confirmado en producción: un rango con
-    document='Factura de Venta' fue rechazado como inválido al usarlo en
+    no comparte el de la factura (confirmado en producción con v1: un rango
+    con document='Factura de Venta' fue rechazado como inválido al usarlo en
     una nota crédito). Se resuelve automáticamente contra
-    /v1/numbering-ranges, filtrando por el campo 'document' (nombre legible
+    /v2/numbering-ranges, filtrando por el campo 'document' (nombre legible
     que devuelve Factus, ej. 'Factura de Venta' / 'Nota Crédito') de forma
     tolerante a mayúsculas/acentos; si no hay ningún rango de ese tipo, cae
     de vuelta a cualquier rango activo como último recurso. tipo_documento:
@@ -196,7 +204,7 @@ def _resolver_numbering_range_id(token, tipo_documento="factura"):
     rangos_crudos); rangos_crudos se devuelve siempre para poder
     diagnosticar si Factus sigue rechazando el campo."""
     try:
-        resp = requests.get(f"{BASE_URL}/v1/numbering-ranges", headers=_headers(token), timeout=15)
+        resp = requests.get(f"{BASE_URL}/v2/numbering-ranges", headers=_headers(token), timeout=15)
         if resp.status_code != 200:
             return None, []
         rangos = resp.json().get("data", {}).get("data", [])
@@ -221,21 +229,6 @@ def _resolver_numbering_range_id(token, tipo_documento="factura"):
         return None, []
 
 
-def _obtener_bill_id(token, numero_factura):
-    """v1 exige el ID interno de la factura (no su número) para crear la nota
-    crédito que la anula — se resuelve consultando la factura por su número
-    justo antes de armar la nota."""
-    try:
-        resp = requests.get(f"{BASE_URL}/v1/bills/show/{numero_factura}", headers=_headers(token), timeout=15)
-        if resp.status_code != 200:
-            return None
-        data = resp.json().get("data", {})
-        bill = data.get("bill", data)
-        return bill.get("id")
-    except requests.RequestException:
-        return None
-
-
 def obtener_credenciales(uid):
     """Devuelve (client_id, client_secret, username, password) configurados
     por este negocio, o (None, None, None, None) si no ha configurado nada."""
@@ -251,17 +244,24 @@ def _headers(token):
     return {"Authorization": f"Bearer {token}", "Accept": "application/json", "Content-Type": "application/json"}
 
 
+def _campo(item, nombre, defecto=None):
+    """Lee un campo de un renglón de venta que puede llegar como dict (armado
+    a mano en Devoluciones) o como objeto (fila de Detalles_Venta)."""
+    return item.get(nombre, defecto) if isinstance(item, dict) else getattr(item, nombre, defecto)
+
+
 def _construir_customer(cliente):
     """Arma el objeto 'customer' embebido en la factura/nota crédito a partir
-    de un Cliente de MyInv. No se envía municipality_id: en v1 ese campo pide
-    el ID interno de Factus para el municipio (no el código DIVIPOLA que
-    guarda MyInv), y la documentación lo marca como opcional."""
+    de un Cliente de MyInv. No se envía municipality_code: la documentación
+    lo marca como opcional y MyInv no rastrea el municipio DIAN de cada
+    cliente. Tampoco se envía responsibilities: se deja el default de Factus
+    (R-99-PN) porque MyInv no rastrea el régimen tributario del cliente."""
     tipo_doc = cliente.tipo_documento or "CC"
     customer = {
-        "identification_document_id": TIPO_DOC_ID_FACTUS.get(tipo_doc, 3),
+        "identification_document_code": TIPO_DOC_CODE_FACTUS.get(tipo_doc, "13"),
         "identification": cliente.documento,
-        "legal_organization_id": ORGANIZACION_ID_FACTUS.get(tipo_doc, 2),
-        "tribute_id": TRIBUTE_ID_CLIENTE,
+        "legal_organization_code": ORGANIZACION_CODE_FACTUS.get(tipo_doc, "2"),
+        "tribute_code": TRIBUTE_CODE_CLIENTE,
     }
     if tipo_doc == "NIT":
         customer["company"] = cliente.nombre
@@ -276,10 +276,9 @@ def _construir_customer(cliente):
 
 def _construir_item(descripcion, cantidad, precio_unitario, descuento_linea, iva_porcentaje, codigo_ref):
     """Arma un renglón de la factura/nota crédito a partir de un renglón de
-    Detalles_Venta de MyInv. A diferencia de v2, v1 espera items.price CON
-    impuestos incluidos — igual que se guarda en MyInv — así que no hay que
-    quitarle el IVA. quantity debe ser entero en v1 (MyInv no vende
-    fracciones de unidad en la práctica, así que se redondea)."""
+    Detalles_Venta de MyInv. precio_unitario llega con IVA incluido (como se
+    guarda en MyInv) — a diferencia de v1, v2 pide items.price como valor
+    neto sin impuestos, así que se le quita el IVA antes de mandarlo."""
     iva_porcentaje = float(iva_porcentaje or 0)
     cantidad = float(cantidad or 1)
     precio_unitario = float(precio_unitario or 0)
@@ -300,33 +299,40 @@ def _construir_item(descripcion, cantidad, precio_unitario, descuento_linea, iva
             # así que se factura directo al precio real cobrado en esta venta.
             precio_item = precio_unitario - ajuste_unitario
 
+    precio_neto = precio_item / (1 + iva_porcentaje / 100) if iva_porcentaje > 0 else precio_item
+
+    taxes = (
+        [{"code": CODIGO_IMPUESTO_IVA, "rate": f"{iva_porcentaje:.2f}"}]
+        if iva_porcentaje > 0
+        else [{"code": CODIGO_IMPUESTO_IVA, "rate": "0.00", "is_excluded": True}]
+    )
+
     item = {
         "code_reference": codigo_ref,
         "name": str(descripcion)[:250],
-        "quantity": int(round(cantidad)),
-        "discount_rate": discount_rate,
-        "price": round(precio_item, 2),
-        "tax_rate": f"{iva_porcentaje:.2f}",
-        "unit_measure_id": UNIT_MEASURE_ID_DEFECTO,
-        "standard_code_id": STANDARD_CODE_ID_DEFECTO,
-        "is_excluded": 0 if iva_porcentaje > 0 else 1,
-        "tribute_id": TRIBUTE_ID_IVA_ITEM,
+        "quantity": f"{cantidad:.2f}",
+        "discount_rate": f"{discount_rate:.2f}",
+        "price": f"{round(precio_neto, 2):.2f}",
+        "unit_measure_code": UNIT_MEASURE_CODE_DEFECTO,
+        "standard_code": STANDARD_CODE_DEFECTO,
+        "taxes": taxes,
     }
 
     return item
 
 
-def _campos_pago(tipo_pago, fecha_vencimiento=None):
-    """v1 manda la forma/método de pago como campos sueltos del documento
-    (no un array payment_details como v2)."""
+def _payment_details(tipo_pago, total, fecha_vencimiento=None):
+    """v2 manda el medio de pago como un array de objetos (payment_details),
+    a diferencia de v1 que lo mandaba como campos sueltos del documento."""
     forma = PAYMENT_FORM_FACTUS.get(tipo_pago, "1")
-    campos = {
+    detalle = {
         "payment_form": forma,
         "payment_method_code": PAYMENT_METHOD_FACTUS.get(tipo_pago, "10") if forma == "1" else "1",
+        "amount": f"{float(total or 0):.2f}",
     }
     if forma == "2" and fecha_vencimiento:
-        campos["payment_due_date"] = fecha_vencimiento.isoformat() if hasattr(fecha_vencimiento, "isoformat") else str(fecha_vencimiento)
-    return campos
+        detalle["due_date"] = fecha_vencimiento.isoformat() if hasattr(fecha_vencimiento, "isoformat") else str(fecha_vencimiento)
+    return [detalle]
 
 
 def _pdf_base64_a_data_url(pdf_base64):
@@ -346,7 +352,7 @@ def _xml_base64_a_data_url(xml_base64):
 
 def _descargar_pdf(token, numero_factura):
     try:
-        resp = requests.get(f"{BASE_URL}/v1/bills/download-pdf/{numero_factura}", headers=_headers(token), timeout=20)
+        resp = requests.get(f"{BASE_URL}/v2/bills/{numero_factura}/download-pdf", headers=_headers(token), timeout=20)
         if resp.status_code == 200:
             return resp.json().get("data", {}).get("pdf_base_64_encoded")
     except requests.RequestException:
@@ -356,7 +362,7 @@ def _descargar_pdf(token, numero_factura):
 
 def _descargar_xml(token, numero_factura):
     try:
-        resp = requests.get(f"{BASE_URL}/v1/bills/download-xml/{numero_factura}", headers=_headers(token), timeout=20)
+        resp = requests.get(f"{BASE_URL}/v2/bills/{numero_factura}/download-xml", headers=_headers(token), timeout=20)
         if resp.status_code == 200:
             return resp.json().get("data", {}).get("xml_base_64_encoded")
     except requests.RequestException:
@@ -366,7 +372,7 @@ def _descargar_xml(token, numero_factura):
 
 def _descargar_pdf_nota_credito(token, numero_nc):
     try:
-        resp = requests.get(f"{BASE_URL}/v1/credit-notes/download-pdf/{numero_nc}", headers=_headers(token), timeout=20)
+        resp = requests.get(f"{BASE_URL}/v2/credit-notes/{numero_nc}/download-pdf", headers=_headers(token), timeout=20)
         if resp.status_code == 200:
             return resp.json().get("data", {}).get("pdf_base_64_encoded")
     except requests.RequestException:
@@ -376,7 +382,7 @@ def _descargar_pdf_nota_credito(token, numero_nc):
 
 def _descargar_xml_nota_credito(token, numero_nc):
     try:
-        resp = requests.get(f"{BASE_URL}/v1/credit-notes/download-xml/{numero_nc}", headers=_headers(token), timeout=20)
+        resp = requests.get(f"{BASE_URL}/v2/credit-notes/{numero_nc}/download-xml", headers=_headers(token), timeout=20)
         if resp.status_code == 200:
             return resp.json().get("data", {}).get("xml_base_64_encoded")
     except requests.RequestException:
@@ -441,17 +447,17 @@ def facturar_venta(uid, venta_id):
         payload = {
             "reference_code": f"MYINV-{uid}-{venta_id}",
             "document": DOCUMENTO_FACTURA,
+            "payment_details": _payment_details(venta.tipo_pago, venta.total, fecha_vencimiento),
             "customer": _construir_customer(cliente),
             "items": items_payload,
         }
-        payload.update(_campos_pago(venta.tipo_pago, fecha_vencimiento))
         if getattr(venta, "notas", None):
             payload["observation"] = str(venta.notas)[:250]
         numbering_range_id, rangos_debug = _resolver_numbering_range_id(token, "factura")
         if numbering_range_id:
             payload["numbering_range_id"] = numbering_range_id
 
-        resp = requests.post(f"{BASE_URL}/v1/bills/validate", headers=_headers(token), json=payload, timeout=30)
+        resp = requests.post(f"{BASE_URL}/v2/bills/validate", headers=_headers(token), json=payload, timeout=30)
         if resp.status_code not in (200, 201):
             queries.guardar_resultado_factura(venta_id, estado="error")
             detalle = f"La factura fue rechazada ({resp.status_code}): {_mensaje_error(resp)}"
@@ -462,7 +468,7 @@ def facturar_venta(uid, venta_id):
         bill = data.get("bill", data)
         numero_factura = bill.get("number")
         cufe = bill.get("cufe")
-        validada = bill.get("status") == 1
+        validada = bool(bill.get("is_validated", True))
 
         if not validada:
             queries.guardar_resultado_factura(venta_id, estado="error")
@@ -538,15 +544,21 @@ def emitir_nota_credito(uid, venta_id, concepto_codigo, items_credito, motivo=No
 
     items_payload = [
         _construir_item(
-            item["nombre_producto"] if isinstance(item, dict) else item.nombre_producto,
-            item["cantidad"] if isinstance(item, dict) else item.cantidad,
-            item["precio_unitario"] if isinstance(item, dict) else item.precio_unitario,
-            item["descuento"] if isinstance(item, dict) else item.descuento,
-            ((item["iva_porcentaje"] if isinstance(item, dict) else item.iva_porcentaje) or 0) if iva_permitido else 0,
+            _campo(item, "nombre_producto"), _campo(item, "cantidad"), _campo(item, "precio_unitario"),
+            _campo(item, "descuento"), (_campo(item, "iva_porcentaje") or 0) if iva_permitido else 0,
             f"VENTA-{venta_id}-{i}",
         )
         for i, item in enumerate(items_credito, start=1)
     ]
+    # Monto total acreditado (bruto, con IVA incluido, igual a como MyInv
+    # guarda sus totales) -- es lo que se reporta en payment_details.amount;
+    # v2 espera el bruto ahí aunque items.price vaya neto, igual que en la
+    # factura original.
+    total_credito = sum(
+        float(_campo(item, "cantidad") or 1) * float(_campo(item, "precio_unitario") or 0)
+        - float(_campo(item, "descuento") or 0)
+        for item in items_credito
+    )
 
     reference_code_nc = f"MYINV-NC-{uid}-{venta_id}"
 
@@ -555,16 +567,12 @@ def emitir_nota_credito(uid, venta_id, concepto_codigo, items_credito, motivo=No
         if not token:
             return False, f"No se pudo autenticar con Factus: {error}"
 
-        bill_id = _obtener_bill_id(token, venta.factura_numero)
-        if not bill_id:
-            return False, "No se pudo obtener la factura original en Factus para generar la nota crédito."
-
         payload = {
             "reference_code": reference_code_nc,
             "correction_concept_code": concepto_codigo,
             "customization_id": CUSTOMIZATION_NC_CON_FACTURA,
-            "bill_id": bill_id,
-            "payment_method_code": PAYMENT_METHOD_FACTUS.get(venta.tipo_pago or "Efectivo", "10"),
+            "bill_number": venta.factura_numero,
+            "payment_details": _payment_details(venta.tipo_pago or "Efectivo", total_credito),
             "customer": _construir_customer(cliente),
             "items": items_payload,
         }
@@ -574,7 +582,7 @@ def emitir_nota_credito(uid, venta_id, concepto_codigo, items_credito, motivo=No
         if numbering_range_id:
             payload["numbering_range_id"] = numbering_range_id
 
-        resp = requests.post(f"{BASE_URL}/v1/credit-notes/validate", headers=_headers(token), json=payload, timeout=30)
+        resp = requests.post(f"{BASE_URL}/v2/credit-notes/validate", headers=_headers(token), json=payload, timeout=30)
         if resp.status_code not in (200, 201):
             detalle = f"La nota crédito fue rechazada ({resp.status_code}): {_mensaje_error(resp)}"
             detalle += f" | numbering_range_id enviado: {numbering_range_id!r} | Rangos en Factus: {rangos_debug}"
