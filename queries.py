@@ -705,7 +705,7 @@ def obtener_facturas_periodo(uid, fecha_inicio, fecha_fin):
     with engine.connect() as conn:
         df = pd.read_sql_query(text("""
             SELECT v.id, v.fecha, COALESCE(cl.nombre, 'Sin cliente') as cliente,
-                   cl.documento as cliente_documento,
+                   cl.documento as cliente_documento, cl.email as cliente_email,
                    v.total, v.tipo_pago, v.estado as estado_venta, v.factura_estado, v.factura_alegra_id,
                    v.factura_prefijo, v.factura_numero, v.factura_correo_enviado,
                    v.factura_cufe, v.factura_pdf_url, v.factura_xml_url,

@@ -617,7 +617,14 @@ with tab_facturas:
                 else:
                     return '—'
                 if pd.isna(enviado):
-                    return 'Cliente sin correo'
+                    # NULL puede ser porque el cliente no tiene correo
+                    # registrado (nunca se intentó mandar nada), o porque la
+                    # factura es anterior a que MyInv empezara a registrar
+                    # esto (2026-08-18) -- se distingue mirando si el cliente
+                    # sí tiene correo hoy, para no decir "sin correo" de un
+                    # cliente que sí lo tiene.
+                    tiene_correo = isinstance(fila.get('cliente_email'), str) and fila['cliente_email'].strip()
+                    return 'Sin registrar (factura anterior)' if tiene_correo else 'Cliente sin correo'
                 return 'Enviado' if enviado else 'Falló'
 
             # df.apply(axis=1) sobre un DataFrame vacío (ej. filtros que no
