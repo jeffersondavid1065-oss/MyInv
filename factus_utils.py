@@ -670,6 +670,76 @@ def anular_factura_venta(uid, venta_id):
     )
 
 
+def reenviar_correo_factura(uid, venta_id, email=None):
+    """Reintenta manualmente el envío por correo de una factura ya emitida
+    (para cuando el envío automático al facturar falló, o la factura es
+    anterior a que MyInv empezara a intentarlo). email: si no se da, usa el
+    correo registrado del cliente de la venta.
+    Devuelve (True, mensaje) o (False, mensaje)."""
+    import queries
+
+    client_id, client_secret, username, password = obtener_credenciales(uid)
+    if not client_id:
+        return False, "Este negocio no tiene configurada su cuenta de facturación electrónica."
+
+    venta = queries.obtener_venta_para_facturar(uid, venta_id)
+    if not venta or not venta.factura_numero:
+        return False, "Esta venta no tiene una factura electrónica emitida."
+
+    destino = (email or "").strip()
+    if not destino and venta.cliente_id:
+        cliente = queries.obtener_datos_facturacion_cliente(uid, venta.cliente_id)
+        destino = (cliente.email or "").strip() if cliente else ""
+    if not destino:
+        return False, "No hay un correo para enviar -- regístralo en el cliente o escríbelo manualmente."
+
+    try:
+        token, error = _obtener_token(client_id, client_secret, username, password)
+        if not token:
+            return False, f"No se pudo autenticar con Factus: {error}"
+
+        correo_ok, correo_error = _enviar_correo_factura(token, venta.factura_numero, destino)
+        queries.actualizar_correo_enviado_factura(venta_id, correo_ok)
+        if correo_ok:
+            return True, f"Correo reenviado a {destino}."
+        return False, f"No se pudo enviar el correo a {destino}: {correo_error}"
+    except requests.RequestException as e:
+        return False, f"Error de conexión al conectar con Factus: {e}"
+
+
+def reenviar_correo_nota_credito(uid, venta_id, email=None):
+    """Igual que reenviar_correo_factura(), pero para la nota crédito."""
+    import queries
+
+    client_id, client_secret, username, password = obtener_credenciales(uid)
+    if not client_id:
+        return False, "Este negocio no tiene configurada su cuenta de facturación electrónica."
+
+    venta = queries.obtener_venta_para_facturar(uid, venta_id)
+    if not venta or not venta.nota_credito_numero:
+        return False, "Esta venta no tiene una nota crédito emitida."
+
+    destino = (email or "").strip()
+    if not destino and venta.cliente_id:
+        cliente = queries.obtener_datos_facturacion_cliente(uid, venta.cliente_id)
+        destino = (cliente.email or "").strip() if cliente else ""
+    if not destino:
+        return False, "No hay un correo para enviar -- regístralo en el cliente o escríbelo manualmente."
+
+    try:
+        token, error = _obtener_token(client_id, client_secret, username, password)
+        if not token:
+            return False, f"No se pudo autenticar con Factus: {error}"
+
+        correo_ok, correo_error = _enviar_correo_nota_credito(token, venta.nota_credito_numero, destino)
+        queries.actualizar_correo_enviado_nota_credito(venta_id, correo_ok)
+        if correo_ok:
+            return True, f"Correo reenviado a {destino}."
+        return False, f"No se pudo enviar el correo a {destino}: {correo_error}"
+    except requests.RequestException as e:
+        return False, f"Error de conexión al conectar con Factus: {e}"
+
+
 def refrescar_url_factura(uid, venta_id):
     """
     Devuelve (pdf_url, xml_url) de la factura de esta venta. A diferencia de

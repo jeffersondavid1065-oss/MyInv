@@ -973,6 +973,28 @@ def guardar_resultado_factura(venta_id, reference_code=None, cufe=None, pdf_url=
     invalidar_cache_ventas()
 
 
+def actualizar_correo_enviado_factura(venta_id, correo_enviado):
+    """Guarda solo el resultado de un reenvío manual del correo de la
+    factura, sin tocar el resto de los datos ya guardados (a diferencia de
+    guardar_resultado_factura, que sobreescribe todo el bloque)."""
+    engine = obtener_conexion()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE Ventas SET factura_correo_enviado = :correo_enviado WHERE id = :vid
+        """), {"correo_enviado": correo_enviado, "vid": venta_id})
+    invalidar_cache_ventas()
+
+
+def actualizar_correo_enviado_nota_credito(venta_id, correo_enviado):
+    """Igual que actualizar_correo_enviado_factura(), pero para la nota crédito."""
+    engine = obtener_conexion()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE Ventas SET nota_credito_correo_enviado = :correo_enviado WHERE id = :vid
+        """), {"correo_enviado": correo_enviado, "vid": venta_id})
+    invalidar_cache_ventas()
+
+
 def actualizar_datos_factura(venta_id, cufe=None, pdf_url=None, xml_url=None, prefijo=None, numero=None):
     """Completa CUFE/PDF/XML/prefijo/número de una factura ya emitida sin pisar lo que ya
     estaba guardado. Se usa al refrescar facturas cuya validación DIAN no estuvo lista

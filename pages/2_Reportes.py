@@ -21,7 +21,7 @@ from queries import (
 )
 from utils import aplicar_estilos, verificar_auth, bloquear_si_cajero
 from tz_utils import hoy_bogota, ahora_bogota
-from factus_utils import facturar_venta, mostrar_documento
+from factus_utils import facturar_venta, mostrar_documento, reenviar_correo_factura, reenviar_correo_nota_credito
 
 st.set_page_config(page_title="Reportes", layout="wide")
 aplicar_estilos()
@@ -666,6 +666,22 @@ with tab_facturas:
                 mostrar_documento(col_dr2, "Factura XML", fila_desc_rep['factura_xml_url'], f"Factura_Venta_{num_venta(fila_desc_rep['id'])}.xml", "application/xml")
                 mostrar_documento(col_dr3, "N.C. PDF", fila_desc_rep['nota_credito_pdf_url'], f"NotaCredito_Venta_{num_venta(fila_desc_rep['id'])}.pdf", "application/pdf")
                 mostrar_documento(col_dr4, "N.C. XML", fila_desc_rep['nota_credito_xml_url'], f"NotaCredito_Venta_{num_venta(fila_desc_rep['id'])}.xml", "application/xml")
+
+                st.markdown("**Reenviar por correo:**")
+                correo_registrado = fila_desc_rep.get('cliente_email')
+                correo_destino = st.text_input(
+                    "Correo de destino",
+                    value=correo_registrado if isinstance(correo_registrado, str) else "",
+                    key="correo_destino_reenvio",
+                    help="Precargado con el correo del cliente si tiene uno registrado. Puedes escribir otro para pruebas.",
+                )
+                col_rc1, col_rc2 = st.columns(2)
+                if col_rc1.button("Reenviar factura por correo", use_container_width=True, disabled=pd.isna(fila_desc_rep['factura_alegra_id'])):
+                    ok_correo, msg_correo = reenviar_correo_factura(user_id, int(fila_desc_rep['id']), correo_destino)
+                    (st.success if ok_correo else st.error)(msg_correo)
+                if col_rc2.button("Reenviar N.C. por correo", use_container_width=True, disabled=pd.isna(fila_desc_rep['nota_credito_alegra_id'])):
+                    ok_correo_nc, msg_correo_nc = reenviar_correo_nota_credito(user_id, int(fila_desc_rep['id']), correo_destino)
+                    (st.success if ok_correo_nc else st.error)(msg_correo_nc)
 
             facturas_con_error = df_facturas[df_facturas['factura_estado'] == 'error']
             if not facturas_con_error.empty:
