@@ -388,6 +388,38 @@ def _descargar_xml_nota_credito(token, numero_nc):
     return None
 
 
+def _enviar_correo_factura(token, numero_factura, email):
+    """Al validar, Factus ya intenta mandar el correo solo (send_email por
+    defecto en true) -- pero eso es fire-and-forget, sin ninguna confirmación
+    de si realmente llegó ni forma de reintentarlo. Se llama aparte a
+    POST /v2/bills/{number}/send-email para tener una respuesta explícita de
+    éxito/fracaso y poder mostrarle al usuario si el envío falló."""
+    try:
+        resp = requests.post(
+            f"{BASE_URL}/v2/bills/{numero_factura}/send-email",
+            headers=_headers(token), json={"email": email}, timeout=20,
+        )
+        if resp.status_code in (200, 201):
+            return True, None
+        return False, _mensaje_error(resp)
+    except requests.RequestException as e:
+        return False, str(e)
+
+
+def _enviar_correo_nota_credito(token, numero_nc, email):
+    """Igual que _enviar_correo_factura(), pero para notas crédito."""
+    try:
+        resp = requests.post(
+            f"{BASE_URL}/v2/credit-notes/{numero_nc}/send-email",
+            headers=_headers(token), json={"email": email}, timeout=20,
+        )
+        if resp.status_code in (200, 201):
+            return True, None
+        return False, _mensaje_error(resp)
+    except requests.RequestException as e:
+        return False, str(e)
+
+
 def facturar_venta(uid, venta_id):
     """
     Crea Y timbra ante la DIAN la factura electrónica de una venta ya
@@ -489,7 +521,17 @@ def facturar_venta(uid, venta_id):
             numero=numero_factura,
         )
 
-        return True, f"Factura {numero_factura} emitida ante la DIAN."
+        mensaje = f"Factura {numero_factura} emitida ante la DIAN."
+        if cliente.email and numero_factura:
+            # El send_email automático de /v2/bills/validate no confirma si el
+            # correo realmente llegó -- se reintenta aquí explícito para
+            # poder avisarle al usuario si falla, en vez de que se entere
+            # solo cuando el cliente reclame que nunca le llegó la factura.
+            correo_ok, correo_error = _enviar_correo_factura(token, numero_factura, cliente.email)
+            if not correo_ok:
+                mensaje += f" (No se pudo enviar el correo a {cliente.email}: {correo_error})"
+
+        return True, mensaje
     except requests.RequestException as e:
         queries.guardar_resultado_factura(venta_id, estado="error")
         return False, f"Error de conexión al conectar con Factus para crear la factura: {e}"
@@ -598,7 +640,14 @@ def emitir_nota_credito(uid, venta_id, concepto_codigo, items_credito, motivo=No
             prefijo=None, numero=numero_nc,
             anular_venta=(concepto_codigo == CORRECCION_ANULACION),
         )
-        return True, f"Nota crédito emitida ({numero_nc})."
+
+        mensaje = f"Nota crédito emitida ({numero_nc})."
+        if cliente.email and numero_nc:
+            correo_ok, correo_error = _enviar_correo_nota_credito(token, numero_nc, cliente.email)
+            if not correo_ok:
+                mensaje += f" (No se pudo enviar el correo a {cliente.email}: {correo_error})"
+
+        return True, mensaje
     except requests.RequestException as e:
         return False, f"Error de conexión al conectar con Factus para crear la nota crédito: {e}"
 
