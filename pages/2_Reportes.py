@@ -620,7 +620,14 @@ with tab_facturas:
                     return 'Cliente sin correo'
                 return 'Enviado' if enviado else 'Falló'
 
-            df_mostrar_fe['correo_texto'] = df_mostrar_fe.apply(_texto_correo_fe, axis=1)
+            # df.apply(axis=1) sobre un DataFrame vacío (ej. filtros que no
+            # dejan ninguna fila) prueba la función con una fila señuelo sin
+            # columnas reales -- _texto_correo_fe truena con KeyError. Se
+            # evita llamando apply solo si hay filas.
+            if df_mostrar_fe.empty:
+                df_mostrar_fe['correo_texto'] = pd.Series(dtype=object)
+            else:
+                df_mostrar_fe['correo_texto'] = df_mostrar_fe.apply(_texto_correo_fe, axis=1)
 
             df_reportes_display = df_mostrar_fe[[
                 'numero_venta', 'fecha', 'cliente', 'cliente_documento', 'total', 'estado_texto',
