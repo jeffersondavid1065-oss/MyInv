@@ -89,6 +89,11 @@ with tab_stock:
         filtro_categoria = st.text_input("Categoría", placeholder="Ej: Ferretería")
 
     df_inv = obtener_todos_productos(user_id)
+    if not df_inv.empty and 'activo' in df_inv.columns:
+        # Los productos desactivados (eliminados sin poder borrarse por tener
+        # ventas/entradas ligadas -- ver bloque de eliminación más abajo) no
+        # deben seguir apareciendo aquí ni poder venderse.
+        df_inv = df_inv[df_inv['activo'] != False]
 
     if not df_inv.empty:
         if busqueda_inv:
@@ -139,7 +144,9 @@ with tab_stock:
                 if r['costo_compra'] > 0 else 0.0, axis=1
             )
 
-            cols_mostrar = ['id', 'nombre', 'codigo_barras', 'codigo_ref',
+            df_show['eliminar'] = False
+
+            cols_mostrar = ['id', 'eliminar', 'nombre', 'codigo_barras', 'codigo_ref',
                             'categoria', 'unidad_medida', 'stock_actual',
                             'stock_minimo', 'costo_compra', 'precio_venta']
             if iva_activo:
@@ -149,6 +156,10 @@ with tab_stock:
 
             column_config_inv = {
                 "id": None,
+                "eliminar": st.column_config.CheckboxColumn(
+                    "🗑️", default=False,
+                    help="Marca los productos que quieras eliminar por completo del inventario."
+                ),
                 "nombre": "Producto",
                 "codigo_barras": st.column_config.TextColumn("Código Barras"),
                 "codigo_ref": "Referencia",
@@ -220,6 +231,51 @@ with tab_stock:
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error al guardar: {e}")
+
+            productos_marcados = df_edit[df_edit['eliminar'] == True] if 'eliminar' in df_edit.columns else df_edit.iloc[0:0]
+            if not productos_marcados.empty:
+                st.markdown("---")
+                st.warning(
+                    f"⚠️ Vas a eliminar **por completo** {len(productos_marcados)} producto(s): "
+                    + ", ".join(productos_marcados['nombre'].astype(str).tolist())
+                    + ". Esta acción no se puede deshacer."
+                )
+                if st.button(f"🗑️ Eliminar {len(productos_marcados)} producto(s) seleccionado(s)"):
+                    eliminados, desactivados, con_error = [], [], []
+                    for _, row in productos_marcados.iterrows():
+                        pid, nombre_p = int(row['id']), row['nombre']
+                        try:
+                            with engine.begin() as conn:
+                                conn.execute(
+                                    text("DELETE FROM Productos WHERE id = :id AND usuario_id = :uid"),
+                                    {"id": pid, "uid": user_id}
+                                )
+                            eliminados.append(nombre_p)
+                        except Exception:
+                            # Tiene ventas o entradas ligadas (sin ON DELETE CASCADE
+                            # a propósito, para no perder ese historial) -- se
+                            # desactiva en su lugar en vez de fallar en seco.
+                            try:
+                                with engine.begin() as conn:
+                                    conn.execute(
+                                        text("UPDATE Productos SET activo = FALSE WHERE id = :id AND usuario_id = :uid"),
+                                        {"id": pid, "uid": user_id}
+                                    )
+                                desactivados.append(nombre_p)
+                            except Exception as e2:
+                                con_error.append(f"{nombre_p}: {e2}")
+                    invalidar_cache_productos()
+                    if eliminados:
+                        st.success(f"Eliminados por completo: {', '.join(eliminados)}.")
+                    if desactivados:
+                        st.warning(
+                            "Estos productos ya tienen ventas o entradas registradas, así que borrarlos "
+                            "perdería ese historial -- en vez de eso se desactivaron (dejan de aparecer en "
+                            f"Inventario y Punto de Venta, pero sus ventas pasadas se conservan): {', '.join(desactivados)}."
+                        )
+                    if con_error:
+                        st.error("No se pudieron eliminar ni desactivar: " + "; ".join(con_error))
+                    st.rerun()
     else:
         st.info("No tienes productos registrados. Ve a 'Agregar Producto' para comenzar.")
 
@@ -230,25 +286,30 @@ with tab_nuevo:
     st.subheader("Registrar Nuevo Producto")
     st.caption("Puedes escanear el código de barras en el campo correspondiente.")
 
+    if st.session_state.get("producto_guardado_msg"):
+        st.success(f"✅ {st.session_state.pop('producto_guardado_msg')}")
+
     col_n1, col_n2 = st.columns(2)
     with col_n1:
-        nom_p = st.text_input("Nombre del Producto *")
-        desc_p = st.text_input("Descripción (opcional)")
+        nom_p = st.text_input("Nombre del Producto *", key="np_nombre")
+        desc_p = st.text_input("Descripción (opcional)", key="np_desc")
         cod_barras = st.text_input("Código de Barras",
-                                    placeholder="Escanea con el lector o escribe manualmente")
-        cod_ref = st.text_input("Referencia interna (opcional)")
-        categoria_p = st.text_input("Categoría", value="General")
+                                    placeholder="Escanea con el lector o escribe manualmente",
+                                    key="np_cod_barras")
+        cod_ref = st.text_input("Referencia interna (opcional)", key="np_cod_ref")
+        categoria_p = st.text_input("Categoría", value="General", key="np_categoria")
         if iva_activo:
             iva_p = st.selectbox(
                 "IVA", options=OPCIONES_IVA, index=0,
                 format_func=lambda v: "Sin IVA / Excluido" if v == 0 else f"{v}%",
-                help="Opcional. El precio de venta que definas abajo ya debe incluir el IVA."
+                help="Opcional. El precio de venta que definas abajo ya debe incluir el IVA.",
+                key="np_iva",
             )
         else:
             iva_p = 0
 
         unidad_p = st.selectbox("Unidad de Medida", options=UNIDADES,
-                                 help="Cómo se mide/vende este producto")
+                                 help="Cómo se mide/vende este producto", key="np_unidad")
         hints = {
             "kg": "Ej: puntillas, tornillos a granel, cemento",
             "m": "Ej: cable eléctrico, tubería, manguera",
@@ -265,23 +326,27 @@ with tab_nuevo:
             f"Stock Inicial ({unidad_p})",
             min_value=0.0 if es_decimal else 0,
             value=1.0 if es_decimal else 1,
-            step=0.5 if es_decimal else 1
+            step=0.5 if es_decimal else 1,
+            key="np_stock_inicial",
         )
         stock_min = st.number_input(
             f"Stock Mínimo ({unidad_p})",
             min_value=0.0 if es_decimal else 0,
             value=0.5 if es_decimal else 2,
-            step=0.5 if es_decimal else 1
+            step=0.5 if es_decimal else 1,
+            key="np_stock_min",
         )
 
         st.markdown(f"**Precio de Venta (por {unidad_p})**")
         costo_p = st.number_input(f"Costo de Compra ($ por {unidad_p}) *",
-                                   min_value=0.0, step=1000.0, key="costo_nuevo")
+                                   min_value=0.0, step=1000.0, key="np_costo")
         modo_precio = st.radio("Calcular precio por:",
-                                ["Porcentaje de ganancia", "Precio fijo"], horizontal=True)
+                                ["Porcentaje de ganancia", "Precio fijo"], horizontal=True,
+                                key="np_modo_precio")
 
         if modo_precio == "Porcentaje de ganancia":
-            porcentaje = st.slider("% de ganancia", min_value=0, max_value=300, value=30, step=1)
+            porcentaje = st.slider("% de ganancia", min_value=0, max_value=300, value=30, step=1,
+                                    key="np_porcentaje")
             if costo_p > 0:
                 precio_calculado = costo_p * (1 + porcentaje / 100)
                 ganancia_pesos = precio_calculado - costo_p
@@ -291,7 +356,8 @@ with tab_nuevo:
                     st.markdown(f"### Precio de Venta: {formato_cop(precio_calculado)}")
                 precio_p = precio_calculado
                 ajuste = st.number_input("Ajuste fino ($)",
-                                          min_value=-precio_calculado, value=0.0, step=100.0)
+                                          min_value=-precio_calculado, value=0.0, step=100.0,
+                                          key="np_ajuste")
                 precio_p = max(0, precio_calculado + ajuste)
                 if ajuste != 0:
                     pct_real = ((precio_p - costo_p) / costo_p * 100) if costo_p > 0 else 0
@@ -301,7 +367,7 @@ with tab_nuevo:
                 precio_p = 0.0
         else:
             precio_p = st.number_input(f"Precio de Venta ($ por {unidad_p}) *",
-                                        min_value=0.0, step=1000.0)
+                                        min_value=0.0, step=1000.0, key="np_precio_fijo")
             if costo_p > 0 and precio_p > 0:
                 ganancia = precio_p - costo_p
                 pct = (ganancia / costo_p) * 100
@@ -312,23 +378,37 @@ with tab_nuevo:
     if st.button("Guardar Producto", type="primary", use_container_width=True):
         if nom_p and precio_p > 0:
             try:
-                with engine.begin() as conn:
-                    conn.execute(text("""
-                        INSERT INTO Productos
-                        (usuario_id, nombre, descripcion, codigo_barras, codigo_ref,
-                         categoria, unidad_medida, stock_actual, stock_minimo,
-                         costo_compra, precio_venta, iva_porcentaje)
-                        VALUES (:uid, :nom, :desc, :cod, :ref, :cat, :um, :stk, :stk_min, :costo, :pvp, :iva)
-                    """), {
-                        "uid": user_id, "nom": nom_p, "desc": desc_p or None,
-                        "cod": cod_barras or None, "ref": cod_ref or None,
-                        "cat": categoria_p, "um": unidad_p,
-                        "stk": float(stock_inicial), "stk_min": float(stock_min),
-                        "costo": float(costo_p), "pvp": float(precio_p),
-                        "iva": float(iva_p)
-                    })
-                invalidar_cache_productos()
-                st.success(f"'{nom_p}' registrado — {formato_cant(stock_inicial, unidad_p)} en stock a {formato_cop(precio_p)}/{unidad_p}.")
+                with st.spinner("Guardando producto..."):
+                    with engine.begin() as conn:
+                        conn.execute(text("""
+                            INSERT INTO Productos
+                            (usuario_id, nombre, descripcion, codigo_barras, codigo_ref,
+                             categoria, unidad_medida, stock_actual, stock_minimo,
+                             costo_compra, precio_venta, iva_porcentaje)
+                            VALUES (:uid, :nom, :desc, :cod, :ref, :cat, :um, :stk, :stk_min, :costo, :pvp, :iva)
+                        """), {
+                            "uid": user_id, "nom": nom_p, "desc": desc_p or None,
+                            "cod": cod_barras or None, "ref": cod_ref or None,
+                            "cat": categoria_p, "um": unidad_p,
+                            "stk": float(stock_inicial), "stk_min": float(stock_min),
+                            "costo": float(costo_p), "pvp": float(precio_p),
+                            "iva": float(iva_p)
+                        })
+                    invalidar_cache_productos()
+                # El mensaje se guarda en session_state y se muestra recién en
+                # el siguiente run (arriba del formulario) -- mostrarlo aquí y
+                # llamar st.rerun() en el mismo paso hace que Streamlit
+                # reinicie el script antes de que el usuario alcance a verlo,
+                # que es justo por qué el cliente terminaba dándole "Guardar"
+                # varias veces sin saber si ya había quedado registrado.
+                st.session_state["producto_guardado_msg"] = (
+                    f"'{nom_p}' se guardó — {formato_cant(stock_inicial, unidad_p)} en stock a {formato_cop(precio_p)}/{unidad_p}. "
+                    f"El formulario se limpió, listo para el siguiente producto."
+                )
+                for k in ("np_nombre", "np_desc", "np_cod_barras", "np_cod_ref", "np_categoria",
+                          "np_iva", "np_unidad", "np_stock_inicial", "np_stock_min", "np_costo",
+                          "np_modo_precio", "np_porcentaje", "np_ajuste", "np_precio_fijo"):
+                    st.session_state.pop(k, None)
                 st.rerun()
             except Exception as e:
                 st.error(f"Error al guardar: {e}")
