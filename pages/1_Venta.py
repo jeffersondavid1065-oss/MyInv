@@ -1421,6 +1421,25 @@ with tab_cotizacion:
             "iva_porcentaje": float(iva_porcentaje or 0),
         })
 
+    def agregar_item_libre_a_cotizacion(nombre, precio, cantidad=1, costo=0, iva_porcentaje=0):
+        """Igual que agregar_item_libre_al_carrito pero para la cotización:
+        un ítem que NO está en el inventario. producto_id queda en None --
+        Detalles_Cotizacion.producto_id admite NULL y tanto crear_cotizacion
+        como convertir_cotizacion_a_venta ya lo pasan tal cual a Detalles_Venta."""
+        st.session_state.carrito_cotizacion.append({
+            "producto_id": None,
+            "nombre": nombre,
+            "codigo_barras": "",
+            "precio_unitario": float(precio),
+            "costo_unitario": float(costo or 0),
+            "descuento_item": 0.0,
+            "cantidad": cantidad,
+            "subtotal": float(precio) * cantidad,
+            "stock_max": None,
+            "iva_porcentaje": float(iva_porcentaje or 0),
+            "es_libre": True,
+        })
+
     st.subheader("Nueva Cotización")
     st.caption(
         "Cotiza productos para un cliente sin comprometer stock ni forma de pago todavía. "
@@ -1481,6 +1500,41 @@ with tab_cotizacion:
                     else:
                         st.warning(f"No se encontró '{busqueda_cot}'.")
 
+        with st.expander("Venta libre (algo que no está en el inventario)"):
+            st.caption(
+                "Para cotizar algo que no tienes en el inventario o que conseguirías por "
+                "fuera. Se agrega a la cotización igual que cualquier producto, pero no "
+                "descuenta stock de Productos."
+            )
+            with st.form("form_libre_cotizacion", clear_on_submit=True):
+                nombre_libre_cot = st.text_input("Nombre / descripción *", placeholder="Ej: Filtro de aceite Toyota")
+                col_lc1, col_lc2, col_lc3 = st.columns(3)
+                with col_lc1:
+                    precio_libre_cot = st.number_input("Precio de venta ($) *", min_value=0.0, step=1000.0)
+                with col_lc2:
+                    cantidad_libre_cot = st.number_input("Cantidad", min_value=1, value=1, step=1)
+                with col_lc3:
+                    costo_libre_cot = st.number_input(
+                        "Costo (opcional, $)", min_value=0.0, step=1000.0,
+                        help="Lo que te costó a ti, si lo sabes. Solo afecta los reportes de ganancia."
+                    )
+                if iva_activo:
+                    iva_libre_cot = st.selectbox("IVA%", OPCIONES_IVA_POS, index=0, key="iva_libre_cot")
+                else:
+                    iva_libre_cot = 0
+                if st.form_submit_button("Agregar venta libre a la cotización", use_container_width=True):
+                    if not nombre_libre_cot.strip():
+                        st.warning("Escribe el nombre o descripción del ítem.")
+                    elif precio_libre_cot <= 0:
+                        st.warning("El precio debe ser mayor a 0.")
+                    else:
+                        agregar_item_libre_a_cotizacion(
+                            nombre=nombre_libre_cot.strip(), precio=precio_libre_cot,
+                            cantidad=int(cantidad_libre_cot), costo=costo_libre_cot,
+                            iva_porcentaje=iva_libre_cot,
+                        )
+                        st.rerun()
+
         st.markdown("---")
         st.markdown("**Ítems de la Cotización**")
 
@@ -1493,7 +1547,7 @@ with tab_cotizacion:
             for i, item in enumerate(st.session_state.carrito_cotizacion):
                 cc1, cc2, cc3, cc4, cc5 = st.columns([3, 1, 1, 1, 0.5])
                 with cc1:
-                    st.write(item["nombre"])
+                    st.write(f"(Libre) {item['nombre']}" if item.get("es_libre") else item["nombre"])
                 with cc2:
                     st.write(formato_cop(item["precio_unitario"]))
                 with cc3:
