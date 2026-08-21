@@ -34,113 +34,117 @@ tab_cajeros, tab_nuevo, tab_rendimiento = st.tabs([
 # TAB 1: LISTA DE CAJEROS
 # ==========================================
 with tab_cajeros:
-    st.subheader("Cajeros del Negocio")
+    @st.fragment
+    def _seccion_cajeros_actual():
+        st.subheader("Cajeros del Negocio")
 
-    try:
-        with engine.connect() as conn:
-            df_cajeros = pd.read_sql_query(text("""
-                SELECT c.id, c.nombre, c.activo, c.fecha_registro, c.usuario_login,
-                       COUNT(DISTINCT DATE(v.fecha)) as dias_trabajados,
-                       COUNT(v.id) as total_ventas,
-                       COALESCE(SUM(v.total), 0) as total_vendido
-                FROM Cajeros c
-                LEFT JOIN Ventas v ON v.cajero_id = c.id
-                    AND v.estado != 'Anulada'
-                WHERE c.usuario_id = :uid
-                GROUP BY c.id, c.nombre, c.activo, c.fecha_registro, c.usuario_login
-                ORDER BY c.nombre ASC
-            """), con=conn, params={"uid": user_id})
-    except Exception:
-        df_cajeros = pd.DataFrame()
-        st.warning("La tabla de cajeros aún no está lista. Haz Reboot app en Streamlit Cloud.")
+        try:
+            with engine.connect() as conn:
+                df_cajeros = pd.read_sql_query(text("""
+                    SELECT c.id, c.nombre, c.activo, c.fecha_registro, c.usuario_login,
+                           COUNT(DISTINCT DATE(v.fecha)) as dias_trabajados,
+                           COUNT(v.id) as total_ventas,
+                           COALESCE(SUM(v.total), 0) as total_vendido
+                    FROM Cajeros c
+                    LEFT JOIN Ventas v ON v.cajero_id = c.id
+                        AND v.estado != 'Anulada'
+                    WHERE c.usuario_id = :uid
+                    GROUP BY c.id, c.nombre, c.activo, c.fecha_registro, c.usuario_login
+                    ORDER BY c.nombre ASC
+                """), con=conn, params={"uid": user_id})
+        except Exception:
+            df_cajeros = pd.DataFrame()
+            st.warning("La tabla de cajeros aún no está lista. Haz Reboot app en Streamlit Cloud.")
 
-    if not df_cajeros.empty:
-        for _, caj in df_cajeros.iterrows():
-            with st.container(border=True):
-                col_c1, col_c2, col_c3, col_c4 = st.columns([3, 2, 2, 1])
-                with col_c1:
-                    estado_icon = "🟢" if caj['activo'] else "🔴"
-                    st.markdown(f"### {estado_icon} {caj['nombre']}")
-                    if caj['usuario_login']:
-                        st.caption(f"Usuario: **{caj['usuario_login']}** · Registrado: {str(caj['fecha_registro'])[:10]}")
+        if not df_cajeros.empty:
+            for _, caj in df_cajeros.iterrows():
+                with st.container(border=True):
+                    col_c1, col_c2, col_c3, col_c4 = st.columns([3, 2, 2, 1])
+                    with col_c1:
+                        estado_icon = "🟢" if caj['activo'] else "🔴"
+                        st.markdown(f"### {estado_icon} {caj['nombre']}")
+                        if caj['usuario_login']:
+                            st.caption(f"Usuario: **{caj['usuario_login']}** · Registrado: {str(caj['fecha_registro'])[:10]}")
+                        else:
+                            st.caption(f"Registrado: {str(caj['fecha_registro'])[:10]}")
+                            st.warning("Sin usuario de acceso asignado — no puede iniciar sesión todavía.", icon="⚠️")
+                    with col_c2:
+                        st.metric("Días trabajados", int(caj['dias_trabajados']))
+                    with col_c3:
+                        st.metric("Ventas", int(caj['total_ventas']))
+                    with col_c4:
+                        nuevo_estado = not caj['activo']
+                        btn_label = "Desactivar" if caj['activo'] else "Activar"
+                        if st.button(btn_label, key=f"toggle_{caj['id']}"):
+                            try:
+                                with engine.begin() as conn:
+                                    conn.execute(text("""
+                                        UPDATE Cajeros SET activo = :estado, token_sesion = NULL
+                                        WHERE id = :cid AND usuario_id = :uid
+                                    """), {"estado": nuevo_estado, "cid": int(caj['id']), "uid": user_id})
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error: {e}")
+
+            st.markdown("---")
+            st.subheader("Credenciales de acceso de un cajero")
+            st.caption("El usuario de acceso es con lo que el cajero inicia sesión de forma independiente (sin que tú tengas que entrar primero).")
+            cajeros_activos = df_cajeros[df_cajeros['activo'] == True]
+            if not cajeros_activos.empty:
+                dict_caj = {r['nombre']: (r['id'], r['usuario_login']) for _, r in cajeros_activos.iterrows()}
+                caj_sel = st.selectbox("Selecciona el cajero", options=list(dict_caj.keys()))
+                caj_id_sel, login_actual_sel = dict_caj[caj_sel]
+
+                nuevo_login = st.text_input(
+                    "Usuario de acceso", value=login_actual_sel or "",
+                    placeholder="ej: maria_ferreteria", max_chars=30,
+                    help="Único en toda la plataforma, sin espacios. El cajero lo usa junto con su PIN para entrar."
+                )
+
+                col_pin1, col_pin2 = st.columns(2)
+                with col_pin1:
+                    nuevo_pin = st.text_input("Nuevo PIN (4 dígitos, opcional)", type="password", max_chars=4)
+                with col_pin2:
+                    confirmar_pin = st.text_input("Confirmar PIN", type="password", max_chars=4)
+
+                if st.button("Guardar credenciales", use_container_width=True):
+                    login_limpio = nuevo_login.strip() if nuevo_login else None
+                    if login_limpio and " " in login_limpio:
+                        st.error("El usuario de acceso no puede contener espacios.")
+                    elif nuevo_pin and not (len(nuevo_pin) == 4 and nuevo_pin.isdigit()):
+                        st.error("El PIN debe ser de exactamente 4 dígitos numéricos.")
+                    elif nuevo_pin and nuevo_pin != confirmar_pin:
+                        st.error("Los PINs no coinciden.")
                     else:
-                        st.caption(f"Registrado: {str(caj['fecha_registro'])[:10]}")
-                        st.warning("Sin usuario de acceso asignado — no puede iniciar sesión todavía.", icon="⚠️")
-                with col_c2:
-                    st.metric("Días trabajados", int(caj['dias_trabajados']))
-                with col_c3:
-                    st.metric("Ventas", int(caj['total_ventas']))
-                with col_c4:
-                    nuevo_estado = not caj['activo']
-                    btn_label = "Desactivar" if caj['activo'] else "Activar"
-                    if st.button(btn_label, key=f"toggle_{caj['id']}"):
                         try:
+                            if login_limpio:
+                                with engine.connect() as conn_check:
+                                    existe = conn_check.execute(text("""
+                                        SELECT 1 FROM Cajeros WHERE usuario_login = :login AND id != :cid
+                                    """), {"login": login_limpio, "cid": caj_id_sel}).fetchone()
+                                if existe:
+                                    st.error(f"El usuario '{login_limpio}' ya está en uso. Elige otro.")
+                                    st.stop()
+
                             with engine.begin() as conn:
-                                conn.execute(text("""
-                                    UPDATE Cajeros SET activo = :estado, token_sesion = NULL
-                                    WHERE id = :cid AND usuario_id = :uid
-                                """), {"estado": nuevo_estado, "cid": int(caj['id']), "uid": user_id})
+                                if nuevo_pin:
+                                    conn.execute(text("""
+                                        UPDATE Cajeros SET usuario_login = :login, pin = :pin
+                                        WHERE id = :cid AND usuario_id = :uid
+                                    """), {"login": login_limpio, "pin": hash_pin(nuevo_pin), "cid": caj_id_sel, "uid": user_id})
+                                else:
+                                    conn.execute(text("""
+                                        UPDATE Cajeros SET usuario_login = :login
+                                        WHERE id = :cid AND usuario_id = :uid
+                                    """), {"login": login_limpio, "cid": caj_id_sel, "uid": user_id})
+                            st.success(f"Credenciales de {caj_sel} actualizadas.")
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error: {e}")
+        else:
+            st.info("No tienes cajeros registrados. Ve a 'Registrar Cajero' para agregar uno.")
 
-        st.markdown("---")
-        st.subheader("Credenciales de acceso de un cajero")
-        st.caption("El usuario de acceso es con lo que el cajero inicia sesión de forma independiente (sin que tú tengas que entrar primero).")
-        cajeros_activos = df_cajeros[df_cajeros['activo'] == True]
-        if not cajeros_activos.empty:
-            dict_caj = {r['nombre']: (r['id'], r['usuario_login']) for _, r in cajeros_activos.iterrows()}
-            caj_sel = st.selectbox("Selecciona el cajero", options=list(dict_caj.keys()))
-            caj_id_sel, login_actual_sel = dict_caj[caj_sel]
-
-            nuevo_login = st.text_input(
-                "Usuario de acceso", value=login_actual_sel or "",
-                placeholder="ej: maria_ferreteria", max_chars=30,
-                help="Único en toda la plataforma, sin espacios. El cajero lo usa junto con su PIN para entrar."
-            )
-
-            col_pin1, col_pin2 = st.columns(2)
-            with col_pin1:
-                nuevo_pin = st.text_input("Nuevo PIN (4 dígitos, opcional)", type="password", max_chars=4)
-            with col_pin2:
-                confirmar_pin = st.text_input("Confirmar PIN", type="password", max_chars=4)
-
-            if st.button("Guardar credenciales", use_container_width=True):
-                login_limpio = nuevo_login.strip() if nuevo_login else None
-                if login_limpio and " " in login_limpio:
-                    st.error("El usuario de acceso no puede contener espacios.")
-                elif nuevo_pin and not (len(nuevo_pin) == 4 and nuevo_pin.isdigit()):
-                    st.error("El PIN debe ser de exactamente 4 dígitos numéricos.")
-                elif nuevo_pin and nuevo_pin != confirmar_pin:
-                    st.error("Los PINs no coinciden.")
-                else:
-                    try:
-                        if login_limpio:
-                            with engine.connect() as conn_check:
-                                existe = conn_check.execute(text("""
-                                    SELECT 1 FROM Cajeros WHERE usuario_login = :login AND id != :cid
-                                """), {"login": login_limpio, "cid": caj_id_sel}).fetchone()
-                            if existe:
-                                st.error(f"El usuario '{login_limpio}' ya está en uso. Elige otro.")
-                                st.stop()
-
-                        with engine.begin() as conn:
-                            if nuevo_pin:
-                                conn.execute(text("""
-                                    UPDATE Cajeros SET usuario_login = :login, pin = :pin
-                                    WHERE id = :cid AND usuario_id = :uid
-                                """), {"login": login_limpio, "pin": hash_pin(nuevo_pin), "cid": caj_id_sel, "uid": user_id})
-                            else:
-                                conn.execute(text("""
-                                    UPDATE Cajeros SET usuario_login = :login
-                                    WHERE id = :cid AND usuario_id = :uid
-                                """), {"login": login_limpio, "cid": caj_id_sel, "uid": user_id})
-                        st.success(f"Credenciales de {caj_sel} actualizadas.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error: {e}")
-    else:
-        st.info("No tienes cajeros registrados. Ve a 'Registrar Cajero' para agregar uno.")
+    _seccion_cajeros_actual()
 
 # ==========================================
 # TAB 2: REGISTRAR CAJERO NUEVO

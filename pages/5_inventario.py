@@ -78,206 +78,214 @@ with tab_stock:
 
     st.markdown("---")
 
-    col_f1, col_f2, col_f3 = st.columns(3)
-    with col_f1:
-        busqueda_inv = st.text_input("Buscar por nombre o código",
-                                      placeholder="Escanea o escribe...", key="busq_inv")
-    with col_f2:
-        filtro_estado = st.selectbox("Estado de stock",
-                                      ["Todos", "Agotados", "Por agotarse", "Con stock"])
-    with col_f3:
-        filtro_categoria = st.text_input("Categoría", placeholder="Ej: Ferretería")
+    @st.fragment
+    def _seccion_stock_actual():
+        col_f1, col_f2, col_f3 = st.columns(3)
+        with col_f1:
+            busqueda_inv = st.text_input("Buscar por nombre o código",
+                                          placeholder="Escanea o escribe...", key="busq_inv")
+        with col_f2:
+            filtro_estado = st.selectbox("Estado de stock",
+                                          ["Todos", "Agotados", "Por agotarse", "Con stock"])
+        with col_f3:
+            filtro_categoria = st.text_input("Categoría", placeholder="Ej: Ferretería")
 
-    df_inv = obtener_todos_productos(user_id)
-    if not df_inv.empty and 'activo' in df_inv.columns:
-        # Los productos desactivados (eliminados sin poder borrarse por tener
-        # ventas/entradas ligadas -- ver bloque de eliminación más abajo) no
-        # deben seguir apareciendo aquí ni poder venderse.
-        df_inv = df_inv[df_inv['activo'] != False]
+        df_inv = obtener_todos_productos(user_id)
+        if not df_inv.empty and 'activo' in df_inv.columns:
+            # Los productos desactivados (eliminados sin poder borrarse por tener
+            # ventas/entradas ligadas -- ver bloque de eliminación más abajo) no
+            # deben seguir apareciendo aquí ni poder venderse.
+            df_inv = df_inv[df_inv['activo'] != False]
 
-    if not df_inv.empty:
-        if busqueda_inv:
-            mask = (
-                df_inv['nombre'].str.contains(busqueda_inv, case=False, na=False) |
-                df_inv['codigo_barras'].astype(str).str.contains(busqueda_inv, case=False, na=False) |
-                df_inv['codigo_ref'].astype(str).str.contains(busqueda_inv, case=False, na=False)
-            )
-            df_inv = df_inv[mask]
+        if not df_inv.empty:
+            if busqueda_inv:
+                mask = (
+                    df_inv['nombre'].str.contains(busqueda_inv, case=False, na=False) |
+                    df_inv['codigo_barras'].astype(str).str.contains(busqueda_inv, case=False, na=False) |
+                    df_inv['codigo_ref'].astype(str).str.contains(busqueda_inv, case=False, na=False)
+                )
+                df_inv = df_inv[mask]
 
-        if filtro_estado == "Agotados":
-            df_inv = df_inv[df_inv['stock_actual'] <= 0]
-        elif filtro_estado == "Por agotarse":
-            df_inv = df_inv[(df_inv['stock_actual'] > 0) & (df_inv['stock_actual'] <= df_inv['stock_minimo'])]
-        elif filtro_estado == "Con stock":
-            df_inv = df_inv[df_inv['stock_actual'] > 0]
+            if filtro_estado == "Agotados":
+                df_inv = df_inv[df_inv['stock_actual'] <= 0]
+            elif filtro_estado == "Por agotarse":
+                df_inv = df_inv[(df_inv['stock_actual'] > 0) & (df_inv['stock_actual'] <= df_inv['stock_minimo'])]
+            elif filtro_estado == "Con stock":
+                df_inv = df_inv[df_inv['stock_actual'] > 0]
 
-        if filtro_categoria:
-            df_inv = df_inv[df_inv['categoria'].str.contains(filtro_categoria, case=False, na=False)]
+            if filtro_categoria:
+                df_inv = df_inv[df_inv['categoria'].str.contains(filtro_categoria, case=False, na=False)]
 
-        if df_inv.empty:
-            st.info("No hay productos que coincidan con los filtros.")
-        else:
-            st.caption(f"Mostrando {len(df_inv)} producto(s). Edita directamente en la tabla y guarda.")
-            st.caption("Puedes editar **código de barras** y **unidad de medida** directamente aquí.")
-
-            df_show = df_inv.copy()
-            df_show['codigo_barras'] = df_show['codigo_barras'].fillna("").astype(str).replace("None", "")
-            df_show['codigo_ref'] = df_show['codigo_ref'].fillna("").astype(str).replace("None", "")
-            df_show['categoria'] = df_show['categoria'].fillna("General")
-
-            if 'unidad_medida' not in df_show.columns:
-                df_show['unidad_medida'] = 'Unidad'
+            if df_inv.empty:
+                st.info("No hay productos que coincidan con los filtros.")
             else:
-                df_show['unidad_medida'] = df_show['unidad_medida'].fillna("Unidad")
+                st.caption(f"Mostrando {len(df_inv)} producto(s). Edita directamente en la tabla y guarda.")
+                st.caption("Puedes editar **código de barras** y **unidad de medida** directamente aquí.")
 
-            if 'iva_porcentaje' not in df_show.columns:
-                df_show['iva_porcentaje'] = 0
-            else:
-                df_show['iva_porcentaje'] = df_show['iva_porcentaje'].fillna(0)
+                df_show = df_inv.copy()
+                df_show['codigo_barras'] = df_show['codigo_barras'].fillna("").astype(str).replace("None", "")
+                df_show['codigo_ref'] = df_show['codigo_ref'].fillna("").astype(str).replace("None", "")
+                df_show['categoria'] = df_show['categoria'].fillna("General")
 
-            # Calcular ganancia (fillna por si hay valores corruptos/NaN en BD)
-            df_show['costo_compra'] = df_show['costo_compra'].fillna(0)
-            df_show['precio_venta'] = df_show['precio_venta'].fillna(0)
-            df_show['ganancia'] = df_show['precio_venta'] - df_show['costo_compra']
-            df_show['pct_ganancia'] = df_show.apply(
-                lambda r: round((r['ganancia'] / r['costo_compra']) * 100, 1)
-                if r['costo_compra'] > 0 else 0.0, axis=1
-            )
+                if 'unidad_medida' not in df_show.columns:
+                    df_show['unidad_medida'] = 'Unidad'
+                else:
+                    df_show['unidad_medida'] = df_show['unidad_medida'].fillna("Unidad")
 
-            df_show['eliminar'] = False
+                if 'iva_porcentaje' not in df_show.columns:
+                    df_show['iva_porcentaje'] = 0
+                else:
+                    df_show['iva_porcentaje'] = df_show['iva_porcentaje'].fillna(0)
 
-            cols_mostrar = ['id', 'eliminar', 'nombre', 'codigo_barras', 'codigo_ref',
-                            'categoria', 'unidad_medida', 'stock_actual',
-                            'stock_minimo', 'costo_compra', 'precio_venta']
-            if iva_activo:
-                cols_mostrar.append('iva_porcentaje')
-            cols_mostrar += ['ganancia', 'pct_ganancia']
-            cols_disponibles = [c for c in cols_mostrar if c in df_show.columns]
-
-            column_config_inv = {
-                "id": None,
-                "eliminar": st.column_config.CheckboxColumn(
-                    "🗑️", default=False,
-                    help="Marca los productos que quieras eliminar por completo del inventario."
-                ),
-                "nombre": "Producto",
-                "codigo_barras": st.column_config.TextColumn("Código Barras"),
-                "codigo_ref": "Referencia",
-                "categoria": "Categoría",
-                "unidad_medida": st.column_config.SelectboxColumn(
-                    "Unidad", options=UNIDADES,
-                    help="Ej: kg para granel, m para cable, Unidad para repuestos"
-                ),
-                "stock_actual": st.column_config.NumberColumn(
-                    "Stock", min_value=0, format="localized"
-                ),
-                "stock_minimo": st.column_config.NumberColumn(
-                    "Stock Mín.", min_value=0, format="localized"
-                ),
-                "costo_compra": st.column_config.NumberColumn("Costo ($)", format="$%,d"),
-                "precio_venta": st.column_config.NumberColumn("Precio Venta ($)", format="$%,d"),
-                "ganancia": st.column_config.NumberColumn("Ganancia ($)", format="$%,d"),
-                "pct_ganancia": st.column_config.NumberColumn("% Ganancia", format="%.1f%%"),
-            }
-            if iva_activo:
-                column_config_inv["iva_porcentaje"] = st.column_config.SelectboxColumn(
-                    "IVA", options=OPCIONES_IVA,
-                    help="0 = sin IVA/excluido. El precio de venta ya lo incluye."
+                # Calcular ganancia (fillna por si hay valores corruptos/NaN en BD)
+                df_show['costo_compra'] = df_show['costo_compra'].fillna(0)
+                df_show['precio_venta'] = df_show['precio_venta'].fillna(0)
+                df_show['ganancia'] = df_show['precio_venta'] - df_show['costo_compra']
+                df_show['pct_ganancia'] = df_show.apply(
+                    lambda r: round((r['ganancia'] / r['costo_compra']) * 100, 1)
+                    if r['costo_compra'] > 0 else 0.0, axis=1
                 )
 
-            df_edit = st.data_editor(
-                df_show[cols_disponibles],
-                hide_index=True,
-                use_container_width=True,
-                disabled=["id", "ganancia", "pct_ganancia"],
-                column_config=column_config_inv,
-                key=f"editor_inv_{busqueda_inv}_{filtro_estado}"
-            )
+                df_show['eliminar'] = False
 
-            if st.button("Guardar Cambios", type="primary"):
-                try:
-                    with engine.begin() as conn:
-                        for _, row in df_edit.iterrows():
-                            um = row.get('unidad_medida', 'Unidad') if 'unidad_medida' in row else 'Unidad'
-                            sql_iva = ", iva_porcentaje = :iva" if iva_activo else ""
-                            params = {
-                                "nom": row['nombre'],
-                                "cod": row['codigo_barras'] or None,
-                                "ref": row['codigo_ref'] or None,
-                                "cat": row['categoria'],
-                                "um": um,
-                                "st_act": safe_float(row['stock_actual']),
-                                "st_min": safe_float(row['stock_minimo']),
-                                "costo": safe_float(row['costo_compra']),
-                                "pvp": safe_float(row['precio_venta']),
-                                # ganancia y pct_ganancia son calculadas, NO se guardan
-                                "id": int(row['id']),
-                                "uid": user_id
-                            }
-                            if iva_activo:
-                                params["iva"] = safe_float(row.get('iva_porcentaje', 0))
-                            conn.execute(text(f"""
-                                UPDATE Productos
-                                SET nombre = :nom, codigo_barras = :cod,
-                                    codigo_ref = :ref, categoria = :cat,
-                                    unidad_medida = :um,
-                                    stock_actual = :st_act, stock_minimo = :st_min,
-                                    costo_compra = :costo, precio_venta = :pvp
-                                    {sql_iva}
-                                WHERE id = :id AND usuario_id = :uid
-                            """), params)
-                    invalidar_cache_productos()
-                    st.success("Inventario actualizado correctamente.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error al guardar: {e}")
+                cols_mostrar = ['id', 'eliminar', 'nombre', 'codigo_barras', 'codigo_ref',
+                                'categoria', 'unidad_medida', 'stock_actual',
+                                'stock_minimo', 'costo_compra', 'precio_venta']
+                if iva_activo:
+                    cols_mostrar.append('iva_porcentaje')
+                cols_mostrar += ['ganancia', 'pct_ganancia']
+                cols_disponibles = [c for c in cols_mostrar if c in df_show.columns]
 
-            productos_marcados = df_edit[df_edit['eliminar'] == True] if 'eliminar' in df_edit.columns else df_edit.iloc[0:0]
-            if not productos_marcados.empty:
-                st.markdown("---")
-                st.warning(
-                    f"⚠️ Vas a eliminar **por completo** {len(productos_marcados)} producto(s): "
-                    + ", ".join(productos_marcados['nombre'].astype(str).tolist())
-                    + ". Esta acción no se puede deshacer."
+                column_config_inv = {
+                    "id": None,
+                    "eliminar": st.column_config.CheckboxColumn(
+                        "🗑️", default=False,
+                        help="Marca los productos que quieras eliminar por completo del inventario."
+                    ),
+                    "nombre": "Producto",
+                    "codigo_barras": st.column_config.TextColumn("Código Barras"),
+                    "codigo_ref": "Referencia",
+                    "categoria": "Categoría",
+                    "unidad_medida": st.column_config.SelectboxColumn(
+                        "Unidad", options=UNIDADES,
+                        help="Ej: kg para granel, m para cable, Unidad para repuestos"
+                    ),
+                    "stock_actual": st.column_config.NumberColumn(
+                        "Stock", min_value=0, format="localized"
+                    ),
+                    "stock_minimo": st.column_config.NumberColumn(
+                        "Stock Mín.", min_value=0, format="localized"
+                    ),
+                    "costo_compra": st.column_config.NumberColumn("Costo ($)", format="$%,d"),
+                    "precio_venta": st.column_config.NumberColumn("Precio Venta ($)", format="$%,d"),
+                    "ganancia": st.column_config.NumberColumn("Ganancia ($)", format="$%,d"),
+                    "pct_ganancia": st.column_config.NumberColumn("% Ganancia", format="%.1f%%"),
+                }
+                if iva_activo:
+                    column_config_inv["iva_porcentaje"] = st.column_config.SelectboxColumn(
+                        "IVA", options=OPCIONES_IVA,
+                        help="0 = sin IVA/excluido. El precio de venta ya lo incluye."
+                    )
+
+                df_edit = st.data_editor(
+                    df_show[cols_disponibles],
+                    hide_index=True,
+                    use_container_width=True,
+                    disabled=["id", "ganancia", "pct_ganancia"],
+                    column_config=column_config_inv,
+                    key=f"editor_inv_{busqueda_inv}_{filtro_estado}"
                 )
-                if st.button(f"🗑️ Eliminar {len(productos_marcados)} producto(s) seleccionado(s)"):
-                    eliminados, desactivados, con_error = [], [], []
-                    for _, row in productos_marcados.iterrows():
-                        pid, nombre_p = int(row['id']), row['nombre']
-                        try:
-                            with engine.begin() as conn:
-                                conn.execute(
-                                    text("DELETE FROM Productos WHERE id = :id AND usuario_id = :uid"),
-                                    {"id": pid, "uid": user_id}
-                                )
-                            eliminados.append(nombre_p)
-                        except Exception:
-                            # Tiene ventas o entradas ligadas (sin ON DELETE CASCADE
-                            # a propósito, para no perder ese historial) -- se
-                            # desactiva en su lugar en vez de fallar en seco.
+
+                if st.button("Guardar Cambios", type="primary"):
+                    try:
+                        with engine.begin() as conn:
+                            for _, row in df_edit.iterrows():
+                                um = row.get('unidad_medida', 'Unidad') if 'unidad_medida' in row else 'Unidad'
+                                sql_iva = ", iva_porcentaje = :iva" if iva_activo else ""
+                                params = {
+                                    "nom": row['nombre'],
+                                    "cod": row['codigo_barras'] or None,
+                                    "ref": row['codigo_ref'] or None,
+                                    "cat": row['categoria'],
+                                    "um": um,
+                                    "st_act": safe_float(row['stock_actual']),
+                                    "st_min": safe_float(row['stock_minimo']),
+                                    "costo": safe_float(row['costo_compra']),
+                                    "pvp": safe_float(row['precio_venta']),
+                                    # ganancia y pct_ganancia son calculadas, NO se guardan
+                                    "id": int(row['id']),
+                                    "uid": user_id
+                                }
+                                if iva_activo:
+                                    params["iva"] = safe_float(row.get('iva_porcentaje', 0))
+                                conn.execute(text(f"""
+                                    UPDATE Productos
+                                    SET nombre = :nom, codigo_barras = :cod,
+                                        codigo_ref = :ref, categoria = :cat,
+                                        unidad_medida = :um,
+                                        stock_actual = :st_act, stock_minimo = :st_min,
+                                        costo_compra = :costo, precio_venta = :pvp
+                                        {sql_iva}
+                                    WHERE id = :id AND usuario_id = :uid
+                                """), params)
+                        invalidar_cache_productos()
+                        st.success("Inventario actualizado correctamente.")
+                        # scope="app": las métricas del encabezado (fuera de este
+                        # fragment) también deben refrescarse tras guardar.
+                        st.rerun(scope="app")
+                    except Exception as e:
+                        st.error(f"Error al guardar: {e}")
+
+                productos_marcados = df_edit[df_edit['eliminar'] == True] if 'eliminar' in df_edit.columns else df_edit.iloc[0:0]
+                if not productos_marcados.empty:
+                    st.markdown("---")
+                    st.warning(
+                        f"⚠️ Vas a eliminar **por completo** {len(productos_marcados)} producto(s): "
+                        + ", ".join(productos_marcados['nombre'].astype(str).tolist())
+                        + ". Esta acción no se puede deshacer."
+                    )
+                    if st.button(f"🗑️ Eliminar {len(productos_marcados)} producto(s) seleccionado(s)"):
+                        eliminados, desactivados, con_error = [], [], []
+                        for _, row in productos_marcados.iterrows():
+                            pid, nombre_p = int(row['id']), row['nombre']
                             try:
                                 with engine.begin() as conn:
                                     conn.execute(
-                                        text("UPDATE Productos SET activo = FALSE WHERE id = :id AND usuario_id = :uid"),
+                                        text("DELETE FROM Productos WHERE id = :id AND usuario_id = :uid"),
                                         {"id": pid, "uid": user_id}
                                     )
-                                desactivados.append(nombre_p)
-                            except Exception as e2:
-                                con_error.append(f"{nombre_p}: {e2}")
-                    invalidar_cache_productos()
-                    if eliminados:
-                        st.success(f"Eliminados por completo: {', '.join(eliminados)}.")
-                    if desactivados:
-                        st.warning(
-                            "Estos productos ya tienen ventas o entradas registradas, así que borrarlos "
-                            "perdería ese historial -- en vez de eso se desactivaron (dejan de aparecer en "
-                            f"Inventario y Punto de Venta, pero sus ventas pasadas se conservan): {', '.join(desactivados)}."
-                        )
-                    if con_error:
-                        st.error("No se pudieron eliminar ni desactivar: " + "; ".join(con_error))
-                    st.rerun()
-    else:
-        st.info("No tienes productos registrados. Ve a 'Agregar Producto' para comenzar.")
+                                eliminados.append(nombre_p)
+                            except Exception:
+                                # Tiene ventas o entradas ligadas (sin ON DELETE CASCADE
+                                # a propósito, para no perder ese historial) -- se
+                                # desactiva en su lugar en vez de fallar en seco.
+                                try:
+                                    with engine.begin() as conn:
+                                        conn.execute(
+                                            text("UPDATE Productos SET activo = FALSE WHERE id = :id AND usuario_id = :uid"),
+                                            {"id": pid, "uid": user_id}
+                                        )
+                                    desactivados.append(nombre_p)
+                                except Exception as e2:
+                                    con_error.append(f"{nombre_p}: {e2}")
+                        invalidar_cache_productos()
+                        if eliminados:
+                            st.success(f"Eliminados por completo: {', '.join(eliminados)}.")
+                        if desactivados:
+                            st.warning(
+                                "Estos productos ya tienen ventas o entradas registradas, así que borrarlos "
+                                "perdería ese historial -- en vez de eso se desactivaron (dejan de aparecer en "
+                                f"Inventario y Punto de Venta, pero sus ventas pasadas se conservan): {', '.join(desactivados)}."
+                            )
+                        if con_error:
+                            st.error("No se pudieron eliminar ni desactivar: " + "; ".join(con_error))
+                        # scope="app": las métricas del encabezado (fuera de este
+                        # fragment) también deben refrescarse tras eliminar.
+                        st.rerun(scope="app")
+        else:
+            st.info("No tienes productos registrados. Ve a 'Agregar Producto' para comenzar.")
+
+    _seccion_stock_actual()
 
 # ==========================================
 # TAB 2: AGREGAR PRODUCTO NUEVO
@@ -482,236 +490,242 @@ with tab_entradas:
 
     st.markdown("---")
 
-    if "items_entrada" not in st.session_state:
-        st.session_state.items_entrada = []
-
-    col_btn1, col_btn2 = st.columns(2)
-    with col_btn1:
-        if st.button("Agregar producto manualmente",
-                     use_container_width=True, key="btn_agregar_manual"):
-            st.session_state.items_entrada.append({
-                "nombre": "", "cantidad": 1.0, "costo": 0.0,
-                "subtotal": 0.0, "unidad_medida": "Unidad", "ia": False
-            })
-            st.rerun()
-    with col_btn2:
-        if st.button("Limpiar todo", use_container_width=True, key="btn_limpiar_entrada"):
+    @st.fragment
+    def _seccion_entradas_lista():
+        if "items_entrada" not in st.session_state:
             st.session_state.items_entrada = []
-            if "num_factura_ia" in st.session_state:
-                del st.session_state.num_factura_ia
-            st.rerun()
 
-    if not st.session_state.items_entrada:
-        st.info("Sube una factura para que la IA detecte los productos, o agrega uno manualmente.")
-    else:
-        df_inv_entrada = obtener_todos_productos(user_id)
-        st.markdown(f"**{len(st.session_state.items_entrada)} producto(s) en esta entrada:**")
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            if st.button("Agregar producto manualmente",
+                         use_container_width=True, key="btn_agregar_manual"):
+                st.session_state.items_entrada.append({
+                    "nombre": "", "cantidad": 1.0, "costo": 0.0,
+                    "subtotal": 0.0, "unidad_medida": "Unidad", "ia": False
+                })
+                st.rerun()
+        with col_btn2:
+            if st.button("Limpiar todo", use_container_width=True, key="btn_limpiar_entrada"):
+                st.session_state.items_entrada = []
+                if "num_factura_ia" in st.session_state:
+                    del st.session_state.num_factura_ia
+                st.rerun()
 
-        items_a_eliminar = []
-        total_entrada = 0.0
+        if not st.session_state.items_entrada:
+            st.info("Sube una factura para que la IA detecte los productos, o agrega uno manualmente.")
+        else:
+            df_inv_entrada = obtener_todos_productos(user_id)
+            st.markdown(f"**{len(st.session_state.items_entrada)} producto(s) en esta entrada:**")
 
-        for i, item in enumerate(st.session_state.items_entrada):
-            with st.container(border=True):
-                nombre_item = item.get("nombre", "")
-                producto_match = None
-                if nombre_item and not df_inv_entrada.empty:
-                    matches = df_inv_entrada[
-                        df_inv_entrada['nombre'].str.lower().str.contains(
-                            nombre_item.lower()[:10], na=False
+            items_a_eliminar = []
+            total_entrada = 0.0
+
+            for i, item in enumerate(st.session_state.items_entrada):
+                with st.container(border=True):
+                    nombre_item = item.get("nombre", "")
+                    producto_match = None
+                    if nombre_item and not df_inv_entrada.empty:
+                        matches = df_inv_entrada[
+                            df_inv_entrada['nombre'].str.lower().str.contains(
+                                nombre_item.lower()[:10], na=False
+                            )
+                        ]
+                        if not matches.empty:
+                            producto_match = matches.iloc[0]
+
+                    col_h1, col_h2 = st.columns([4, 1])
+                    with col_h1:
+                        if producto_match is not None:
+                            um_match = producto_match.get('unidad_medida', 'Unidad') \
+                                       if 'unidad_medida' in producto_match else 'Unidad'
+                            st.success(f"Encontrado: **{producto_match['nombre']}** "
+                                       f"(Stock: {formato_cant(producto_match['stock_actual'], um_match)})")
+                        else:
+                            st.warning("Producto nuevo — se creará en el inventario")
+                    with col_h2:
+                        if st.button("❌", key=f"del_item_{i}"):
+                            items_a_eliminar.append(i)
+
+                    col_f1, col_f2, col_f3, col_f4 = st.columns([3, 1, 1, 1])
+                    with col_f1:
+                        nombre_nuevo = st.text_input("Nombre", value=nombre_item, key=f"nom_{i}")
+                        st.session_state.items_entrada[i]["nombre"] = nombre_nuevo
+                    with col_f2:
+                        um_actual = item.get("unidad_medida", "Unidad")
+                        if producto_match is not None and 'unidad_medida' in producto_match:
+                            um_actual = producto_match['unidad_medida'] or "Unidad"
+                        um_idx = UNIDADES.index(um_actual) if um_actual in UNIDADES else 0
+                        um_sel = st.selectbox("Unidad", UNIDADES, index=um_idx, key=f"um_{i}")
+                        st.session_state.items_entrada[i]["unidad_medida"] = um_sel
+                    with col_f3:
+                        es_dec = um_sel in UNIDADES_DECIMALES
+                        cant_actual = safe_float(item.get("cantidad", 1), 1.0)
+                        cant_nueva = st.number_input(
+                            f"Cant. ({um_sel})",
+                            min_value=0.0 if es_dec else 1,
+                            value=cant_actual if es_dec else int(cant_actual),
+                            step=0.5 if es_dec else 1,
+                            key=f"cant_{i}"
                         )
-                    ]
-                    if not matches.empty:
-                        producto_match = matches.iloc[0]
+                        st.session_state.items_entrada[i]["cantidad"] = cant_nueva
+                    with col_f4:
+                        costo_nuevo = st.number_input(
+                            f"Costo/$/{um_sel}", min_value=0.0,
+                            value=safe_float(item.get("costo", 0)),
+                            step=1000.0, key=f"costo_{i}"
+                        )
+                        st.session_state.items_entrada[i]["costo"] = costo_nuevo
+                        subtotal_i = cant_nueva * costo_nuevo
+                        st.session_state.items_entrada[i]["subtotal"] = subtotal_i
+                        st.caption(f"= {formato_cop(subtotal_i)}")
 
-                col_h1, col_h2 = st.columns([4, 1])
-                with col_h1:
                     if producto_match is not None:
-                        um_match = producto_match.get('unidad_medida', 'Unidad') \
-                                   if 'unidad_medida' in producto_match else 'Unidad'
-                        st.success(f"Encontrado: **{producto_match['nombre']}** "
-                                   f"(Stock: {formato_cant(producto_match['stock_actual'], um_match)})")
-                    else:
-                        st.warning("Producto nuevo — se creará en el inventario")
-                with col_h2:
-                    if st.button("❌", key=f"del_item_{i}"):
-                        items_a_eliminar.append(i)
-
-                col_f1, col_f2, col_f3, col_f4 = st.columns([3, 1, 1, 1])
-                with col_f1:
-                    nombre_nuevo = st.text_input("Nombre", value=nombre_item, key=f"nom_{i}")
-                    st.session_state.items_entrada[i]["nombre"] = nombre_nuevo
-                with col_f2:
-                    um_actual = item.get("unidad_medida", "Unidad")
-                    if producto_match is not None and 'unidad_medida' in producto_match:
-                        um_actual = producto_match['unidad_medida'] or "Unidad"
-                    um_idx = UNIDADES.index(um_actual) if um_actual in UNIDADES else 0
-                    um_sel = st.selectbox("Unidad", UNIDADES, index=um_idx, key=f"um_{i}")
-                    st.session_state.items_entrada[i]["unidad_medida"] = um_sel
-                with col_f3:
-                    es_dec = um_sel in UNIDADES_DECIMALES
-                    cant_actual = safe_float(item.get("cantidad", 1), 1.0)
-                    cant_nueva = st.number_input(
-                        f"Cant. ({um_sel})",
-                        min_value=0.0 if es_dec else 1,
-                        value=cant_actual if es_dec else int(cant_actual),
-                        step=0.5 if es_dec else 1,
-                        key=f"cant_{i}"
-                    )
-                    st.session_state.items_entrada[i]["cantidad"] = cant_nueva
-                with col_f4:
-                    costo_nuevo = st.number_input(
-                        f"Costo/$/{um_sel}", min_value=0.0,
-                        value=safe_float(item.get("costo", 0)),
-                        step=1000.0, key=f"costo_{i}"
-                    )
-                    st.session_state.items_entrada[i]["costo"] = costo_nuevo
-                    subtotal_i = cant_nueva * costo_nuevo
-                    st.session_state.items_entrada[i]["subtotal"] = subtotal_i
-                    st.caption(f"= {formato_cop(subtotal_i)}")
-
-                if producto_match is not None:
-                    col_e1, col_e2 = st.columns(2)
-                    with col_e1:
-                        pvp_actual = float(producto_match['precio_venta'])
-                        st.caption(f"PVP actual: {formato_cop(pvp_actual)}/{um_sel}")
-                        actualizar_precio = st.checkbox("Actualizar precio de venta", key=f"upd_precio_{i}")
-                    with col_e2:
-                        if actualizar_precio:
-                            precio_nuevo = st.number_input("Nuevo PVP ($)", min_value=0.0,
-                                                           value=pvp_actual, step=1000.0, key=f"pvp_{i}")
-                            st.session_state.items_entrada[i]["precio_venta"] = precio_nuevo
-                        else:
-                            st.session_state.items_entrada[i]["precio_venta"] = pvp_actual
-                    st.session_state.items_entrada[i]["producto_id"] = int(producto_match['id'])
-                    st.session_state.items_entrada[i]["es_nuevo"] = False
-                else:
-                    col_n1, col_n2, col_n3 = st.columns(3)
-                    with col_n1:
-                        pvp_nuevo = st.number_input(
-                            f"Precio venta ($/{um_sel}) *", min_value=0.0,
-                            value=float(costo_nuevo * 1.3) if costo_nuevo > 0 else 0.0,
-                            step=1000.0, key=f"pvp_nuevo_{i}"
-                        )
-                        st.session_state.items_entrada[i]["precio_venta"] = pvp_nuevo
-                    with col_n2:
-                        cod_barras = st.text_input("Código de barras",
-                                                    placeholder="Escanea o escribe",
-                                                    key=f"cod_{i}")
-                        st.session_state.items_entrada[i]["codigo_barras"] = cod_barras
-                    with col_n3:
-                        categoria = st.text_input("Categoría", value="General", key=f"cat_{i}")
-                        st.session_state.items_entrada[i]["categoria"] = categoria
-                    st.session_state.items_entrada[i]["es_nuevo"] = True
-                    st.session_state.items_entrada[i]["producto_id"] = None
-
-                total_entrada += subtotal_i
-
-        for idx in sorted(items_a_eliminar, reverse=True):
-            st.session_state.items_entrada.pop(idx)
-        if items_a_eliminar:
-            st.rerun()
-
-        if total_entrada > 0:
-            st.markdown("---")
-            st.info(f"**Total de la entrada: {formato_cop(total_entrada)}**")
-
-        if st.session_state.items_entrada and st.button(
-            "Registrar Entrada", type="primary",
-            use_container_width=True, key="btn_registrar_entrada"
-        ):
-            items_validos = [i for i in st.session_state.items_entrada
-                             if i.get("nombre") and i.get("cantidad", 0) > 0]
-            if not items_validos:
-                st.warning("Agrega al menos un producto válido.")
-            else:
-                try:
-                    proveedor_id = dict_proveedores.get(prov_sel) if prov_sel != "-- Sin proveedor --" else None
-
-                    with engine.begin() as conn:
-                        is_sqlite = "sqlite" in str(engine.url)
-
-                        if is_sqlite:
-                            cur = conn.execute(text("""
-                                INSERT INTO Entradas_Inventario
-                                (usuario_id, proveedor_id, numero_factura, total_compra, notas)
-                                VALUES (:uid, :pid, :nf, :total, :notas)
-                            """), {"uid": user_id, "pid": proveedor_id,
-                                   "nf": num_factura or None, "total": float(total_entrada),
-                                   "notas": notas_entrada or None})
-                            entrada_id = cur.lastrowid
-                        else:
-                            res = conn.execute(text("""
-                                INSERT INTO Entradas_Inventario
-                                (usuario_id, proveedor_id, numero_factura, total_compra, notas)
-                                VALUES (:uid, :pid, :nf, :total, :notas) RETURNING id
-                            """), {"uid": user_id, "pid": proveedor_id,
-                                   "nf": num_factura or None, "total": float(total_entrada),
-                                   "notas": notas_entrada or None})
-                            entrada_id = res.scalar()
-
-                        nuevos = actualizados = 0
-
-                        for item in items_validos:
-                            pid = item.get("producto_id")
-                            pvp = safe_float(item.get("precio_venta", 0))
-                            costo = safe_float(item.get("costo", 0))
-                            cantidad = safe_float(item.get("cantidad", 1), 1.0)
-                            um = item.get("unidad_medida", "Unidad")
-                            cod = item.get("codigo_barras") or None
-                            cat = item.get("categoria", "General")
-
-                            if item.get("es_nuevo") or not pid:
-                                pvp_sug = costo * 1.30 if costo > 0 else 1000
-                                pvp_final = pvp if pvp > 0 else pvp_sug
-                                if is_sqlite:
-                                    cur_p = conn.execute(text("""
-                                        INSERT INTO Productos
-                                        (usuario_id, nombre, codigo_barras, categoria, unidad_medida,
-                                         stock_actual, stock_minimo, costo_compra, precio_venta)
-                                        VALUES (:uid, :nom, :cod, :cat, :um, :stk, 2, :costo, :pvp)
-                                    """), {"uid": user_id, "nom": item["nombre"],
-                                           "cod": cod, "cat": cat, "um": um,
-                                           "stk": cantidad, "costo": costo, "pvp": pvp_final})
-                                    pid = cur_p.lastrowid
-                                else:
-                                    res_p = conn.execute(text("""
-                                        INSERT INTO Productos
-                                        (usuario_id, nombre, codigo_barras, categoria, unidad_medida,
-                                         stock_actual, stock_minimo, costo_compra, precio_venta)
-                                        VALUES (:uid, :nom, :cod, :cat, :um, :stk, 2, :costo, :pvp)
-                                        RETURNING id
-                                    """), {"uid": user_id, "nom": item["nombre"],
-                                           "cod": cod, "cat": cat, "um": um,
-                                           "stk": cantidad, "costo": costo, "pvp": pvp_final})
-                                    pid = res_p.scalar()
-                                nuevos += 1
+                        col_e1, col_e2 = st.columns(2)
+                        with col_e1:
+                            pvp_actual = float(producto_match['precio_venta'])
+                            st.caption(f"PVP actual: {formato_cop(pvp_actual)}/{um_sel}")
+                            actualizar_precio = st.checkbox("Actualizar precio de venta", key=f"upd_precio_{i}")
+                        with col_e2:
+                            if actualizar_precio:
+                                precio_nuevo = st.number_input("Nuevo PVP ($)", min_value=0.0,
+                                                               value=pvp_actual, step=1000.0, key=f"pvp_{i}")
+                                st.session_state.items_entrada[i]["precio_venta"] = precio_nuevo
                             else:
+                                st.session_state.items_entrada[i]["precio_venta"] = pvp_actual
+                        st.session_state.items_entrada[i]["producto_id"] = int(producto_match['id'])
+                        st.session_state.items_entrada[i]["es_nuevo"] = False
+                    else:
+                        col_n1, col_n2, col_n3 = st.columns(3)
+                        with col_n1:
+                            pvp_nuevo = st.number_input(
+                                f"Precio venta ($/{um_sel}) *", min_value=0.0,
+                                value=float(costo_nuevo * 1.3) if costo_nuevo > 0 else 0.0,
+                                step=1000.0, key=f"pvp_nuevo_{i}"
+                            )
+                            st.session_state.items_entrada[i]["precio_venta"] = pvp_nuevo
+                        with col_n2:
+                            cod_barras = st.text_input("Código de barras",
+                                                        placeholder="Escanea o escribe",
+                                                        key=f"cod_{i}")
+                            st.session_state.items_entrada[i]["codigo_barras"] = cod_barras
+                        with col_n3:
+                            categoria = st.text_input("Categoría", value="General", key=f"cat_{i}")
+                            st.session_state.items_entrada[i]["categoria"] = categoria
+                        st.session_state.items_entrada[i]["es_nuevo"] = True
+                        st.session_state.items_entrada[i]["producto_id"] = None
+
+                    total_entrada += subtotal_i
+
+            for idx in sorted(items_a_eliminar, reverse=True):
+                st.session_state.items_entrada.pop(idx)
+            if items_a_eliminar:
+                st.rerun()
+
+            if total_entrada > 0:
+                st.markdown("---")
+                st.info(f"**Total de la entrada: {formato_cop(total_entrada)}**")
+
+            if st.session_state.items_entrada and st.button(
+                "Registrar Entrada", type="primary",
+                use_container_width=True, key="btn_registrar_entrada"
+            ):
+                items_validos = [i for i in st.session_state.items_entrada
+                                 if i.get("nombre") and i.get("cantidad", 0) > 0]
+                if not items_validos:
+                    st.warning("Agrega al menos un producto válido.")
+                else:
+                    try:
+                        proveedor_id = dict_proveedores.get(prov_sel) if prov_sel != "-- Sin proveedor --" else None
+
+                        with engine.begin() as conn:
+                            is_sqlite = "sqlite" in str(engine.url)
+
+                            if is_sqlite:
+                                cur = conn.execute(text("""
+                                    INSERT INTO Entradas_Inventario
+                                    (usuario_id, proveedor_id, numero_factura, total_compra, notas)
+                                    VALUES (:uid, :pid, :nf, :total, :notas)
+                                """), {"uid": user_id, "pid": proveedor_id,
+                                       "nf": num_factura or None, "total": float(total_entrada),
+                                       "notas": notas_entrada or None})
+                                entrada_id = cur.lastrowid
+                            else:
+                                res = conn.execute(text("""
+                                    INSERT INTO Entradas_Inventario
+                                    (usuario_id, proveedor_id, numero_factura, total_compra, notas)
+                                    VALUES (:uid, :pid, :nf, :total, :notas) RETURNING id
+                                """), {"uid": user_id, "pid": proveedor_id,
+                                       "nf": num_factura or None, "total": float(total_entrada),
+                                       "notas": notas_entrada or None})
+                                entrada_id = res.scalar()
+
+                            nuevos = actualizados = 0
+
+                            for item in items_validos:
+                                pid = item.get("producto_id")
+                                pvp = safe_float(item.get("precio_venta", 0))
+                                costo = safe_float(item.get("costo", 0))
+                                cantidad = safe_float(item.get("cantidad", 1), 1.0)
+                                um = item.get("unidad_medida", "Unidad")
+                                cod = item.get("codigo_barras") or None
+                                cat = item.get("categoria", "General")
+
+                                if item.get("es_nuevo") or not pid:
+                                    pvp_sug = costo * 1.30 if costo > 0 else 1000
+                                    pvp_final = pvp if pvp > 0 else pvp_sug
+                                    if is_sqlite:
+                                        cur_p = conn.execute(text("""
+                                            INSERT INTO Productos
+                                            (usuario_id, nombre, codigo_barras, categoria, unidad_medida,
+                                             stock_actual, stock_minimo, costo_compra, precio_venta)
+                                            VALUES (:uid, :nom, :cod, :cat, :um, :stk, 2, :costo, :pvp)
+                                        """), {"uid": user_id, "nom": item["nombre"],
+                                               "cod": cod, "cat": cat, "um": um,
+                                               "stk": cantidad, "costo": costo, "pvp": pvp_final})
+                                        pid = cur_p.lastrowid
+                                    else:
+                                        res_p = conn.execute(text("""
+                                            INSERT INTO Productos
+                                            (usuario_id, nombre, codigo_barras, categoria, unidad_medida,
+                                             stock_actual, stock_minimo, costo_compra, precio_venta)
+                                            VALUES (:uid, :nom, :cod, :cat, :um, :stk, 2, :costo, :pvp)
+                                            RETURNING id
+                                        """), {"uid": user_id, "nom": item["nombre"],
+                                               "cod": cod, "cat": cat, "um": um,
+                                               "stk": cantidad, "costo": costo, "pvp": pvp_final})
+                                        pid = res_p.scalar()
+                                    nuevos += 1
+                                else:
+                                    conn.execute(text("""
+                                        UPDATE Productos
+                                        SET stock_actual = stock_actual + :cant,
+                                            costo_compra = :costo, precio_venta = :pvp,
+                                            unidad_medida = :um
+                                        WHERE id = :pid AND usuario_id = :uid
+                                    """), {"cant": cantidad, "costo": costo, "pvp": pvp,
+                                           "um": um, "pid": pid, "uid": user_id})
+                                    actualizados += 1
+
                                 conn.execute(text("""
-                                    UPDATE Productos
-                                    SET stock_actual = stock_actual + :cant,
-                                        costo_compra = :costo, precio_venta = :pvp,
-                                        unidad_medida = :um
-                                    WHERE id = :pid AND usuario_id = :uid
-                                """), {"cant": cantidad, "costo": costo, "pvp": pvp,
-                                       "um": um, "pid": pid, "uid": user_id})
-                                actualizados += 1
+                                    INSERT INTO Detalles_Entrada
+                                    (entrada_id, producto_id, cantidad, costo_unitario, subtotal)
+                                    VALUES (:eid, :pid, :cant, :costo, :sub)
+                                """), {"eid": entrada_id, "pid": pid,
+                                       "cant": cantidad, "costo": costo,
+                                       "sub": safe_float(item.get("subtotal", 0))})
 
-                            conn.execute(text("""
-                                INSERT INTO Detalles_Entrada
-                                (entrada_id, producto_id, cantidad, costo_unitario, subtotal)
-                                VALUES (:eid, :pid, :cant, :costo, :sub)
-                            """), {"eid": entrada_id, "pid": pid,
-                                   "cant": cantidad, "costo": costo,
-                                   "sub": safe_float(item.get("subtotal", 0))})
+                        invalidar_cache_productos()
+                        st.session_state.items_entrada = []
+                        if "num_factura_ia" in st.session_state:
+                            del st.session_state.num_factura_ia
 
-                    invalidar_cache_productos()
-                    st.session_state.items_entrada = []
-                    if "num_factura_ia" in st.session_state:
-                        del st.session_state.num_factura_ia
+                        st.success(f"Entrada #{entrada_id}: **{nuevos}** nuevo(s), **{actualizados}** actualizado(s).")
+                        if nuevos > 0:
+                            st.info("Productos nuevos creados con 30% de ganancia sugerida. Ajusta precios en Stock Actual.")
+                        # scope="app": el stock/métricas de "Stock Actual" (otro
+                        # fragment, fuera de este) también deben reflejar la entrada.
+                        st.rerun(scope="app")
+                    except Exception as e:
+                        st.error(f"Error al registrar: {e}")
 
-                    st.success(f"Entrada #{entrada_id}: **{nuevos}** nuevo(s), **{actualizados}** actualizado(s).")
-                    if nuevos > 0:
-                        st.info("Productos nuevos creados con 30% de ganancia sugerida. Ajusta precios en Stock Actual.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error al registrar: {e}")
+    _seccion_entradas_lista()

@@ -179,142 +179,146 @@ with col_conf3:
 
 st.markdown("---")
 
-# ==========================================
-# SELECCIÓN DE PRODUCTOS
-# ==========================================
-st.subheader("Selecciona los Productos")
+@st.fragment
+def _seccion_seleccion_etiquetas():
+    # ==========================================
+    # SELECCIÓN DE PRODUCTOS
+    # ==========================================
+    st.subheader("Selecciona los Productos")
 
-df_todos = obtener_todos_productos(user_id)
+    df_todos = obtener_todos_productos(user_id)
 
-if df_todos.empty:
-    st.info("No tienes productos registrados.")
-else:
-    sin_codigo_mask = (
-        df_todos['codigo_barras'].isna() | (df_todos['codigo_barras'].astype(str).str.strip() == "")
-    ) & (
-        df_todos['codigo_ref'].isna() | (df_todos['codigo_ref'].astype(str).str.strip() == "")
-    )
-    productos_sin_codigo = df_todos[sin_codigo_mask]
-
-    if not productos_sin_codigo.empty:
-        st.warning(
-            f"**{len(productos_sin_codigo)} producto(s)** no tienen código de barras "
-            "(llegaron sin código en la entrada de mercancía). Genérales uno interno para poder "
-            "escanearlos en el punto de venta y agilizar la venta."
-        )
-        if st.button(f"Generar código para los {len(productos_sin_codigo)} producto(s) sin código", type="primary"):
-            with engine.begin() as conn:
-                for _, row in productos_sin_codigo.iterrows():
-                    conn.execute(text("""
-                        UPDATE Productos SET codigo_barras = :cod
-                        WHERE id = :id AND usuario_id = :uid
-                    """), {
-                        "cod": generar_codigo_interno(row['id']),
-                        "id": int(row['id']),
-                        "uid": user_id
-                    })
-            invalidar_cache_productos()
-            st.success("Códigos de barras generados. Ya puedes imprimir las etiquetas.")
-            st.rerun()
-
-    col_filtro1, col_filtro2 = st.columns(2)
-    with col_filtro1:
-        busq_etiq = st.text_input("Buscar producto", placeholder="Nombre o categoría...")
-    with col_filtro2:
-        categorias_disponibles = ["-- Todas --"] + sorted(df_todos['categoria'].dropna().unique().tolist())
-        cat_filtro = st.selectbox("Filtrar por categoría", categorias_disponibles)
-
-    df_filtrado = df_todos.copy()
-    if busq_etiq:
-        df_filtrado = df_filtrado[
-            df_filtrado['nombre'].str.contains(busq_etiq, case=False, na=False)
-        ]
-    if cat_filtro != "-- Todas --":
-        df_filtrado = df_filtrado[df_filtrado['categoria'] == cat_filtro]
-
-    # Selección con checkboxes
-    st.caption(f"{len(df_filtrado)} producto(s) encontrado(s). Selecciona los que quieres etiquetar.")
-
-    col_sel1, col_sel2 = st.columns(2)
-    with col_sel1:
-        if st.button("Seleccionar todos", use_container_width=True):
-            for i in df_filtrado.index:
-                st.session_state[f"etiq_{i}"] = True
-            st.rerun()
-    with col_sel2:
-        if st.button("Deseleccionar todos", use_container_width=True):
-            for i in df_filtrado.index:
-                st.session_state[f"etiq_{i}"] = False
-            st.rerun()
-
-    st.markdown("")
-
-    productos_seleccionados = []
-
-    # Mostrar en grid de 3 columnas
-    cols = st.columns(3)
-    for idx, (i, prod) in enumerate(df_filtrado.iterrows()):
-        col = cols[idx % 3]
-        with col:
-            tiene_cod = bool(str(prod.get('codigo_barras') or prod.get('codigo_ref') or '').strip())
-            etiqueta_cod = "" if tiene_cod else " sin código"
-            seleccionado = st.checkbox(
-                f"**{prod['nombre']}**\n{formato_cop(prod['precio_venta'])}{etiqueta_cod}",
-                key=f"etiq_{i}",
-                value=st.session_state.get(f"etiq_{i}", False)
-            )
-            if seleccionado:
-                for _ in range(cantidad_copias):
-                    productos_seleccionados.append(prod)
-
-    st.markdown("---")
-
-    # Preview y generación
-    if productos_seleccionados:
-        st.success(f"**{len(productos_seleccionados)} etiqueta(s)** seleccionada(s) — {len(productos_seleccionados) // (4 if tamano == 'pequena' else 3 if tamano == 'mediana' else 2) + 1} hoja(s) aprox.")
-
-        col_prev1, col_prev2 = st.columns([2, 1])
-
-        with col_prev1:
-            st.markdown("**Preview de etiquetas seleccionadas:**")
-            preview_data = []
-            for p in productos_seleccionados[:10]:
-                preview_data.append({
-                    "Producto": p['nombre'],
-                    "Precio": formato_cop(p['precio_venta']),
-                    "Código": p.get('codigo_barras') or p.get('codigo_ref') or 'Sin código'
-                })
-            st.dataframe(pd.DataFrame(preview_data), hide_index=True, use_container_width=True)
-            if len(productos_seleccionados) > 10:
-                st.caption(f"... y {len(productos_seleccionados) - 10} más")
-
-        with col_prev2:
-            st.markdown("**Generar PDF:**")
-            st.info(f"""
-            **Configuración:**
-            - Tamaño: {tamano}
-            - Etiquetas: {len(productos_seleccionados)}
-            - Código: {'Sí' if mostrar_codigo else 'No'}
-            - Negocio: {'Sí' if mostrar_nombre_negocio else 'No'}
-            """)
-
-            pdf_etiquetas = generar_etiquetas_pdf(
-                productos_seleccionados,
-                nombre_negocio,
-                tamano,
-                mostrar_codigo,
-                mostrar_nombre_negocio
-            )
-
-            st.download_button(
-                label="Descargar Etiquetas PDF",
-                data=pdf_etiquetas,
-                file_name=f"Etiquetas_{nombre_negocio}_{tamano}.pdf",
-                mime="application/pdf",
-                type="primary",
-                use_container_width=True
-            )
-
-            st.caption("Imprime en papel adhesivo A4 para mejores resultados.")
+    if df_todos.empty:
+        st.info("No tienes productos registrados.")
     else:
-        st.info("Selecciona al menos un producto para generar etiquetas.")
+        sin_codigo_mask = (
+            df_todos['codigo_barras'].isna() | (df_todos['codigo_barras'].astype(str).str.strip() == "")
+        ) & (
+            df_todos['codigo_ref'].isna() | (df_todos['codigo_ref'].astype(str).str.strip() == "")
+        )
+        productos_sin_codigo = df_todos[sin_codigo_mask]
+
+        if not productos_sin_codigo.empty:
+            st.warning(
+                f"**{len(productos_sin_codigo)} producto(s)** no tienen código de barras "
+                "(llegaron sin código en la entrada de mercancía). Genérales uno interno para poder "
+                "escanearlos en el punto de venta y agilizar la venta."
+            )
+            if st.button(f"Generar código para los {len(productos_sin_codigo)} producto(s) sin código", type="primary"):
+                with engine.begin() as conn:
+                    for _, row in productos_sin_codigo.iterrows():
+                        conn.execute(text("""
+                            UPDATE Productos SET codigo_barras = :cod
+                            WHERE id = :id AND usuario_id = :uid
+                        """), {
+                            "cod": generar_codigo_interno(row['id']),
+                            "id": int(row['id']),
+                            "uid": user_id
+                        })
+                invalidar_cache_productos()
+                st.success("Códigos de barras generados. Ya puedes imprimir las etiquetas.")
+                st.rerun()
+
+        col_filtro1, col_filtro2 = st.columns(2)
+        with col_filtro1:
+            busq_etiq = st.text_input("Buscar producto", placeholder="Nombre o categoría...")
+        with col_filtro2:
+            categorias_disponibles = ["-- Todas --"] + sorted(df_todos['categoria'].dropna().unique().tolist())
+            cat_filtro = st.selectbox("Filtrar por categoría", categorias_disponibles)
+
+        df_filtrado = df_todos.copy()
+        if busq_etiq:
+            df_filtrado = df_filtrado[
+                df_filtrado['nombre'].str.contains(busq_etiq, case=False, na=False)
+            ]
+        if cat_filtro != "-- Todas --":
+            df_filtrado = df_filtrado[df_filtrado['categoria'] == cat_filtro]
+
+        # Selección con checkboxes
+        st.caption(f"{len(df_filtrado)} producto(s) encontrado(s). Selecciona los que quieres etiquetar.")
+
+        col_sel1, col_sel2 = st.columns(2)
+        with col_sel1:
+            if st.button("Seleccionar todos", use_container_width=True):
+                for i in df_filtrado.index:
+                    st.session_state[f"etiq_{i}"] = True
+                st.rerun()
+        with col_sel2:
+            if st.button("Deseleccionar todos", use_container_width=True):
+                for i in df_filtrado.index:
+                    st.session_state[f"etiq_{i}"] = False
+                st.rerun()
+
+        st.markdown("")
+
+        productos_seleccionados = []
+
+        # Mostrar en grid de 3 columnas
+        cols = st.columns(3)
+        for idx, (i, prod) in enumerate(df_filtrado.iterrows()):
+            col = cols[idx % 3]
+            with col:
+                tiene_cod = bool(str(prod.get('codigo_barras') or prod.get('codigo_ref') or '').strip())
+                etiqueta_cod = "" if tiene_cod else " sin código"
+                seleccionado = st.checkbox(
+                    f"**{prod['nombre']}**\n{formato_cop(prod['precio_venta'])}{etiqueta_cod}",
+                    key=f"etiq_{i}",
+                    value=st.session_state.get(f"etiq_{i}", False)
+                )
+                if seleccionado:
+                    for _ in range(cantidad_copias):
+                        productos_seleccionados.append(prod)
+
+        st.markdown("---")
+
+        # Preview y generación
+        if productos_seleccionados:
+            st.success(f"**{len(productos_seleccionados)} etiqueta(s)** seleccionada(s) — {len(productos_seleccionados) // (4 if tamano == 'pequena' else 3 if tamano == 'mediana' else 2) + 1} hoja(s) aprox.")
+
+            col_prev1, col_prev2 = st.columns([2, 1])
+
+            with col_prev1:
+                st.markdown("**Preview de etiquetas seleccionadas:**")
+                preview_data = []
+                for p in productos_seleccionados[:10]:
+                    preview_data.append({
+                        "Producto": p['nombre'],
+                        "Precio": formato_cop(p['precio_venta']),
+                        "Código": p.get('codigo_barras') or p.get('codigo_ref') or 'Sin código'
+                    })
+                st.dataframe(pd.DataFrame(preview_data), hide_index=True, use_container_width=True)
+                if len(productos_seleccionados) > 10:
+                    st.caption(f"... y {len(productos_seleccionados) - 10} más")
+
+            with col_prev2:
+                st.markdown("**Generar PDF:**")
+                st.info(f"""
+                **Configuración:**
+                - Tamaño: {tamano}
+                - Etiquetas: {len(productos_seleccionados)}
+                - Código: {'Sí' if mostrar_codigo else 'No'}
+                - Negocio: {'Sí' if mostrar_nombre_negocio else 'No'}
+                """)
+
+                pdf_etiquetas = generar_etiquetas_pdf(
+                    productos_seleccionados,
+                    nombre_negocio,
+                    tamano,
+                    mostrar_codigo,
+                    mostrar_nombre_negocio
+                )
+
+                st.download_button(
+                    label="Descargar Etiquetas PDF",
+                    data=pdf_etiquetas,
+                    file_name=f"Etiquetas_{nombre_negocio}_{tamano}.pdf",
+                    mime="application/pdf",
+                    type="primary",
+                    use_container_width=True
+                )
+
+                st.caption("Imprime en papel adhesivo A4 para mejores resultados.")
+        else:
+            st.info("Selecciona al menos un producto para generar etiquetas.")
+
+_seccion_seleccion_etiquetas()

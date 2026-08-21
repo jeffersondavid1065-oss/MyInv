@@ -246,583 +246,589 @@ tab_pos, tab_historial, tab_devolucion, tab_cotizacion = st.tabs([
 # TAB 1: NUEVA VENTA
 # ==========================================
 with tab_pos:
-    col_izq, col_der = st.columns([3, 2])
+    @st.fragment
+    def _seccion_pos():
+        col_izq, col_der = st.columns([3, 2])
 
-    with col_izq:
-        st.subheader("Buscar Producto")
-        st.caption("Escanea el código de barras o escribe el nombre.")
+        with col_izq:
+            st.subheader("Buscar Producto")
+            st.caption("Escanea el código de barras o escribe el nombre.")
 
-        # Limpiar buscador si viene de un escaneo exitoso
-        if st.session_state.get("limpiar_buscador", False):
-            st.session_state.limpiar_buscador = False
-            st.session_state.buscador_pos = ""
+            # Limpiar buscador si viene de un escaneo exitoso
+            if st.session_state.get("limpiar_buscador", False):
+                st.session_state.limpiar_buscador = False
+                st.session_state.buscador_pos = ""
 
-        busqueda = st.text_input(
-            "Código o nombre", placeholder="Escanea o escribe aquí...",
-            key="buscador_pos", label_visibility="collapsed"
-        )
+            busqueda = st.text_input(
+                "Código o nombre", placeholder="Escanea o escribe aquí...",
+                key="buscador_pos", label_visibility="collapsed"
+            )
 
-        if busqueda:
-            busqueda = busqueda.strip()
-            producto_encontrado = buscar_producto_por_codigo(user_id, busqueda)
+            if busqueda:
+                busqueda = busqueda.strip()
+                producto_encontrado = buscar_producto_por_codigo(user_id, busqueda)
 
-            if producto_encontrado:
-                agregar_al_carrito(
-                    producto_id=producto_encontrado[0],
-                    nombre=producto_encontrado[1],
-                    codigo_barras=producto_encontrado[2],
-                    precio=producto_encontrado[4],
-                    stock_actual=int(producto_encontrado[3]),
-                    costo=producto_encontrado[5],
-                    iva_porcentaje=producto_encontrado[6] if len(producto_encontrado) > 6 else 0,
+                if producto_encontrado:
+                    agregar_al_carrito(
+                        producto_id=producto_encontrado[0],
+                        nombre=producto_encontrado[1],
+                        codigo_barras=producto_encontrado[2],
+                        precio=producto_encontrado[4],
+                        stock_actual=int(producto_encontrado[3]),
+                        costo=producto_encontrado[5],
+                        iva_porcentaje=producto_encontrado[6] if len(producto_encontrado) > 6 else 0,
+                    )
+                    # Limpiar campo automáticamente para siguiente escaneo
+                    st.session_state.limpiar_buscador = True
+                    st.rerun()
+                else:
+                    df_productos = obtener_productos_activos(user_id)
+                    if not df_productos.empty:
+                        df_filtrado = df_productos[
+                            df_productos['nombre'].str.contains(busqueda, case=False, na=False)
+                        ]
+                        if not df_filtrado.empty:
+                            st.markdown(f"**{len(df_filtrado)} resultado(s):**")
+                            st.markdown("""
+                                <style>
+                                .st-key-resultados_busqueda_pos [data-testid="stVerticalBlock"] {
+                                    gap: 0.3rem !important;
+                                }
+                                .st-key-resultados_busqueda_pos [data-testid="stVerticalBlockBorderWrapper"] {
+                                    gap: 0.3rem !important;
+                                }
+                                </style>
+                            """, unsafe_allow_html=True)
+                            with st.container(key="resultados_busqueda_pos"):
+                                for _, prod in df_filtrado.iterrows():
+                                    c1, c2, c3 = st.columns([3, 1, 1])
+                                    with c1:
+                                        st.write(f"**{prod['nombre']}**")
+                                        detalle_parts = []
+                                        if prod['categoria']:
+                                            detalle_parts.append(f"📂 {prod['categoria']}")
+                                        if prod['codigo_barras']:
+                                            detalle_parts.append(f"Cód: {prod['codigo_barras']}")
+                                        if detalle_parts:
+                                            st.caption(" · ".join(detalle_parts))
+                                    with c2:
+                                        st.write(formato_cop(prod['precio_venta']))
+                                        color = "🔴" if prod['stock_actual'] <= 0 else "🟡" if prod['stock_actual'] <= prod['stock_minimo'] else "🟢"
+                                        st.caption(f"{color} {prod['stock_actual']} uds.")
+                                    with c3:
+                                        if st.button("Agregar", key=f"add_{prod['id']}"):
+                                            agregar_al_carrito(
+                                                producto_id=int(prod['id']),
+                                                nombre=prod['nombre'],
+                                                codigo_barras=prod['codigo_barras'] or "",
+                                                precio=float(prod['precio_venta']),
+                                                stock_actual=int(prod['stock_actual']),
+                                                costo=float(prod['costo_compra'] or 0),
+                                                iva_porcentaje=float(prod.get('iva_porcentaje', 0) or 0),
+                                            )
+                                            st.rerun()
+                        else:
+                            st.warning(f"No se encontró '{busqueda}'.")
+
+            with st.expander("Venta libre (algo que no está en el inventario)"):
+                st.caption(
+                    "Para cuando no tienes el producto y lo consigues por fuera para no "
+                    "perder el cliente. Se agrega al carrito y se puede facturar "
+                    "electrónicamente igual que cualquier otra venta, pero no descuenta "
+                    "stock de Productos."
                 )
-                # Limpiar campo automáticamente para siguiente escaneo
-                st.session_state.limpiar_buscador = True
-                st.rerun()
-            else:
-                df_productos = obtener_productos_activos(user_id)
-                if not df_productos.empty:
-                    df_filtrado = df_productos[
-                        df_productos['nombre'].str.contains(busqueda, case=False, na=False)
-                    ]
-                    if not df_filtrado.empty:
-                        st.markdown(f"**{len(df_filtrado)} resultado(s):**")
-                        st.markdown("""
-                            <style>
-                            .st-key-resultados_busqueda_pos [data-testid="stVerticalBlock"] {
-                                gap: 0.3rem !important;
-                            }
-                            .st-key-resultados_busqueda_pos [data-testid="stVerticalBlockBorderWrapper"] {
-                                gap: 0.3rem !important;
-                            }
-                            </style>
-                        """, unsafe_allow_html=True)
-                        with st.container(key="resultados_busqueda_pos"):
-                            for _, prod in df_filtrado.iterrows():
-                                c1, c2, c3 = st.columns([3, 1, 1])
-                                with c1:
-                                    st.write(f"**{prod['nombre']}**")
-                                    detalle_parts = []
-                                    if prod['categoria']:
-                                        detalle_parts.append(f"📂 {prod['categoria']}")
-                                    if prod['codigo_barras']:
-                                        detalle_parts.append(f"Cód: {prod['codigo_barras']}")
-                                    if detalle_parts:
-                                        st.caption(" · ".join(detalle_parts))
-                                with c2:
-                                    st.write(formato_cop(prod['precio_venta']))
-                                    color = "🔴" if prod['stock_actual'] <= 0 else "🟡" if prod['stock_actual'] <= prod['stock_minimo'] else "🟢"
-                                    st.caption(f"{color} {prod['stock_actual']} uds.")
-                                with c3:
-                                    if st.button("Agregar", key=f"add_{prod['id']}"):
-                                        agregar_al_carrito(
-                                            producto_id=int(prod['id']),
-                                            nombre=prod['nombre'],
-                                            codigo_barras=prod['codigo_barras'] or "",
-                                            precio=float(prod['precio_venta']),
-                                            stock_actual=int(prod['stock_actual']),
-                                            costo=float(prod['costo_compra'] or 0),
-                                            iva_porcentaje=float(prod.get('iva_porcentaje', 0) or 0),
-                                        )
-                                        st.rerun()
+                with st.form("form_venta_libre", clear_on_submit=True):
+                    nombre_libre = st.text_input("Nombre / descripción *", placeholder="Ej: Filtro de aceite Toyota")
+                    col_vl1, col_vl2, col_vl3 = st.columns(3)
+                    with col_vl1:
+                        precio_libre = st.number_input("Precio de venta ($) *", min_value=0.0, step=1000.0)
+                    with col_vl2:
+                        cantidad_libre = st.number_input("Cantidad", min_value=1, value=1, step=1)
+                    with col_vl3:
+                        costo_libre = st.number_input(
+                            "Costo (opcional, $)", min_value=0.0, step=1000.0,
+                            help="Lo que te costó a ti, si lo sabes. Solo afecta los reportes de ganancia."
+                        )
+                    if iva_activo:
+                        iva_libre = st.selectbox("IVA%", OPCIONES_IVA_POS, index=0)
                     else:
-                        st.warning(f"No se encontró '{busqueda}'.")
+                        iva_libre = 0
+                    if st.form_submit_button("Agregar venta libre al carrito", use_container_width=True):
+                        if not nombre_libre.strip():
+                            st.warning("Escribe el nombre o descripción del ítem.")
+                        elif precio_libre <= 0:
+                            st.warning("El precio debe ser mayor a 0.")
+                        else:
+                            agregar_item_libre_al_carrito(
+                                nombre=nombre_libre.strip(), precio=precio_libre,
+                                cantidad=int(cantidad_libre), costo=costo_libre,
+                                iva_porcentaje=iva_libre,
+                            )
+                            st.rerun()
 
-        with st.expander("Venta libre (algo que no está en el inventario)"):
-            st.caption(
-                "Para cuando no tienes el producto y lo consigues por fuera para no "
-                "perder el cliente. Se agrega al carrito y se puede facturar "
-                "electrónicamente igual que cualquier otra venta, pero no descuenta "
-                "stock de Productos."
-            )
-            with st.form("form_venta_libre", clear_on_submit=True):
-                nombre_libre = st.text_input("Nombre / descripción *", placeholder="Ej: Filtro de aceite Toyota")
-                col_vl1, col_vl2, col_vl3 = st.columns(3)
-                with col_vl1:
-                    precio_libre = st.number_input("Precio de venta ($) *", min_value=0.0, step=1000.0)
-                with col_vl2:
-                    cantidad_libre = st.number_input("Cantidad", min_value=1, value=1, step=1)
-                with col_vl3:
-                    costo_libre = st.number_input(
-                        "Costo (opcional, $)", min_value=0.0, step=1000.0,
-                        help="Lo que te costó a ti, si lo sabes. Solo afecta los reportes de ganancia."
-                    )
-                if iva_activo:
-                    iva_libre = st.selectbox("IVA%", OPCIONES_IVA_POS, index=0)
-                else:
-                    iva_libre = 0
-                if st.form_submit_button("Agregar venta libre al carrito", use_container_width=True):
-                    if not nombre_libre.strip():
-                        st.warning("Escribe el nombre o descripción del ítem.")
-                    elif precio_libre <= 0:
-                        st.warning("El precio debe ser mayor a 0.")
-                    else:
-                        agregar_item_libre_al_carrito(
-                            nombre=nombre_libre.strip(), precio=precio_libre,
-                            cantidad=int(cantidad_libre), costo=costo_libre,
-                            iva_porcentaje=iva_libre,
-                        )
-                        st.rerun()
+        with col_der:
+            st.subheader("Cobrar")
 
-    with col_der:
-        st.subheader("Cobrar")
-
-        if not st.session_state.carrito:
-            st.info("Agrega productos al carrito para cobrar.")
-        else:
-            total_carrito = sum(i["subtotal"] for i in st.session_state.carrito)
-            desc_global = st.session_state.get("descuento_pos", 0)
-            # Si el descuento es por porcentaje, recalcular
-            pct_g = st.session_state.get("descuento_pct_global", 0)
-            if st.session_state.get("tipo_desc_global") == "% Porcentaje" and pct_g > 0:
-                desc_global = total_carrito * (pct_g / 100)
-            total_final = max(0, total_carrito - desc_global)
-            _, iva_total_cobrar = calcular_desglose_iva(st.session_state.carrito, total_final, total_carrito)
-
-            st.markdown(f"**Total: {formato_cop(total_final)}**")
-            if desc_global > 0:
-                st.caption(f"Descuento aplicado: {formato_cop(desc_global)}")
-            if iva_total_cobrar > 1:
-                st.caption(f"Incluye IVA: {formato_cop(iva_total_cobrar)}")
-
-            st.markdown("---")
-            st.subheader("Carrito")
-
-            # ==========================================
-            # TIPO DE AJUSTE POR ÍTEM (DESCUENTO O AUMENTO)
-            # ==========================================
-            tipo_desc_item = st.radio(
-                "Ajuste por ítem:",
-                ["Desc. $", "Desc. %", "▲ Aumento $", "▲ Aumento %"],
-                horizontal=True,
-                key="tipo_desc_item",
-                help="Aumento: cobra más caro que el precio de lista solo en esta venta, "
-                     "sin modificar el precio del producto en el inventario."
-            )
-
-            # Headers carrito
-            anchos_carrito = [3, 1, 1, 1, 0.7, 1, 0.5] if iva_activo else [3, 1, 1, 1, 1, 0.5]
-            cols_header = st.columns(anchos_carrito)
-            if iva_activo:
-                h1, h2, h3, h4, h5, h6, h7 = cols_header
+            if not st.session_state.carrito:
+                st.info("Agrega productos al carrito para cobrar.")
             else:
-                h1, h2, h3, h4, h6, h7 = cols_header
-            h1.markdown("**Producto**")
-            h2.markdown("**Precio**")
-            h3.markdown("**Cant.**")
-            h4.markdown(f"**{tipo_desc_item}**")
-            if iva_activo:
-                h5.markdown("**IVA%**")
-            h6.markdown("**Total**")
-            h7.markdown("**❌**")
+                total_carrito = sum(i["subtotal"] for i in st.session_state.carrito)
+                desc_global = st.session_state.get("descuento_pos", 0)
+                # Si el descuento es por porcentaje, recalcular
+                pct_g = st.session_state.get("descuento_pct_global", 0)
+                if st.session_state.get("tipo_desc_global") == "% Porcentaje" and pct_g > 0:
+                    desc_global = total_carrito * (pct_g / 100)
+                total_final = max(0, total_carrito - desc_global)
+                _, iva_total_cobrar = calcular_desglose_iva(st.session_state.carrito, total_final, total_carrito)
 
-            items_a_eliminar = []
-            total_carrito = 0
-
-            for i, item in enumerate(st.session_state.carrito):
-                cols_fila = st.columns(anchos_carrito)
-                if iva_activo:
-                    c1, c2, c3, c4, c5, c6, c7 = cols_fila
-                else:
-                    c1, c2, c3, c4, c6, c7 = cols_fila
-                with c1:
-                    st.write(f"(Libre) {item['nombre']}" if item.get("es_libre") else item["nombre"])
-                with c2:
-                    st.write(formato_cop(item["precio_unitario"]))
-                with c3:
-                    nueva_cant = st.number_input(
-                        "", min_value=1,
-                        max_value=item.get("stock_max", 9999),
-                        value=item["cantidad"], step=1,
-                        key=f"cant_{i}", label_visibility="collapsed"
-                    )
-                    if nueva_cant != item["cantidad"]:
-                        st.session_state.carrito[i]["cantidad"] = nueva_cant
-                        desc = item.get("descuento_item", 0)
-                        precio_neto = item["precio_unitario"] - desc
-                        st.session_state.carrito[i]["subtotal"] = nueva_cant * max(0, precio_neto)
-                        st.rerun()
-                with c4:
-                    ajuste_actual = item.get("descuento_item", 0)
-                    if tipo_desc_item == "Desc. $":
-                        valor_actual = max(0.0, ajuste_actual)
-                        desc_item = st.number_input(
-                            "", min_value=0.0,
-                            value=float(valor_actual),
-                            step=500.0, key=f"desc_{i}", label_visibility="collapsed"
-                        )
-                        if desc_item != valor_actual:
-                            st.session_state.carrito[i]["descuento_item"] = desc_item
-                            st.session_state.carrito[i]["descuento_pct_item"] = 0.0
-                            st.session_state.carrito[i]["aumento_pct_item"] = 0.0
-                            precio_neto = item["precio_unitario"] - desc_item
-                            st.session_state.carrito[i]["subtotal"] = item["cantidad"] * max(0, precio_neto)
-                            st.rerun()
-                    elif tipo_desc_item == "Desc. %":
-                        pct_item = st.number_input(
-                            "", min_value=0.0, max_value=100.0,
-                            value=float(item.get("descuento_pct_item", 0)),
-                            step=5.0, key=f"pct_{i}", label_visibility="collapsed"
-                        )
-                        if pct_item != item.get("descuento_pct_item", 0):
-                            desc_calculado = item["precio_unitario"] * (pct_item / 100)
-                            st.session_state.carrito[i]["descuento_pct_item"] = pct_item
-                            st.session_state.carrito[i]["aumento_pct_item"] = 0.0
-                            st.session_state.carrito[i]["descuento_item"] = desc_calculado
-                            precio_neto = item["precio_unitario"] - desc_calculado
-                            st.session_state.carrito[i]["subtotal"] = item["cantidad"] * max(0, precio_neto)
-                            st.rerun()
-                    elif tipo_desc_item == "▲ Aumento $":
-                        valor_actual = max(0.0, -ajuste_actual)
-                        aum_item = st.number_input(
-                            "", min_value=0.0,
-                            value=float(valor_actual),
-                            step=500.0, key=f"aum_{i}", label_visibility="collapsed"
-                        )
-                        if aum_item != valor_actual:
-                            st.session_state.carrito[i]["descuento_item"] = -aum_item
-                            st.session_state.carrito[i]["descuento_pct_item"] = 0.0
-                            st.session_state.carrito[i]["aumento_pct_item"] = 0.0
-                            precio_neto = item["precio_unitario"] + aum_item
-                            st.session_state.carrito[i]["subtotal"] = item["cantidad"] * max(0, precio_neto)
-                            st.rerun()
-                    else:  # ▲ Aumento %
-                        pct_item = st.number_input(
-                            "", min_value=0.0, max_value=300.0,
-                            value=float(item.get("aumento_pct_item", 0)),
-                            step=5.0, key=f"aumpct_{i}", label_visibility="collapsed"
-                        )
-                        if pct_item != item.get("aumento_pct_item", 0):
-                            aum_calculado = item["precio_unitario"] * (pct_item / 100)
-                            st.session_state.carrito[i]["aumento_pct_item"] = pct_item
-                            st.session_state.carrito[i]["descuento_pct_item"] = 0.0
-                            st.session_state.carrito[i]["descuento_item"] = -aum_calculado
-                            precio_neto = item["precio_unitario"] + aum_calculado
-                            st.session_state.carrito[i]["subtotal"] = item["cantidad"] * max(0, precio_neto)
-                            st.rerun()
-                if iva_activo:
-                    with c5:
-                        iva_pct_item = item.get("iva_porcentaje", 0) or 0
-                        st.write(f"{iva_pct_item:.0f}%" if iva_pct_item == int(iva_pct_item) else f"{iva_pct_item}%")
-                with c6:
-                    st.write(formato_cop(item["subtotal"]))
-                with c7:
-                    if st.button("❌", key=f"del_{i}"):
-                        items_a_eliminar.append(i)
-
-                total_carrito += item["subtotal"]
-
-            for idx in sorted(items_a_eliminar, reverse=True):
-                st.session_state.carrito.pop(idx)
-            if items_a_eliminar:
-                st.rerun()
-
-            st.markdown("---")
-
-            # ==========================================
-            # DESCUENTO GLOBAL (SOBRE EL TOTAL)
-            # ==========================================
-            col_desc_tipo, col_desc_val = st.columns([1, 2])
-            with col_desc_tipo:
-                tipo_desc_global = st.radio(
-                    "Descuento global:",
-                    ["$ Fijo", "% Porcentaje"],
-                    horizontal=True,
-                    key="tipo_desc_global"
-                )
-            with col_desc_val:
-                if tipo_desc_global == "$ Fijo":
-                    desc_global = st.number_input(
-                        "Descuento sobre total ($)",
-                        min_value=0.0, step=1000.0,
-                        key="descuento_pos"
-                    )
-                else:
-                    pct_global = st.number_input(
-                        "Descuento sobre total (%)",
-                        min_value=0.0, max_value=100.0,
-                        step=5.0, key="descuento_pct_global"
-                    )
-                    desc_global = total_carrito * (pct_global / 100)
-                    if pct_global > 0:
-                        st.caption(f"= {formato_cop(desc_global)}")
-
-            total_final = max(0, total_carrito - desc_global)
-            subtotal_sin_iva_cart, iva_total_cart = calcular_desglose_iva(
-                st.session_state.carrito, total_final, total_carrito
-            )
-
-            col_t1, col_t2 = st.columns([2, 1])
-            with col_t2:
-                st.markdown(f"### Total: {formato_cop(total_final)}")
+                st.markdown(f"**Total: {formato_cop(total_final)}**")
                 if desc_global > 0:
-                    st.caption(f"Ahorro: {formato_cop(desc_global)}")
-                if iva_total_cart > 1:
-                    st.caption(f"Subtotal (sin IVA): {formato_cop(subtotal_sin_iva_cart)} | IVA: {formato_cop(iva_total_cart)}")
-            with col_t1:
-                if st.button("Limpiar carrito", use_container_width=True):
-                    limpiar_carrito()
+                    st.caption(f"Descuento aplicado: {formato_cop(desc_global)}")
+                if iva_total_cobrar > 1:
+                    st.caption(f"Incluye IVA: {formato_cop(iva_total_cobrar)}")
+
+                st.markdown("---")
+                st.subheader("Carrito")
+
+                # ==========================================
+                # TIPO DE AJUSTE POR ÍTEM (DESCUENTO O AUMENTO)
+                # ==========================================
+                tipo_desc_item = st.radio(
+                    "Ajuste por ítem:",
+                    ["Desc. $", "Desc. %", "▲ Aumento $", "▲ Aumento %"],
+                    horizontal=True,
+                    key="tipo_desc_item",
+                    help="Aumento: cobra más caro que el precio de lista solo en esta venta, "
+                         "sin modificar el precio del producto en el inventario."
+                )
+
+                # Headers carrito
+                anchos_carrito = [3, 1, 1, 1, 0.7, 1, 0.5] if iva_activo else [3, 1, 1, 1, 1, 0.5]
+                cols_header = st.columns(anchos_carrito)
+                if iva_activo:
+                    h1, h2, h3, h4, h5, h6, h7 = cols_header
+                else:
+                    h1, h2, h3, h4, h6, h7 = cols_header
+                h1.markdown("**Producto**")
+                h2.markdown("**Precio**")
+                h3.markdown("**Cant.**")
+                h4.markdown(f"**{tipo_desc_item}**")
+                if iva_activo:
+                    h5.markdown("**IVA%**")
+                h6.markdown("**Total**")
+                h7.markdown("**❌**")
+
+                items_a_eliminar = []
+                total_carrito = 0
+
+                for i, item in enumerate(st.session_state.carrito):
+                    cols_fila = st.columns(anchos_carrito)
+                    if iva_activo:
+                        c1, c2, c3, c4, c5, c6, c7 = cols_fila
+                    else:
+                        c1, c2, c3, c4, c6, c7 = cols_fila
+                    with c1:
+                        st.write(f"(Libre) {item['nombre']}" if item.get("es_libre") else item["nombre"])
+                    with c2:
+                        st.write(formato_cop(item["precio_unitario"]))
+                    with c3:
+                        nueva_cant = st.number_input(
+                            "", min_value=1,
+                            max_value=item.get("stock_max", 9999),
+                            value=item["cantidad"], step=1,
+                            key=f"cant_{i}", label_visibility="collapsed"
+                        )
+                        if nueva_cant != item["cantidad"]:
+                            st.session_state.carrito[i]["cantidad"] = nueva_cant
+                            desc = item.get("descuento_item", 0)
+                            precio_neto = item["precio_unitario"] - desc
+                            st.session_state.carrito[i]["subtotal"] = nueva_cant * max(0, precio_neto)
+                            st.rerun()
+                    with c4:
+                        ajuste_actual = item.get("descuento_item", 0)
+                        if tipo_desc_item == "Desc. $":
+                            valor_actual = max(0.0, ajuste_actual)
+                            desc_item = st.number_input(
+                                "", min_value=0.0,
+                                value=float(valor_actual),
+                                step=500.0, key=f"desc_{i}", label_visibility="collapsed"
+                            )
+                            if desc_item != valor_actual:
+                                st.session_state.carrito[i]["descuento_item"] = desc_item
+                                st.session_state.carrito[i]["descuento_pct_item"] = 0.0
+                                st.session_state.carrito[i]["aumento_pct_item"] = 0.0
+                                precio_neto = item["precio_unitario"] - desc_item
+                                st.session_state.carrito[i]["subtotal"] = item["cantidad"] * max(0, precio_neto)
+                                st.rerun()
+                        elif tipo_desc_item == "Desc. %":
+                            pct_item = st.number_input(
+                                "", min_value=0.0, max_value=100.0,
+                                value=float(item.get("descuento_pct_item", 0)),
+                                step=5.0, key=f"pct_{i}", label_visibility="collapsed"
+                            )
+                            if pct_item != item.get("descuento_pct_item", 0):
+                                desc_calculado = item["precio_unitario"] * (pct_item / 100)
+                                st.session_state.carrito[i]["descuento_pct_item"] = pct_item
+                                st.session_state.carrito[i]["aumento_pct_item"] = 0.0
+                                st.session_state.carrito[i]["descuento_item"] = desc_calculado
+                                precio_neto = item["precio_unitario"] - desc_calculado
+                                st.session_state.carrito[i]["subtotal"] = item["cantidad"] * max(0, precio_neto)
+                                st.rerun()
+                        elif tipo_desc_item == "▲ Aumento $":
+                            valor_actual = max(0.0, -ajuste_actual)
+                            aum_item = st.number_input(
+                                "", min_value=0.0,
+                                value=float(valor_actual),
+                                step=500.0, key=f"aum_{i}", label_visibility="collapsed"
+                            )
+                            if aum_item != valor_actual:
+                                st.session_state.carrito[i]["descuento_item"] = -aum_item
+                                st.session_state.carrito[i]["descuento_pct_item"] = 0.0
+                                st.session_state.carrito[i]["aumento_pct_item"] = 0.0
+                                precio_neto = item["precio_unitario"] + aum_item
+                                st.session_state.carrito[i]["subtotal"] = item["cantidad"] * max(0, precio_neto)
+                                st.rerun()
+                        else:  # ▲ Aumento %
+                            pct_item = st.number_input(
+                                "", min_value=0.0, max_value=300.0,
+                                value=float(item.get("aumento_pct_item", 0)),
+                                step=5.0, key=f"aumpct_{i}", label_visibility="collapsed"
+                            )
+                            if pct_item != item.get("aumento_pct_item", 0):
+                                aum_calculado = item["precio_unitario"] * (pct_item / 100)
+                                st.session_state.carrito[i]["aumento_pct_item"] = pct_item
+                                st.session_state.carrito[i]["descuento_pct_item"] = 0.0
+                                st.session_state.carrito[i]["descuento_item"] = -aum_calculado
+                                precio_neto = item["precio_unitario"] + aum_calculado
+                                st.session_state.carrito[i]["subtotal"] = item["cantidad"] * max(0, precio_neto)
+                                st.rerun()
+                    if iva_activo:
+                        with c5:
+                            iva_pct_item = item.get("iva_porcentaje", 0) or 0
+                            st.write(f"{iva_pct_item:.0f}%" if iva_pct_item == int(iva_pct_item) else f"{iva_pct_item}%")
+                    with c6:
+                        st.write(formato_cop(item["subtotal"]))
+                    with c7:
+                        if st.button("❌", key=f"del_{i}"):
+                            items_a_eliminar.append(i)
+
+                    total_carrito += item["subtotal"]
+
+                for idx in sorted(items_a_eliminar, reverse=True):
+                    st.session_state.carrito.pop(idx)
+                if items_a_eliminar:
                     st.rerun()
 
-            st.markdown("---")
+                st.markdown("---")
 
-            tipo_pago = st.selectbox(
-                "Tipo de Pago",
-                ["Efectivo", "Transferencia", "Credito", "Mixto"],
-                format_func=lambda x: "Crédito" if x == "Credito" else x,
-                key="tipo_pago_sel"
-            )
+                # ==========================================
+                # DESCUENTO GLOBAL (SOBRE EL TOTAL)
+                # ==========================================
+                col_desc_tipo, col_desc_val = st.columns([1, 2])
+                with col_desc_tipo:
+                    tipo_desc_global = st.radio(
+                        "Descuento global:",
+                        ["$ Fijo", "% Porcentaje"],
+                        horizontal=True,
+                        key="tipo_desc_global"
+                    )
+                with col_desc_val:
+                    if tipo_desc_global == "$ Fijo":
+                        desc_global = st.number_input(
+                            "Descuento sobre total ($)",
+                            min_value=0.0, step=1000.0,
+                            key="descuento_pos"
+                        )
+                    else:
+                        pct_global = st.number_input(
+                            "Descuento sobre total (%)",
+                            min_value=0.0, max_value=100.0,
+                            step=5.0, key="descuento_pct_global"
+                        )
+                        desc_global = total_carrito * (pct_global / 100)
+                        if pct_global > 0:
+                            st.caption(f"= {formato_cop(desc_global)}")
 
-            monto_efectivo = 0
-            monto_transferencia = 0
-            cambio = 0
-            cliente_id = None
-            tipo_cuota = "Libre"
-            valor_cuota = 0
-            fecha_limite = hoy_bogota()
-
-            cliente_creado_pos = st.session_state.pop("_cliente_pos_creado", None)
-
-            if tipo_pago in ("Efectivo", "Transferencia", "Mixto"):
-                clientes_fact = obtener_clientes(user_id)
-                dict_clientes_fact = {"Sin cliente (venta directa)": None}
-                for c in clientes_fact:
-                    cid_c, nombre_c, tel_c = c[0], c[1], c[2]
-                    etiqueta = f"{nombre_c} — {tel_c}" if tel_c else nombre_c
-                    dict_clientes_fact[etiqueta] = cid_c
-                opciones_fact = list(dict_clientes_fact.keys())
-                if cliente_creado_pos:
-                    nombre_cc, tel_cc = cliente_creado_pos
-                    etiqueta_cc = f"{nombre_cc} — {tel_cc}" if tel_cc else nombre_cc
-                    if etiqueta_cc in opciones_fact:
-                        st.session_state["venta_cliente_opcional_sel"] = etiqueta_cc
-                cliente_fact_sel = st.selectbox(
-                    "Cliente (opcional, para poder facturar electrónicamente)",
-                    options=opciones_fact,
-                    key="venta_cliente_opcional_sel",
-                    help="Solo se puede emitir factura electrónica si la venta queda ligada a un cliente registrado con documento.",
+                total_final = max(0, total_carrito - desc_global)
+                subtotal_sin_iva_cart, iva_total_cart = calcular_desglose_iva(
+                    st.session_state.carrito, total_final, total_carrito
                 )
-                cliente_id = dict_clientes_fact[cliente_fact_sel]
-                registrar_cliente_rapido_pos("efectivo")
 
-            if tipo_pago == "Efectivo":
-                monto_efectivo_input = st.number_input(
-                    "Monto recibido ($)", min_value=0.0,
-                    value=float(total_final), step=1000.0
+                col_t1, col_t2 = st.columns([2, 1])
+                with col_t2:
+                    st.markdown(f"### Total: {formato_cop(total_final)}")
+                    if desc_global > 0:
+                        st.caption(f"Ahorro: {formato_cop(desc_global)}")
+                    if iva_total_cart > 1:
+                        st.caption(f"Subtotal (sin IVA): {formato_cop(subtotal_sin_iva_cart)} | IVA: {formato_cop(iva_total_cart)}")
+                with col_t1:
+                    if st.button("Limpiar carrito", use_container_width=True):
+                        limpiar_carrito()
+                        st.rerun()
+
+                st.markdown("---")
+
+                tipo_pago = st.selectbox(
+                    "Tipo de Pago",
+                    ["Efectivo", "Transferencia", "Credito", "Mixto"],
+                    format_func=lambda x: "Crédito" if x == "Credito" else x,
+                    key="tipo_pago_sel"
                 )
-                cambio = max(0, monto_efectivo_input - total_final)
-                monto_efectivo = min(monto_efectivo_input, total_final)
-                if cambio > 0:
-                    st.success(f"Cambio: {formato_cop(cambio)}")
 
-            elif tipo_pago == "Transferencia":
-                monto_transferencia = total_final
-                st.info(f"Total a transferir: {formato_cop(total_final)}")
+                monto_efectivo = 0
+                monto_transferencia = 0
+                cambio = 0
+                cliente_id = None
+                tipo_cuota = "Libre"
+                valor_cuota = 0
+                fecha_limite = hoy_bogota()
 
-            elif tipo_pago == "Credito":
-                clientes = obtener_clientes(user_id)
-                if clientes:
-                    # IMPORTANTE: las opciones del selectbox deben ser una lista
-                    # ESTABLE (no filtrada dinámicamente por texto de búsqueda).
-                    # Antes, el campo de búsqueda cambiaba la lista de "options"
-                    # en cada tecla, y como el selectbox no tenía un "key" fijo,
-                    # Streamlit lo trataba como un widget nuevo y volvía a
-                    # seleccionar el índice 0 (el primer cliente en orden
-                    # alfabético) sin importar lo que el cajero hubiera elegido.
-                    # Por eso todo crédito terminaba guardándose al mismo cliente.
-                    # Se usa el buscador nativo del selectbox (escribir para
-                    # filtrar) y se incluye el teléfono en la etiqueta para
-                    # poder buscar también por teléfono.
-                    dict_clientes = {}
-                    for c in clientes:
+                cliente_creado_pos = st.session_state.pop("_cliente_pos_creado", None)
+
+                if tipo_pago in ("Efectivo", "Transferencia", "Mixto"):
+                    clientes_fact = obtener_clientes(user_id)
+                    dict_clientes_fact = {"Sin cliente (venta directa)": None}
+                    for c in clientes_fact:
                         cid_c, nombre_c, tel_c = c[0], c[1], c[2]
                         etiqueta = f"{nombre_c} — {tel_c}" if tel_c else nombre_c
-                        dict_clientes[etiqueta] = cid_c
-
-                    opciones_credito = list(dict_clientes.keys())
+                        dict_clientes_fact[etiqueta] = cid_c
+                    opciones_fact = list(dict_clientes_fact.keys())
                     if cliente_creado_pos:
                         nombre_cc, tel_cc = cliente_creado_pos
                         etiqueta_cc = f"{nombre_cc} — {tel_cc}" if tel_cc else nombre_cc
-                        if etiqueta_cc in opciones_credito:
-                            st.session_state["venta_credito_cliente_sel"] = etiqueta_cc
-
-                    cliente_sel = st.selectbox(
-                        "Cliente",
-                        options=opciones_credito,
-                        key="venta_credito_cliente_sel",
-                        help="Escribe el nombre o teléfono para buscar en la lista.",
+                        if etiqueta_cc in opciones_fact:
+                            st.session_state["venta_cliente_opcional_sel"] = etiqueta_cc
+                    cliente_fact_sel = st.selectbox(
+                        "Cliente (opcional, para poder facturar electrónicamente)",
+                        options=opciones_fact,
+                        key="venta_cliente_opcional_sel",
+                        help="Solo se puede emitir factura electrónica si la venta queda ligada a un cliente registrado con documento.",
                     )
-                    cliente_id = dict_clientes[cliente_sel]
-                    cliente_nombre_sel = cliente_sel.split(" — ")[0]
-                    st.caption(f"🧾 Este crédito quedará registrado a nombre de: **{cliente_nombre_sel}**")
-                    registrar_cliente_rapido_pos("credito")
+                    cliente_id = dict_clientes_fact[cliente_fact_sel]
+                    registrar_cliente_rapido_pos("efectivo")
 
-                    tipo_cuota = st.selectbox(
-                        "Tipo de cuota", ["Libre", "Semanal", "Quincenal", "Mensual"],
-                        key="venta_credito_tipo_cuota"
+                if tipo_pago == "Efectivo":
+                    monto_efectivo_input = st.number_input(
+                        "Monto recibido ($)", min_value=0.0,
+                        value=float(total_final), step=1000.0
                     )
-                    if tipo_cuota != "Libre":
-                        valor_cuota = st.number_input(
-                            "Valor por cuota ($)", min_value=0.0, step=10000.0,
-                            key="venta_credito_valor_cuota"
+                    cambio = max(0, monto_efectivo_input - total_final)
+                    monto_efectivo = min(monto_efectivo_input, total_final)
+                    if cambio > 0:
+                        st.success(f"Cambio: {formato_cop(cambio)}")
+
+                elif tipo_pago == "Transferencia":
+                    monto_transferencia = total_final
+                    st.info(f"Total a transferir: {formato_cop(total_final)}")
+
+                elif tipo_pago == "Credito":
+                    clientes = obtener_clientes(user_id)
+                    if clientes:
+                        # IMPORTANTE: las opciones del selectbox deben ser una lista
+                        # ESTABLE (no filtrada dinámicamente por texto de búsqueda).
+                        # Antes, el campo de búsqueda cambiaba la lista de "options"
+                        # en cada tecla, y como el selectbox no tenía un "key" fijo,
+                        # Streamlit lo trataba como un widget nuevo y volvía a
+                        # seleccionar el índice 0 (el primer cliente en orden
+                        # alfabético) sin importar lo que el cajero hubiera elegido.
+                        # Por eso todo crédito terminaba guardándose al mismo cliente.
+                        # Se usa el buscador nativo del selectbox (escribir para
+                        # filtrar) y se incluye el teléfono en la etiqueta para
+                        # poder buscar también por teléfono.
+                        dict_clientes = {}
+                        for c in clientes:
+                            cid_c, nombre_c, tel_c = c[0], c[1], c[2]
+                            etiqueta = f"{nombre_c} — {tel_c}" if tel_c else nombre_c
+                            dict_clientes[etiqueta] = cid_c
+
+                        opciones_credito = list(dict_clientes.keys())
+                        if cliente_creado_pos:
+                            nombre_cc, tel_cc = cliente_creado_pos
+                            etiqueta_cc = f"{nombre_cc} — {tel_cc}" if tel_cc else nombre_cc
+                            if etiqueta_cc in opciones_credito:
+                                st.session_state["venta_credito_cliente_sel"] = etiqueta_cc
+
+                        cliente_sel = st.selectbox(
+                            "Cliente",
+                            options=opciones_credito,
+                            key="venta_credito_cliente_sel",
+                            help="Escribe el nombre o teléfono para buscar en la lista.",
                         )
-                    fecha_limite = st.date_input(
-                        "Fecha límite", value=hoy_bogota(),
-                        key="venta_credito_fecha_limite"
+                        cliente_id = dict_clientes[cliente_sel]
+                        cliente_nombre_sel = cliente_sel.split(" — ")[0]
+                        st.caption(f"🧾 Este crédito quedará registrado a nombre de: **{cliente_nombre_sel}**")
+                        registrar_cliente_rapido_pos("credito")
+
+                        tipo_cuota = st.selectbox(
+                            "Tipo de cuota", ["Libre", "Semanal", "Quincenal", "Mensual"],
+                            key="venta_credito_tipo_cuota"
+                        )
+                        if tipo_cuota != "Libre":
+                            valor_cuota = st.number_input(
+                                "Valor por cuota ($)", min_value=0.0, step=10000.0,
+                                key="venta_credito_valor_cuota"
+                            )
+                        fecha_limite = st.date_input(
+                            "Fecha límite", value=hoy_bogota(),
+                            key="venta_credito_fecha_limite"
+                        )
+                    else:
+                        st.warning("No tienes clientes registrados. Registra uno abajo para poder venderle a crédito.")
+                        registrar_cliente_rapido_pos("credito")
+                        tipo_pago = None
+
+                elif tipo_pago == "Mixto":
+                    monto_efectivo = st.number_input(
+                        "Monto Efectivo ($)", min_value=0.0,
+                        step=1000.0, max_value=float(total_final)
                     )
+                    monto_transferencia = total_final - monto_efectivo
+                    st.info(f"Transferencia: {formato_cop(monto_transferencia)}")
+
+                st.markdown("---")
+
+                if fe_activa:
+                    col_venta1, col_venta2 = st.columns(2)
+                    confirmar_venta = tipo_pago and col_venta1.button(
+                        "Registrar Venta", type="primary", use_container_width=True
+                    )
+                    confirmar_venta_factura = tipo_pago and col_venta2.button(
+                        "Registrar Venta con Factura Electrónica", use_container_width=True
+                    )
+                    if confirmar_venta_factura and not cliente_id:
+                        st.warning(
+                            "Selecciona un cliente registrado (con documento) en 'Cliente' "
+                            "para poder facturar electrónicamente."
+                        )
+                        confirmar_venta_factura = False
                 else:
-                    st.warning("No tienes clientes registrados. Registra uno abajo para poder venderle a crédito.")
-                    registrar_cliente_rapido_pos("credito")
-                    tipo_pago = None
-
-            elif tipo_pago == "Mixto":
-                monto_efectivo = st.number_input(
-                    "Monto Efectivo ($)", min_value=0.0,
-                    step=1000.0, max_value=float(total_final)
-                )
-                monto_transferencia = total_final - monto_efectivo
-                st.info(f"Transferencia: {formato_cop(monto_transferencia)}")
-
-            st.markdown("---")
-
-            if fe_activa:
-                col_venta1, col_venta2 = st.columns(2)
-                confirmar_venta = tipo_pago and col_venta1.button(
-                    "Registrar Venta", type="primary", use_container_width=True
-                )
-                confirmar_venta_factura = tipo_pago and col_venta2.button(
-                    "Registrar Venta con Factura Electrónica", use_container_width=True
-                )
-                if confirmar_venta_factura and not cliente_id:
-                    st.warning(
-                        "Selecciona un cliente registrado (con documento) en 'Cliente' "
-                        "para poder facturar electrónicamente."
+                    confirmar_venta = tipo_pago and st.button(
+                        "Registrar Venta", type="primary", use_container_width=True
                     )
                     confirmar_venta_factura = False
-            else:
-                confirmar_venta = tipo_pago and st.button(
-                    "Registrar Venta", type="primary", use_container_width=True
-                )
-                confirmar_venta_factura = False
 
-            if confirmar_venta or confirmar_venta_factura:
-                try:
-                    # Subtotal bruto (antes de cualquier descuento) y descuento total
-                    # (suma de descuentos por ítem + descuento global), para que el
-                    # descuento real quede reflejado en Ventas.descuento y no se
-                    # pierda "escondido" dentro del subtotal.
-                    subtotal_bruto = sum(
-                        item["precio_unitario"] * item["cantidad"]
-                        for item in st.session_state.carrito
-                    )
-                    descuento_items_total = sum(
-                        item.get("descuento_item", 0) * item["cantidad"]
-                        for item in st.session_state.carrito
-                    )
-                    descuento_total = descuento_items_total + desc_global
+                if confirmar_venta or confirmar_venta_factura:
+                    try:
+                        # Subtotal bruto (antes de cualquier descuento) y descuento total
+                        # (suma de descuentos por ítem + descuento global), para que el
+                        # descuento real quede reflejado en Ventas.descuento y no se
+                        # pierda "escondido" dentro del subtotal.
+                        subtotal_bruto = sum(
+                            item["precio_unitario"] * item["cantidad"]
+                            for item in st.session_state.carrito
+                        )
+                        descuento_items_total = sum(
+                            item.get("descuento_item", 0) * item["cantidad"]
+                            for item in st.session_state.carrito
+                        )
+                        descuento_total = descuento_items_total + desc_global
 
-                    with engine.begin() as conn:
-                        is_sqlite = "sqlite" in str(engine.url)
-                        estado_venta = "Credito" if tipo_pago == "Credito" else "Pagada"
+                        with engine.begin() as conn:
+                            is_sqlite = "sqlite" in str(engine.url)
+                            estado_venta = "Credito" if tipo_pago == "Credito" else "Pagada"
 
-                        fecha_venta = ahora_bogota_naive()
+                            fecha_venta = ahora_bogota_naive()
 
-                        if is_sqlite:
-                            cur = conn.execute(text("""
-                                INSERT INTO Ventas
-                                (usuario_id, cliente_id, subtotal, descuento, total,
-                                 tipo_pago, monto_efectivo, monto_transferencia, cambio, estado, cajero_id, fecha)
-                                VALUES (:uid, :cid, :sub, :desc, :total,
-                                        :tipo, :efec, :trans, :cambio, :est, :cajero, :fecha)
-                            """), {
-                                "uid": user_id, "cid": cliente_id,
-                                "sub": subtotal_bruto, "desc": descuento_total,
-                                "total": total_final, "tipo": tipo_pago,
-                                "efec": monto_efectivo, "trans": monto_transferencia,
-                                "cambio": cambio, "est": estado_venta,
-                                "cajero": cajero_id_actual, "fecha": fecha_venta
-                            })
-                            venta_id = cur.lastrowid
-                        else:
-                            res = conn.execute(text("""
-                                INSERT INTO Ventas
-                                (usuario_id, cliente_id, subtotal, descuento, total,
-                                 tipo_pago, monto_efectivo, monto_transferencia, cambio, estado, cajero_id, fecha)
-                                VALUES (:uid, :cid, :sub, :desc, :total,
-                                        :tipo, :efec, :trans, :cambio, :est, :cajero, :fecha)
-                                RETURNING id
-                            """), {
-                                "uid": user_id, "cid": cliente_id,
-                                "sub": subtotal_bruto, "desc": descuento_total,
-                                "total": total_final, "tipo": tipo_pago,
-                                "efec": monto_efectivo, "trans": monto_transferencia,
-                                "cambio": cambio, "est": estado_venta,
-                                "cajero": cajero_id_actual, "fecha": fecha_venta
-                            })
-                            venta_id = res.scalar()
+                            if is_sqlite:
+                                cur = conn.execute(text("""
+                                    INSERT INTO Ventas
+                                    (usuario_id, cliente_id, subtotal, descuento, total,
+                                     tipo_pago, monto_efectivo, monto_transferencia, cambio, estado, cajero_id, fecha)
+                                    VALUES (:uid, :cid, :sub, :desc, :total,
+                                            :tipo, :efec, :trans, :cambio, :est, :cajero, :fecha)
+                                """), {
+                                    "uid": user_id, "cid": cliente_id,
+                                    "sub": subtotal_bruto, "desc": descuento_total,
+                                    "total": total_final, "tipo": tipo_pago,
+                                    "efec": monto_efectivo, "trans": monto_transferencia,
+                                    "cambio": cambio, "est": estado_venta,
+                                    "cajero": cajero_id_actual, "fecha": fecha_venta
+                                })
+                                venta_id = cur.lastrowid
+                            else:
+                                res = conn.execute(text("""
+                                    INSERT INTO Ventas
+                                    (usuario_id, cliente_id, subtotal, descuento, total,
+                                     tipo_pago, monto_efectivo, monto_transferencia, cambio, estado, cajero_id, fecha)
+                                    VALUES (:uid, :cid, :sub, :desc, :total,
+                                            :tipo, :efec, :trans, :cambio, :est, :cajero, :fecha)
+                                    RETURNING id
+                                """), {
+                                    "uid": user_id, "cid": cliente_id,
+                                    "sub": subtotal_bruto, "desc": descuento_total,
+                                    "total": total_final, "tipo": tipo_pago,
+                                    "efec": monto_efectivo, "trans": monto_transferencia,
+                                    "cambio": cambio, "est": estado_venta,
+                                    "cajero": cajero_id_actual, "fecha": fecha_venta
+                                })
+                                venta_id = res.scalar()
 
-                        for item in st.session_state.carrito:
-                            descuento_linea = item.get("descuento_item", 0) * item["cantidad"]
-                            conn.execute(text("""
-                                INSERT INTO Detalles_Venta
-                                (venta_id, producto_id, nombre_producto, codigo_barras,
-                                 cantidad, precio_unitario, costo_unitario, descuento, subtotal, iva_porcentaje)
-                                VALUES (:vid, :pid, :nom, :cod, :cant, :pvp, :costo, :desc, :sub, :iva)
-                            """), {
-                                "vid": venta_id, "pid": item["producto_id"],
-                                "nom": item["nombre"], "cod": item["codigo_barras"],
-                                "cant": item["cantidad"], "pvp": item["precio_unitario"],
-                                "costo": item.get("costo_unitario", 0),
-                                "desc": descuento_linea,
-                                "sub": item["subtotal"],
-                                "iva": item.get("iva_porcentaje", 0) or 0
-                            })
-                            if item["producto_id"]:
-                                resultado = conn.execute(text("""
-                                    UPDATE Productos SET stock_actual = stock_actual - :cant
-                                    WHERE id = :pid AND stock_actual >= :cant
-                                """), {"cant": item["cantidad"], "pid": item["producto_id"]})
-                                if resultado.rowcount == 0:
-                                    raise ValueError(f"Stock insuficiente para '{item['nombre']}'.")
+                            for item in st.session_state.carrito:
+                                descuento_linea = item.get("descuento_item", 0) * item["cantidad"]
+                                conn.execute(text("""
+                                    INSERT INTO Detalles_Venta
+                                    (venta_id, producto_id, nombre_producto, codigo_barras,
+                                     cantidad, precio_unitario, costo_unitario, descuento, subtotal, iva_porcentaje)
+                                    VALUES (:vid, :pid, :nom, :cod, :cant, :pvp, :costo, :desc, :sub, :iva)
+                                """), {
+                                    "vid": venta_id, "pid": item["producto_id"],
+                                    "nom": item["nombre"], "cod": item["codigo_barras"],
+                                    "cant": item["cantidad"], "pvp": item["precio_unitario"],
+                                    "costo": item.get("costo_unitario", 0),
+                                    "desc": descuento_linea,
+                                    "sub": item["subtotal"],
+                                    "iva": item.get("iva_porcentaje", 0) or 0
+                                })
+                                if item["producto_id"]:
+                                    resultado = conn.execute(text("""
+                                        UPDATE Productos SET stock_actual = stock_actual - :cant
+                                        WHERE id = :pid AND stock_actual >= :cant
+                                    """), {"cant": item["cantidad"], "pid": item["producto_id"]})
+                                    if resultado.rowcount == 0:
+                                        raise ValueError(f"Stock insuficiente para '{item['nombre']}'.")
 
-                        if tipo_pago == "Credito" and cliente_id:
-                            conn.execute(text("""
-                                INSERT INTO Creditos
-                                (usuario_id, venta_id, cliente_id, total, saldo_pendiente,
-                                 fecha_inicio, fecha_limite, tipo_cuota, valor_cuota, estado)
-                                VALUES (:uid, :vid, :cid, :total, :saldo,
-                                        :f_ini, :f_lim, :tipo_c, :val_c, 'Activo')
-                            """), {
-                                "uid": user_id, "vid": venta_id, "cid": cliente_id,
-                                "total": total_final, "saldo": total_final,
-                                "f_ini": hoy_bogota().strftime('%Y-%m-%d'),
-                                "f_lim": fecha_limite.strftime('%Y-%m-%d'),
-                                "tipo_c": tipo_cuota, "val_c": valor_cuota,
-                            })
-                            invalidar_cache_creditos()
+                            if tipo_pago == "Credito" and cliente_id:
+                                conn.execute(text("""
+                                    INSERT INTO Creditos
+                                    (usuario_id, venta_id, cliente_id, total, saldo_pendiente,
+                                     fecha_inicio, fecha_limite, tipo_cuota, valor_cuota, estado)
+                                    VALUES (:uid, :vid, :cid, :total, :saldo,
+                                            :f_ini, :f_lim, :tipo_c, :val_c, 'Activo')
+                                """), {
+                                    "uid": user_id, "vid": venta_id, "cid": cliente_id,
+                                    "total": total_final, "saldo": total_final,
+                                    "f_ini": hoy_bogota().strftime('%Y-%m-%d'),
+                                    "f_lim": fecha_limite.strftime('%Y-%m-%d'),
+                                    "tipo_c": tipo_cuota, "val_c": valor_cuota,
+                                })
+                                invalidar_cache_creditos()
 
-                    invalidar_cache_ventas()
-                    invalidar_cache_productos()
+                        invalidar_cache_ventas()
+                        invalidar_cache_productos()
 
-                    limpiar_carrito()
-                    st.success(f"Venta #{num_venta(venta_id)} registrada.")
-                    if cambio > 0:
-                        st.info(f"Cambio: {formato_cop(cambio)}")
+                        limpiar_carrito()
+                        st.success(f"Venta #{num_venta(venta_id)} registrada.")
+                        if cambio > 0:
+                            st.info(f"Cambio: {formato_cop(cambio)}")
 
-                    if confirmar_venta_factura:
-                        with st.spinner("Emitiendo factura electrónica ante la DIAN..."):
-                            ok_f, msg_f = facturar_venta(user_id, venta_id)
-                        if ok_f:
-                            st.success(msg_f)
-                        else:
-                            st.warning(msg_f)
+                        if confirmar_venta_factura:
+                            with st.spinner("Emitiendo factura electrónica ante la DIAN..."):
+                                ok_f, msg_f = facturar_venta(user_id, venta_id)
+                            if ok_f:
+                                st.success(msg_f)
+                            else:
+                                st.warning(msg_f)
 
-                    st.rerun()
+                        # scope="app": el Historial del Día (otra pestaña, fuera
+                        # de este fragment) también debe mostrar la venta nueva.
+                        st.rerun(scope="app")
 
-                except ValueError as ve:
-                    st.error(str(ve))
-                except Exception as e:
-                    st.error(f"Error: {e}")
+                    except ValueError as ve:
+                        st.error(str(ve))
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+
+    _seccion_pos()
 
 # ==========================================
 # TAB 2: HISTORIAL DEL DÍA
@@ -1202,196 +1208,209 @@ with tab_devolucion:
                          "electrónica (si la venta tiene factura emitida).",
                 )
 
-                if tipo_correccion == "Anulación completa":
-                    col_b1, col_b2 = st.columns(2)
+                @st.fragment
+                def _seccion_correccion_venta():
+                    if tipo_correccion == "Anulación completa":
+                        col_b1, col_b2 = st.columns(2)
 
-                    with col_b1:
-                        if st.button("Anular Venta Completa", use_container_width=True, type="primary"):
+                        with col_b1:
+                            if st.button("Anular Venta Completa", use_container_width=True, type="primary"):
+                                try:
+                                    with engine.begin() as conn:
+                                        conn.execute(text("""
+                                            UPDATE Ventas SET estado = 'Anulada', notas = :notas
+                                            WHERE id = :vid AND usuario_id = :uid
+                                        """), {
+                                            "vid": vid_dev, "uid": user_id,
+                                            "notas": f"Anulada: {motivo}" if motivo else "Anulada"
+                                        })
+                                        for _, item in detalles_dev.iterrows():
+                                            if item['producto_id']:
+                                                conn.execute(text("""
+                                                    UPDATE Productos
+                                                    SET stock_actual = stock_actual + :cant
+                                                    WHERE id = :pid AND usuario_id = :uid
+                                                """), {
+                                                    "cant": int(item['cantidad']),
+                                                    "pid": int(item['producto_id']),
+                                                    "uid": user_id
+                                                })
+                                        conn.execute(text("""
+                                            UPDATE Creditos SET estado = 'Pagado'
+                                            WHERE venta_id = :vid AND usuario_id = :uid
+                                        """), {"vid": vid_dev, "uid": user_id})
+
+                                    invalidar_cache_ventas()
+                                    invalidar_cache_productos()
+                                    st.success(f"Venta #{num_venta(vid_dev)} anulada. Stock restaurado.")
+
+                                    with st.spinner("Verificando si necesita nota crédito electrónica..."):
+                                        ok_nc, msg_nc = anular_factura_venta(user_id, vid_dev)
+                                    if ok_nc:
+                                        if "nota crédito" in msg_nc.lower():
+                                            st.success(msg_nc)
+                                    else:
+                                        st.warning(f"La venta se anuló en MyInv, pero: {msg_nc}")
+
+                                    # scope="app": el estado de la venta mostrado
+                                    # arriba (fuera de este fragment) debe reflejar
+                                    # la anulación.
+                                    st.rerun(scope="app")
+                                except Exception as e:
+                                    st.error(f"Error al anular: {e}")
+
+                        with col_b2:
+                            st.info("Al anular se restaura el stock y la venta queda marcada como anulada en los reportes.")
+
+                    elif tipo_correccion == "Devolución parcial de productos":
+                        st.caption(
+                            "Indica cuántas unidades de cada producto devuelve el cliente. "
+                            "Solo se restaura el stock de esas cantidades y se acredita su valor."
+                        )
+                        df_dev_base = detalles_dev.copy()
+                        df_dev_base['cantidad_devolver'] = 0.0
+                        df_dev_editado = st.data_editor(
+                            df_dev_base[['nombre_producto', 'cantidad', 'precio_unitario', 'cantidad_devolver']],
+                            hide_index=True, use_container_width=True,
+                            disabled=['nombre_producto', 'cantidad', 'precio_unitario'],
+                            column_config={
+                                'nombre_producto': 'Producto',
+                                'cantidad': 'Cant. vendida',
+                                'precio_unitario': st.column_config.NumberColumn("Precio", format="$%,d"),
+                                'cantidad_devolver': st.column_config.NumberColumn(
+                                    "Cant. a devolver", min_value=0.0, step=1.0
+                                ),
+                            },
+                            key=f"editor_dev_parcial_{vid_dev}",
+                        )
+                        if st.button("Registrar devolución y nota crédito", type="primary", use_container_width=True):
                             try:
-                                with engine.begin() as conn:
-                                    conn.execute(text("""
-                                        UPDATE Ventas SET estado = 'Anulada', notas = :notas
-                                        WHERE id = :vid AND usuario_id = :uid
-                                    """), {
-                                        "vid": vid_dev, "uid": user_id,
-                                        "notas": f"Anulada: {motivo}" if motivo else "Anulada"
+                                items_stock, items_credito = [], []
+                                monto_total = 0.0
+                                for idx, fila in df_dev_editado.iterrows():
+                                    cant_dev = min(float(fila['cantidad_devolver'] or 0), float(fila['cantidad']))
+                                    if cant_dev <= 0:
+                                        continue
+                                    original = detalles_dev.loc[idx]
+                                    precio_unit = float(original['precio_unitario'])
+                                    cant_original = float(original['cantidad'])
+                                    desc_unit = float(original['descuento'] or 0) / cant_original if cant_original else 0.0
+                                    monto_linea = cant_dev * (precio_unit - desc_unit)
+                                    monto_total += monto_linea
+                                    if original['producto_id']:
+                                        items_stock.append({"producto_id": int(original['producto_id']), "cantidad": cant_dev})
+                                    items_credito.append({
+                                        "producto_id": original['producto_id'],
+                                        "nombre_producto": original['nombre_producto'],
+                                        "cantidad": cant_dev,
+                                        "precio_unitario": precio_unit,
+                                        "descuento": desc_unit * cant_dev,
+                                        "iva_porcentaje": original['iva_porcentaje'],
                                     })
-                                    for _, item in detalles_dev.iterrows():
-                                        if item['producto_id']:
-                                            conn.execute(text("""
-                                                UPDATE Productos
-                                                SET stock_actual = stock_actual + :cant
-                                                WHERE id = :pid AND usuario_id = :uid
-                                            """), {
-                                                "cant": int(item['cantidad']),
-                                                "pid": int(item['producto_id']),
-                                                "uid": user_id
-                                            })
-                                    conn.execute(text("""
-                                        UPDATE Creditos SET estado = 'Pagado'
-                                        WHERE venta_id = :vid AND usuario_id = :uid
-                                    """), {"vid": vid_dev, "uid": user_id})
 
-                                invalidar_cache_ventas()
-                                invalidar_cache_productos()
-                                st.success(f"Venta #{num_venta(vid_dev)} anulada. Stock restaurado.")
-
-                                with st.spinner("Verificando si necesita nota crédito electrónica..."):
-                                    ok_nc, msg_nc = anular_factura_venta(user_id, vid_dev)
-                                if ok_nc:
-                                    if "nota crédito" in msg_nc.lower():
-                                        st.success(msg_nc)
+                                if not items_credito:
+                                    st.warning("Indica al menos una cantidad a devolver mayor a 0.")
+                                elif monto_total > float(venta_dev[1]):
+                                    st.warning("El monto a acreditar no puede superar el total de la venta.")
                                 else:
-                                    st.warning(f"La venta se anuló en MyInv, pero: {msg_nc}")
+                                    if items_stock:
+                                        restaurar_stock_items(user_id, items_stock)
+                                    acreditar_venta(user_id, vid_dev, monto_total,
+                                                     motivo=f"Devolución parcial: {motivo}" if motivo else "Devolución parcial")
+                                    st.success(f"Devolución registrada. Se acreditaron {formato_cop(monto_total)} "
+                                               f"y se restauró el stock devuelto.")
 
-                                st.rerun()
+                                    with st.spinner("Verificando si necesita nota crédito electrónica..."):
+                                        ok_nc, msg_nc = emitir_nota_credito(
+                                            user_id, vid_dev, CORRECCION_DEVOLUCION_PARCIAL, items_credito, motivo
+                                        )
+                                    if ok_nc:
+                                        if "nota crédito" in msg_nc.lower():
+                                            st.success(msg_nc)
+                                    else:
+                                        st.warning(f"La devolución se registró en MyInv, pero: {msg_nc}")
+                                    # scope="app": el saldo/estado de la venta
+                                    # mostrado arriba (fuera de este fragment)
+                                    # debe reflejar la devolución.
+                                    st.rerun(scope="app")
                             except Exception as e:
-                                st.error(f"Error al anular: {e}")
+                                st.error(f"Error al registrar la devolución: {e}")
 
-                    with col_b2:
-                        st.info("Al anular se restaura el stock y la venta queda marcada como anulada en los reportes.")
+                    else:
+                        concepto_map = {
+                            "Rebaja / descuento": CORRECCION_REBAJA,
+                            "Ajuste de precio": CORRECCION_AJUSTE_PRECIO,
+                            "Otro": CORRECCION_OTROS,
+                        }
+                        st.caption(
+                            "Indica el monto a acreditar por producto (no cambia el stock, solo "
+                            "el total cobrado de la venta)."
+                        )
+                        df_credito_base = detalles_dev.copy()
+                        df_credito_base['monto_credito'] = 0.0
+                        df_credito_editado = st.data_editor(
+                            df_credito_base[['nombre_producto', 'subtotal', 'monto_credito']],
+                            hide_index=True, use_container_width=True,
+                            disabled=['nombre_producto', 'subtotal'],
+                            column_config={
+                                'nombre_producto': 'Producto',
+                                'subtotal': st.column_config.NumberColumn("Subtotal vendido", format="$%,d"),
+                                'monto_credito': st.column_config.NumberColumn(
+                                    "Monto a acreditar ($)", min_value=0.0, step=500.0
+                                ),
+                            },
+                            key=f"editor_credito_{vid_dev}_{tipo_correccion}",
+                        )
+                        motivo_requerido = tipo_correccion == "Otro"
+                        if motivo_requerido and not motivo:
+                            st.info("Para 'Otro' es obligatorio indicar el motivo arriba.")
+                        if st.button(f"Registrar {tipo_correccion.lower()} y nota crédito",
+                                     type="primary", use_container_width=True,
+                                     disabled=motivo_requerido and not motivo):
+                            try:
+                                items_credito = []
+                                monto_total = 0.0
+                                for idx, fila in df_credito_editado.iterrows():
+                                    monto_linea = min(float(fila['monto_credito'] or 0), float(fila['subtotal']))
+                                    if monto_linea <= 0:
+                                        continue
+                                    original = detalles_dev.loc[idx]
+                                    monto_total += monto_linea
+                                    items_credito.append({
+                                        "producto_id": original['producto_id'],
+                                        "nombre_producto": original['nombre_producto'],
+                                        "cantidad": float(original['cantidad']),
+                                        "precio_unitario": float(original['precio_unitario']),
+                                        "descuento": monto_linea,
+                                        "iva_porcentaje": original['iva_porcentaje'],
+                                    })
 
-                elif tipo_correccion == "Devolución parcial de productos":
-                    st.caption(
-                        "Indica cuántas unidades de cada producto devuelve el cliente. "
-                        "Solo se restaura el stock de esas cantidades y se acredita su valor."
-                    )
-                    df_dev_base = detalles_dev.copy()
-                    df_dev_base['cantidad_devolver'] = 0.0
-                    df_dev_editado = st.data_editor(
-                        df_dev_base[['nombre_producto', 'cantidad', 'precio_unitario', 'cantidad_devolver']],
-                        hide_index=True, use_container_width=True,
-                        disabled=['nombre_producto', 'cantidad', 'precio_unitario'],
-                        column_config={
-                            'nombre_producto': 'Producto',
-                            'cantidad': 'Cant. vendida',
-                            'precio_unitario': st.column_config.NumberColumn("Precio", format="$%,d"),
-                            'cantidad_devolver': st.column_config.NumberColumn(
-                                "Cant. a devolver", min_value=0.0, step=1.0
-                            ),
-                        },
-                        key=f"editor_dev_parcial_{vid_dev}",
-                    )
-                    if st.button("Registrar devolución y nota crédito", type="primary", use_container_width=True):
-                        try:
-                            items_stock, items_credito = [], []
-                            monto_total = 0.0
-                            for idx, fila in df_dev_editado.iterrows():
-                                cant_dev = min(float(fila['cantidad_devolver'] or 0), float(fila['cantidad']))
-                                if cant_dev <= 0:
-                                    continue
-                                original = detalles_dev.loc[idx]
-                                precio_unit = float(original['precio_unitario'])
-                                cant_original = float(original['cantidad'])
-                                desc_unit = float(original['descuento'] or 0) / cant_original if cant_original else 0.0
-                                monto_linea = cant_dev * (precio_unit - desc_unit)
-                                monto_total += monto_linea
-                                if original['producto_id']:
-                                    items_stock.append({"producto_id": int(original['producto_id']), "cantidad": cant_dev})
-                                items_credito.append({
-                                    "producto_id": original['producto_id'],
-                                    "nombre_producto": original['nombre_producto'],
-                                    "cantidad": cant_dev,
-                                    "precio_unitario": precio_unit,
-                                    "descuento": desc_unit * cant_dev,
-                                    "iva_porcentaje": original['iva_porcentaje'],
-                                })
-
-                            if not items_credito:
-                                st.warning("Indica al menos una cantidad a devolver mayor a 0.")
-                            elif monto_total > float(venta_dev[1]):
-                                st.warning("El monto a acreditar no puede superar el total de la venta.")
-                            else:
-                                if items_stock:
-                                    restaurar_stock_items(user_id, items_stock)
-                                acreditar_venta(user_id, vid_dev, monto_total,
-                                                 motivo=f"Devolución parcial: {motivo}" if motivo else "Devolución parcial")
-                                st.success(f"Devolución registrada. Se acreditaron {formato_cop(monto_total)} "
-                                           f"y se restauró el stock devuelto.")
-
-                                with st.spinner("Verificando si necesita nota crédito electrónica..."):
-                                    ok_nc, msg_nc = emitir_nota_credito(
-                                        user_id, vid_dev, CORRECCION_DEVOLUCION_PARCIAL, items_credito, motivo
-                                    )
-                                if ok_nc:
-                                    if "nota crédito" in msg_nc.lower():
-                                        st.success(msg_nc)
+                                if not items_credito:
+                                    st.warning("Indica al menos un monto a acreditar mayor a 0.")
+                                elif monto_total > float(venta_dev[1]):
+                                    st.warning("El monto a acreditar no puede superar el total de la venta.")
                                 else:
-                                    st.warning(f"La devolución se registró en MyInv, pero: {msg_nc}")
-                                st.rerun()
-                        except Exception as e:
-                            st.error(f"Error al registrar la devolución: {e}")
+                                    acreditar_venta(user_id, vid_dev, monto_total,
+                                                     motivo=f"{tipo_correccion}: {motivo}" if motivo else tipo_correccion)
+                                    st.success(f"Se acreditaron {formato_cop(monto_total)} sobre la venta #{num_venta(vid_dev)}.")
 
-                else:
-                    concepto_map = {
-                        "Rebaja / descuento": CORRECCION_REBAJA,
-                        "Ajuste de precio": CORRECCION_AJUSTE_PRECIO,
-                        "Otro": CORRECCION_OTROS,
-                    }
-                    st.caption(
-                        "Indica el monto a acreditar por producto (no cambia el stock, solo "
-                        "el total cobrado de la venta)."
-                    )
-                    df_credito_base = detalles_dev.copy()
-                    df_credito_base['monto_credito'] = 0.0
-                    df_credito_editado = st.data_editor(
-                        df_credito_base[['nombre_producto', 'subtotal', 'monto_credito']],
-                        hide_index=True, use_container_width=True,
-                        disabled=['nombre_producto', 'subtotal'],
-                        column_config={
-                            'nombre_producto': 'Producto',
-                            'subtotal': st.column_config.NumberColumn("Subtotal vendido", format="$%,d"),
-                            'monto_credito': st.column_config.NumberColumn(
-                                "Monto a acreditar ($)", min_value=0.0, step=500.0
-                            ),
-                        },
-                        key=f"editor_credito_{vid_dev}_{tipo_correccion}",
-                    )
-                    motivo_requerido = tipo_correccion == "Otro"
-                    if motivo_requerido and not motivo:
-                        st.info("Para 'Otro' es obligatorio indicar el motivo arriba.")
-                    if st.button(f"Registrar {tipo_correccion.lower()} y nota crédito",
-                                 type="primary", use_container_width=True,
-                                 disabled=motivo_requerido and not motivo):
-                        try:
-                            items_credito = []
-                            monto_total = 0.0
-                            for idx, fila in df_credito_editado.iterrows():
-                                monto_linea = min(float(fila['monto_credito'] or 0), float(fila['subtotal']))
-                                if monto_linea <= 0:
-                                    continue
-                                original = detalles_dev.loc[idx]
-                                monto_total += monto_linea
-                                items_credito.append({
-                                    "producto_id": original['producto_id'],
-                                    "nombre_producto": original['nombre_producto'],
-                                    "cantidad": float(original['cantidad']),
-                                    "precio_unitario": float(original['precio_unitario']),
-                                    "descuento": monto_linea,
-                                    "iva_porcentaje": original['iva_porcentaje'],
-                                })
+                                    with st.spinner("Verificando si necesita nota crédito electrónica..."):
+                                        ok_nc, msg_nc = emitir_nota_credito(
+                                            user_id, vid_dev, concepto_map[tipo_correccion], items_credito, motivo
+                                        )
+                                    if ok_nc:
+                                        if "nota crédito" in msg_nc.lower():
+                                            st.success(msg_nc)
+                                    else:
+                                        st.warning(f"El crédito se registró en MyInv, pero: {msg_nc}")
+                                    # scope="app": el saldo/estado de la venta
+                                    # mostrado arriba (fuera de este fragment)
+                                    # debe reflejar el ajuste.
+                                    st.rerun(scope="app")
+                            except Exception as e:
+                                st.error(f"Error al registrar el crédito: {e}")
 
-                            if not items_credito:
-                                st.warning("Indica al menos un monto a acreditar mayor a 0.")
-                            elif monto_total > float(venta_dev[1]):
-                                st.warning("El monto a acreditar no puede superar el total de la venta.")
-                            else:
-                                acreditar_venta(user_id, vid_dev, monto_total,
-                                                 motivo=f"{tipo_correccion}: {motivo}" if motivo else tipo_correccion)
-                                st.success(f"Se acreditaron {formato_cop(monto_total)} sobre la venta #{num_venta(vid_dev)}.")
-
-                                with st.spinner("Verificando si necesita nota crédito electrónica..."):
-                                    ok_nc, msg_nc = emitir_nota_credito(
-                                        user_id, vid_dev, concepto_map[tipo_correccion], items_credito, motivo
-                                    )
-                                if ok_nc:
-                                    if "nota crédito" in msg_nc.lower():
-                                        st.success(msg_nc)
-                                else:
-                                    st.warning(f"El crédito se registró en MyInv, pero: {msg_nc}")
-                                st.rerun()
-                        except Exception as e:
-                            st.error(f"Error al registrar el crédito: {e}")
+                _seccion_correccion_venta()
         else:
             st.warning(f"No se encontró la venta #{numero_tipeado_dev}.")
 
@@ -1399,222 +1418,228 @@ with tab_devolucion:
 # TAB 4: COTIZACIÓN
 # ==========================================
 with tab_cotizacion:
-    if "carrito_cotizacion" not in st.session_state:
-        st.session_state.carrito_cotizacion = []
+    @st.fragment
+    def _seccion_cotizacion_builder():
+        if "carrito_cotizacion" not in st.session_state:
+            st.session_state.carrito_cotizacion = []
 
-    def agregar_a_cotizacion(producto_id, nombre, codigo_barras, precio, stock_actual, costo=0, cantidad=1, iva_porcentaje=0):
-        for item in st.session_state.carrito_cotizacion:
-            if item["producto_id"] == producto_id:
-                item["cantidad"] += cantidad
-                item["subtotal"] = item["cantidad"] * item["precio_unitario"]
-                return
-        st.session_state.carrito_cotizacion.append({
-            "producto_id": producto_id,
-            "nombre": nombre,
-            "codigo_barras": codigo_barras,
-            "precio_unitario": float(precio),
-            "costo_unitario": float(costo or 0),
-            "descuento_item": 0.0,
-            "cantidad": cantidad,
-            "subtotal": float(precio) * cantidad,
-            "stock_max": stock_actual,
-            "iva_porcentaje": float(iva_porcentaje or 0),
-        })
+        def agregar_a_cotizacion(producto_id, nombre, codigo_barras, precio, stock_actual, costo=0, cantidad=1, iva_porcentaje=0):
+            for item in st.session_state.carrito_cotizacion:
+                if item["producto_id"] == producto_id:
+                    item["cantidad"] += cantidad
+                    item["subtotal"] = item["cantidad"] * item["precio_unitario"]
+                    return
+            st.session_state.carrito_cotizacion.append({
+                "producto_id": producto_id,
+                "nombre": nombre,
+                "codigo_barras": codigo_barras,
+                "precio_unitario": float(precio),
+                "costo_unitario": float(costo or 0),
+                "descuento_item": 0.0,
+                "cantidad": cantidad,
+                "subtotal": float(precio) * cantidad,
+                "stock_max": stock_actual,
+                "iva_porcentaje": float(iva_porcentaje or 0),
+            })
 
-    def agregar_item_libre_a_cotizacion(nombre, precio, cantidad=1, costo=0, iva_porcentaje=0):
-        """Igual que agregar_item_libre_al_carrito pero para la cotización:
-        un ítem que NO está en el inventario. producto_id queda en None --
-        Detalles_Cotizacion.producto_id admite NULL y tanto crear_cotizacion
-        como convertir_cotizacion_a_venta ya lo pasan tal cual a Detalles_Venta."""
-        st.session_state.carrito_cotizacion.append({
-            "producto_id": None,
-            "nombre": nombre,
-            "codigo_barras": "",
-            "precio_unitario": float(precio),
-            "costo_unitario": float(costo or 0),
-            "descuento_item": 0.0,
-            "cantidad": cantidad,
-            "subtotal": float(precio) * cantidad,
-            "stock_max": None,
-            "iva_porcentaje": float(iva_porcentaje or 0),
-            "es_libre": True,
-        })
+        def agregar_item_libre_a_cotizacion(nombre, precio, cantidad=1, costo=0, iva_porcentaje=0):
+            """Igual que agregar_item_libre_al_carrito pero para la cotización:
+            un ítem que NO está en el inventario. producto_id queda en None --
+            Detalles_Cotizacion.producto_id admite NULL y tanto crear_cotizacion
+            como convertir_cotizacion_a_venta ya lo pasan tal cual a Detalles_Venta."""
+            st.session_state.carrito_cotizacion.append({
+                "producto_id": None,
+                "nombre": nombre,
+                "codigo_barras": "",
+                "precio_unitario": float(precio),
+                "costo_unitario": float(costo or 0),
+                "descuento_item": 0.0,
+                "cantidad": cantidad,
+                "subtotal": float(precio) * cantidad,
+                "stock_max": None,
+                "iva_porcentaje": float(iva_porcentaje or 0),
+                "es_libre": True,
+            })
 
-    st.subheader("Nueva Cotización")
-    st.caption(
-        "Cotiza productos para un cliente sin comprometer stock ni forma de pago todavía. "
-        "Podrás descargarla en PDF y, cuando el cliente la apruebe, convertirla en una venta real "
-        "desde 'Cotizaciones Guardadas' más abajo."
-    )
-
-    col_cot_izq, col_cot_der = st.columns([3, 2])
-
-    with col_cot_izq:
-        st.markdown("**Buscar Producto**")
-        busqueda_cot = st.text_input(
-            "Código o nombre", placeholder="Escanea o escribe aquí...",
-            key="buscador_cotizacion", label_visibility="collapsed"
+        st.subheader("Nueva Cotización")
+        st.caption(
+            "Cotiza productos para un cliente sin comprometer stock ni forma de pago todavía. "
+            "Podrás descargarla en PDF y, cuando el cliente la apruebe, convertirla en una venta real "
+            "desde 'Cotizaciones Guardadas' más abajo."
         )
 
-        if busqueda_cot:
-            busqueda_cot = busqueda_cot.strip()
-            prod_encontrado_cot = buscar_producto_por_codigo(user_id, busqueda_cot)
+        col_cot_izq, col_cot_der = st.columns([3, 2])
 
-            if prod_encontrado_cot:
-                agregar_a_cotizacion(
-                    producto_id=prod_encontrado_cot[0],
-                    nombre=prod_encontrado_cot[1],
-                    codigo_barras=prod_encontrado_cot[2],
-                    precio=prod_encontrado_cot[4],
-                    stock_actual=int(prod_encontrado_cot[3]),
-                    costo=prod_encontrado_cot[5],
-                    iva_porcentaje=prod_encontrado_cot[6] if len(prod_encontrado_cot) > 6 else 0,
-                )
-                st.rerun()
-            else:
-                df_productos_cot = obtener_productos_activos(user_id)
-                if not df_productos_cot.empty:
-                    df_filtrado_cot = df_productos_cot[
-                        df_productos_cot['nombre'].str.contains(busqueda_cot, case=False, na=False)
-                    ]
-                    if not df_filtrado_cot.empty:
-                        st.markdown(f"**{len(df_filtrado_cot)} resultado(s):**")
-                        for _, prod in df_filtrado_cot.iterrows():
-                            c1, c2, c3 = st.columns([3, 1, 1])
-                            with c1:
-                                st.write(f"**{prod['nombre']}**")
-                            with c2:
-                                st.write(formato_cop(prod['precio_venta']))
-                            with c3:
-                                if st.button("Agregar", key=f"add_cot_{prod['id']}"):
-                                    agregar_a_cotizacion(
-                                        producto_id=int(prod['id']),
-                                        nombre=prod['nombre'],
-                                        codigo_barras=prod['codigo_barras'] or "",
-                                        precio=float(prod['precio_venta']),
-                                        stock_actual=int(prod['stock_actual']),
-                                        costo=float(prod['costo_compra'] or 0),
-                                        iva_porcentaje=float(prod.get('iva_porcentaje', 0) or 0),
-                                    )
-                                    st.rerun()
-                    else:
-                        st.warning(f"No se encontró '{busqueda_cot}'.")
-
-        with st.expander("Venta libre (algo que no está en el inventario)"):
-            st.caption(
-                "Para cotizar algo que no tienes en el inventario o que conseguirías por "
-                "fuera. Se agrega a la cotización igual que cualquier producto, pero no "
-                "descuenta stock de Productos."
+        with col_cot_izq:
+            st.markdown("**Buscar Producto**")
+            busqueda_cot = st.text_input(
+                "Código o nombre", placeholder="Escanea o escribe aquí...",
+                key="buscador_cotizacion", label_visibility="collapsed"
             )
-            with st.form("form_libre_cotizacion", clear_on_submit=True):
-                nombre_libre_cot = st.text_input("Nombre / descripción *", placeholder="Ej: Filtro de aceite Toyota")
-                col_lc1, col_lc2, col_lc3 = st.columns(3)
-                with col_lc1:
-                    precio_libre_cot = st.number_input("Precio de venta ($) *", min_value=0.0, step=1000.0)
-                with col_lc2:
-                    cantidad_libre_cot = st.number_input("Cantidad", min_value=1, value=1, step=1)
-                with col_lc3:
-                    costo_libre_cot = st.number_input(
-                        "Costo (opcional, $)", min_value=0.0, step=1000.0,
-                        help="Lo que te costó a ti, si lo sabes. Solo afecta los reportes de ganancia."
-                    )
-                if iva_activo:
-                    iva_libre_cot = st.selectbox("IVA%", OPCIONES_IVA_POS, index=0, key="iva_libre_cot")
-                else:
-                    iva_libre_cot = 0
-                if st.form_submit_button("Agregar venta libre a la cotización", use_container_width=True):
-                    if not nombre_libre_cot.strip():
-                        st.warning("Escribe el nombre o descripción del ítem.")
-                    elif precio_libre_cot <= 0:
-                        st.warning("El precio debe ser mayor a 0.")
-                    else:
-                        agregar_item_libre_a_cotizacion(
-                            nombre=nombre_libre_cot.strip(), precio=precio_libre_cot,
-                            cantidad=int(cantidad_libre_cot), costo=costo_libre_cot,
-                            iva_porcentaje=iva_libre_cot,
-                        )
-                        st.rerun()
 
-        st.markdown("---")
-        st.markdown("**Ítems de la Cotización**")
+            if busqueda_cot:
+                busqueda_cot = busqueda_cot.strip()
+                prod_encontrado_cot = buscar_producto_por_codigo(user_id, busqueda_cot)
 
-        if not st.session_state.carrito_cotizacion:
-            st.info("Aún no se han agregado ítems.")
-        else:
-            items_a_quitar_cot = []
-            total_cotizacion = 0
-
-            for i, item in enumerate(st.session_state.carrito_cotizacion):
-                cc1, cc2, cc3, cc4, cc5 = st.columns([3, 1, 1, 1, 0.5])
-                with cc1:
-                    st.write(f"(Libre) {item['nombre']}" if item.get("es_libre") else item["nombre"])
-                with cc2:
-                    st.write(formato_cop(item["precio_unitario"]))
-                with cc3:
-                    nueva_cant_cot = st.number_input(
-                        "", min_value=1, value=item["cantidad"], step=1,
-                        key=f"cant_cot_{i}", label_visibility="collapsed"
-                    )
-                    if nueva_cant_cot != item["cantidad"]:
-                        st.session_state.carrito_cotizacion[i]["cantidad"] = nueva_cant_cot
-                        st.session_state.carrito_cotizacion[i]["subtotal"] = nueva_cant_cot * item["precio_unitario"]
-                        st.rerun()
-                with cc4:
-                    st.write(formato_cop(item["subtotal"]))
-                with cc5:
-                    if st.button("Quitar", key=f"del_cot_{i}"):
-                        items_a_quitar_cot.append(i)
-
-                total_cotizacion += item["subtotal"]
-
-            for idx in sorted(items_a_quitar_cot, reverse=True):
-                st.session_state.carrito_cotizacion.pop(idx)
-            if items_a_quitar_cot:
-                st.rerun()
-
-            st.markdown("---")
-            st.markdown(f"### Total: {formato_cop(total_cotizacion)}")
-
-    with col_cot_der:
-        st.markdown("**Guardar Cotización**")
-
-        if not st.session_state.carrito_cotizacion:
-            st.info("Agrega productos para poder guardar la cotización.")
-        else:
-            clientes_cot = obtener_clientes(user_id)
-            dict_clientes_cot = {"Sin cliente": None}
-            if clientes_cot:
-                for c in clientes_cot:
-                    cid_c, nombre_c, tel_c = c[0], c[1], c[2]
-                    etiqueta = f"{nombre_c} — {tel_c}" if tel_c else nombre_c
-                    dict_clientes_cot[etiqueta] = cid_c
-
-            cliente_cot_sel = st.selectbox(
-                "Cliente (opcional)", options=list(dict_clientes_cot.keys()), key="cliente_cotizacion_sel",
-                help="Solo se requiere si vas a convertir esta cotización en una venta a crédito.",
-            )
-            cliente_id_cot = dict_clientes_cot[cliente_cot_sel]
-
-            total_cot_guardar = sum(i["subtotal"] for i in st.session_state.carrito_cotizacion)
-            st.markdown(f"**Total: {formato_cop(total_cot_guardar)}**")
-
-            if st.button("Guardar Cotización", type="primary", use_container_width=True):
-                try:
-                    cajero_id_cot = st.session_state.auth.get("cajero_id")
-                    cot_id_nueva = crear_cotizacion(
-                        user_id, cliente_id_cot, cajero_id_cot,
-                        st.session_state.carrito_cotizacion,
-                        subtotal=total_cot_guardar, descuento=0, total=total_cot_guardar,
-                    )
-                    st.session_state.carrito_cotizacion = []
-                    st.success(
-                        f"Cotización #{cot_id_nueva} guardada. Descárgala o conviértela en venta "
-                        "desde 'Cotizaciones Guardadas' más abajo."
+                if prod_encontrado_cot:
+                    agregar_a_cotizacion(
+                        producto_id=prod_encontrado_cot[0],
+                        nombre=prod_encontrado_cot[1],
+                        codigo_barras=prod_encontrado_cot[2],
+                        precio=prod_encontrado_cot[4],
+                        stock_actual=int(prod_encontrado_cot[3]),
+                        costo=prod_encontrado_cot[5],
+                        iva_porcentaje=prod_encontrado_cot[6] if len(prod_encontrado_cot) > 6 else 0,
                     )
                     st.rerun()
-                except Exception as e:
-                    st.error(f"Error al guardar la cotización: {e}")
+                else:
+                    df_productos_cot = obtener_productos_activos(user_id)
+                    if not df_productos_cot.empty:
+                        df_filtrado_cot = df_productos_cot[
+                            df_productos_cot['nombre'].str.contains(busqueda_cot, case=False, na=False)
+                        ]
+                        if not df_filtrado_cot.empty:
+                            st.markdown(f"**{len(df_filtrado_cot)} resultado(s):**")
+                            for _, prod in df_filtrado_cot.iterrows():
+                                c1, c2, c3 = st.columns([3, 1, 1])
+                                with c1:
+                                    st.write(f"**{prod['nombre']}**")
+                                with c2:
+                                    st.write(formato_cop(prod['precio_venta']))
+                                with c3:
+                                    if st.button("Agregar", key=f"add_cot_{prod['id']}"):
+                                        agregar_a_cotizacion(
+                                            producto_id=int(prod['id']),
+                                            nombre=prod['nombre'],
+                                            codigo_barras=prod['codigo_barras'] or "",
+                                            precio=float(prod['precio_venta']),
+                                            stock_actual=int(prod['stock_actual']),
+                                            costo=float(prod['costo_compra'] or 0),
+                                            iva_porcentaje=float(prod.get('iva_porcentaje', 0) or 0),
+                                        )
+                                        st.rerun()
+                        else:
+                            st.warning(f"No se encontró '{busqueda_cot}'.")
 
+            with st.expander("Venta libre (algo que no está en el inventario)"):
+                st.caption(
+                    "Para cotizar algo que no tienes en el inventario o que conseguirías por "
+                    "fuera. Se agrega a la cotización igual que cualquier producto, pero no "
+                    "descuenta stock de Productos."
+                )
+                with st.form("form_libre_cotizacion", clear_on_submit=True):
+                    nombre_libre_cot = st.text_input("Nombre / descripción *", placeholder="Ej: Filtro de aceite Toyota")
+                    col_lc1, col_lc2, col_lc3 = st.columns(3)
+                    with col_lc1:
+                        precio_libre_cot = st.number_input("Precio de venta ($) *", min_value=0.0, step=1000.0)
+                    with col_lc2:
+                        cantidad_libre_cot = st.number_input("Cantidad", min_value=1, value=1, step=1)
+                    with col_lc3:
+                        costo_libre_cot = st.number_input(
+                            "Costo (opcional, $)", min_value=0.0, step=1000.0,
+                            help="Lo que te costó a ti, si lo sabes. Solo afecta los reportes de ganancia."
+                        )
+                    if iva_activo:
+                        iva_libre_cot = st.selectbox("IVA%", OPCIONES_IVA_POS, index=0, key="iva_libre_cot")
+                    else:
+                        iva_libre_cot = 0
+                    if st.form_submit_button("Agregar venta libre a la cotización", use_container_width=True):
+                        if not nombre_libre_cot.strip():
+                            st.warning("Escribe el nombre o descripción del ítem.")
+                        elif precio_libre_cot <= 0:
+                            st.warning("El precio debe ser mayor a 0.")
+                        else:
+                            agregar_item_libre_a_cotizacion(
+                                nombre=nombre_libre_cot.strip(), precio=precio_libre_cot,
+                                cantidad=int(cantidad_libre_cot), costo=costo_libre_cot,
+                                iva_porcentaje=iva_libre_cot,
+                            )
+                            st.rerun()
+
+            st.markdown("---")
+            st.markdown("**Ítems de la Cotización**")
+
+            if not st.session_state.carrito_cotizacion:
+                st.info("Aún no se han agregado ítems.")
+            else:
+                items_a_quitar_cot = []
+                total_cotizacion = 0
+
+                for i, item in enumerate(st.session_state.carrito_cotizacion):
+                    cc1, cc2, cc3, cc4, cc5 = st.columns([3, 1, 1, 1, 0.5])
+                    with cc1:
+                        st.write(f"(Libre) {item['nombre']}" if item.get("es_libre") else item["nombre"])
+                    with cc2:
+                        st.write(formato_cop(item["precio_unitario"]))
+                    with cc3:
+                        nueva_cant_cot = st.number_input(
+                            "", min_value=1, value=item["cantidad"], step=1,
+                            key=f"cant_cot_{i}", label_visibility="collapsed"
+                        )
+                        if nueva_cant_cot != item["cantidad"]:
+                            st.session_state.carrito_cotizacion[i]["cantidad"] = nueva_cant_cot
+                            st.session_state.carrito_cotizacion[i]["subtotal"] = nueva_cant_cot * item["precio_unitario"]
+                            st.rerun()
+                    with cc4:
+                        st.write(formato_cop(item["subtotal"]))
+                    with cc5:
+                        if st.button("Quitar", key=f"del_cot_{i}"):
+                            items_a_quitar_cot.append(i)
+
+                    total_cotizacion += item["subtotal"]
+
+                for idx in sorted(items_a_quitar_cot, reverse=True):
+                    st.session_state.carrito_cotizacion.pop(idx)
+                if items_a_quitar_cot:
+                    st.rerun()
+
+                st.markdown("---")
+                st.markdown(f"### Total: {formato_cop(total_cotizacion)}")
+
+        with col_cot_der:
+            st.markdown("**Guardar Cotización**")
+
+            if not st.session_state.carrito_cotizacion:
+                st.info("Agrega productos para poder guardar la cotización.")
+            else:
+                clientes_cot = obtener_clientes(user_id)
+                dict_clientes_cot = {"Sin cliente": None}
+                if clientes_cot:
+                    for c in clientes_cot:
+                        cid_c, nombre_c, tel_c = c[0], c[1], c[2]
+                        etiqueta = f"{nombre_c} — {tel_c}" if tel_c else nombre_c
+                        dict_clientes_cot[etiqueta] = cid_c
+
+                cliente_cot_sel = st.selectbox(
+                    "Cliente (opcional)", options=list(dict_clientes_cot.keys()), key="cliente_cotizacion_sel",
+                    help="Solo se requiere si vas a convertir esta cotización en una venta a crédito.",
+                )
+                cliente_id_cot = dict_clientes_cot[cliente_cot_sel]
+
+                total_cot_guardar = sum(i["subtotal"] for i in st.session_state.carrito_cotizacion)
+                st.markdown(f"**Total: {formato_cop(total_cot_guardar)}**")
+
+                if st.button("Guardar Cotización", type="primary", use_container_width=True):
+                    try:
+                        cajero_id_cot = st.session_state.auth.get("cajero_id")
+                        cot_id_nueva = crear_cotizacion(
+                            user_id, cliente_id_cot, cajero_id_cot,
+                            st.session_state.carrito_cotizacion,
+                            subtotal=total_cot_guardar, descuento=0, total=total_cot_guardar,
+                        )
+                        st.session_state.carrito_cotizacion = []
+                        st.success(
+                            f"Cotización #{cot_id_nueva} guardada. Descárgala o conviértela en venta "
+                            "desde 'Cotizaciones Guardadas' más abajo."
+                        )
+                        # scope="app": la lista de "Cotizaciones Guardadas" (fuera
+                        # de este fragment) también debe mostrar la nueva.
+                        st.rerun(scope="app")
+                    except Exception as e:
+                        st.error(f"Error al guardar la cotización: {e}")
+
+
+    _seccion_cotizacion_builder()
     st.markdown("---")
     st.subheader("Cotizaciones Guardadas")
 
