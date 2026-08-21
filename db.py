@@ -14,8 +14,17 @@ LOCAL_DB_PATH = os.path.join(BASE_DIR, "myalmacen.db")
 @st.cache_resource
 def obtener_conexion():
     try:
-        db_url = st.secrets["postgres"]["url"]
-        pg_schema = st.secrets["postgres"].get("schema", "public")
+        # Variable de entorno simple primero: hostings como Railway/Render no
+        # generan un .streamlit/secrets.toml por sí solos (eso es propio de
+        # Streamlit Community Cloud), así que esto permite desplegar en
+        # cualquier lado sin ese paso extra. Si no existe, cae al st.secrets
+        # de siempre (Streamlit Cloud o local).
+        if os.environ.get("DATABASE_URL"):
+            db_url = os.environ["DATABASE_URL"]
+            pg_schema = os.environ.get("DB_SCHEMA", "public")
+        else:
+            db_url = st.secrets["postgres"]["url"]
+            pg_schema = st.secrets["postgres"].get("schema", "public")
 
         if pg_schema != "public":
             # Conexión de arranque (sin search_path fijo) solo para asegurar
